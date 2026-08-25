@@ -1,68 +1,76 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-08-25.
+run log, or URL) noted next to it. Last updated: 2026-08-25 (evening).
 
 ## Current phase
 
-**Phase 0 — Setup & research: DONE (2026-08-25).** Next: Phase 0a (blocked on human checklist),
-with Supabase schema + web scaffold as the sanctioned wait-work.
+**Phase 0 done · wait-work build-out done.** All four packages + infra are authored and verified
+to the maximum extent possible on this machine. **Everything further is blocked on the human
+checklist** (server, game purchase, keys) — see Blockers.
 
-Phase 0 evidence:
-- Repo skeleton commit `0331ff6`; CLAUDE.md (non-negotiables verbatim), 4 agent files, docs
-  skeleton, .gitignore, directory ownership READMEs.
-- Research: 8 parallel researcher briefs, 193 sourced facts total, raw JSON preserved in
-  `docs/research/brief-*.json`; synthesis + decisions D1–D10 in docs/RESEARCH.md. Every
-  API-shaped claim carries a source URL; unconfirmed items are listed explicitly (RESEARCH.md
-  "Open items").
-- docs/CONTRACTS.md **v1.0 frozen 2026-08-25**: bridge endpoints + JSON, 11 task types with
-  driving-style values, decision schema, event enum + payloads, table shapes, overlay SSE,
-  governor levels, ownership.
-- Human checklist delivered in chat 2026-08-25 (also mirrored below).
+## Works / verified locally (real commands, re-run independently by a verifier)
 
-## Works / verified
+| Package | Verified here (evidence) | Deferred to real env |
+|---|---|---|
+| infra/ | Migrations apply clean on real Postgres 16 (`infra/verify-local.sh` reproduces): anon SELECT on all 7 tables; anon INSERT/UPDATE/DELETE denied ×3; service_role writes ok (incl. identity sequences); enum CHECKs reject bad values; publication = exactly decisions/events/stats | Apply to cloud project; PostgREST/Realtime/Storage behavior (needs keys) |
+| bridge/ | `dotnet build -c Release` clean (0 warn/0 err); SHVDN v3.7.0-nightly.189 pinned + hash-verified; **38/38 real HTTP transport checks** by loading the compiled HttpServer under .NET 8 (state/health shapes, all 11 task types → 202 + `t-` ids, param/unknown-type 400s, unstick 409, online kill-switch 503 on every endpoint) | Everything touching natives: Phase 1 smoke with the game (`scripts/bridge-smoke.ps1`) |
+| harness/ | 42/42 pytest green (py 3.13); `--check` honest (exit ≠ 0 listing missing prereqs); post_event queues offline for real; all five writer row shapes proven against the real schema as service_role; pricing.yaml byte-exact to D4 with source URL + date; product-code grep clean | PostgREST flush success path; real Claude API calls (startup model check, prefix ≥4096 check, live decisions); OBS replay pipeline; everything game-adjacent; 20-min live check (Phase 2) |
+| web/ | build/tsc/lint clean; **12/12 Playwright** incl. offline banner with unreachable backend, honest empty states, per-clip OG image, 390×844 no horizontal scroll; no fabricated data anywhere | Realtime delivery + real rows; Vercel preview + Playwright there; live Twitch/YouTube embed (needs HTTPS host + channel) |
+| scripts/ | PowerShell AST parse 0 errors ×8 files; PSScriptAnalyzer 0 errors; env guards abort loudly on non-server hosts (proven); bridge-smoke honest-FAIL run vs dead port (22 checks, exit 1); live checks of every external URL/API the scripts rely on (dev-c Referer gating, SHVDN release asset, winget IDs, VB-CABLE, Autologon) | Real execution on Windows Server 2025 (Phase 0a) |
 
-- (no product code yet — Phase 1+ will populate this section with run evidence)
+Commits: `50d1cd9` (bridge), `ecc39ff` (harness), `0e02430` (web), `64ce38d` (scripts),
+`22a3a53`/`a1aa924` (infra + contracts v1.1). Full executor/verifier reports: workflow
+wf_29b91fcf-c97 journal (session transcript dir).
+
+Notable implementation decisions accepted from executor reports (contract-conforming):
+governor L1/L2/L3 at 70/90/100% of the configurable hourly cap; director screenshots allowed only
+on §4 screenshot-bearing events; §2 word limits via pydantic validators (retry once → reflex keeps
+control); watchdog posts only `bridge_down` (harness owns `bridge_up`/downtime accounting);
+`stop` → `last_task.status: idle`; online-session latch is permanent until restart;
+supabase-js pinned 2.109.0 until Node ≥22 baseline; drive/walk arrival = planar (XY) distance.
 
 ## Broken / known gaps
 
-- No server exists. **Hetzner GEX44 lead time is currently "several weeks"** (RESEARCH.md §7) —
-  the master brief assumed 1–3 days; ordering is the schedule-critical item.
-- No Supabase project, no Vercel project, no API keys yet.
-- ViGEmBus/vgamepad on Windows Server 2025 unverified (known Code-28 failures on Server SKUs);
-  plan of record is SendInput keyboard/mouse (CONTRACTS §2).
-- This checkout runs on the human's macOS laptop — fine for docs/infra/web; all game-adjacent
-  verification waits for the server.
+- **Nothing further is verifiable on this Mac.** The remaining work requires: the Windows GPU
+  server (Phases 0a,1,2,3,4,6,7), an Anthropic API key (brain verification), Supabase keys
+  (cloud migration apply + Realtime), Vercel access (Phase 5 previews), a stream channel (0a/6).
+- vgamepad/ViGEmBus on Server 2025 untested (known Code-28 risk) — SendInput is the plan of record.
+- Curated landmark/stunt coordinates in `behavior/activities.py` need live tuning in Phase 3.
+- `-scofflineonly` durability is best-effort (periodic Rockstar revalidation reported).
 
-## Blockers on the human (checklist delivered 2026-08-25)
+## Blockers on the human (unchanged checklist, delivered 2026-08-25)
 
-1. Order Hetzner GEX44 (+ Windows Server 2025 add-on + "HDMI emulator" add-on) — or provide cloud
-   credentials for an interim GPU VM. This is the long pole.
-2. Buy "Grand Theft Auto V Enhanced" on Steam (app 3240220; includes the Legacy edition we run).
-3. Claude API key (org must support > $500/month spend — Build tier or raised cap); Supabase
-   project or plugin auth; Vercel access.
-4. Stream channel (Twitch recommended for embeds) — stream key goes into OBS by hand, never the repo.
-5. Later, on the server: one-time Steam + Rockstar logins; then offline args + BattlEye off.
+1. **Order the server** (Hetzner GEX44 + Windows Server 2025 + "HDMI emulator" — lead time
+   currently "several weeks", this is the critical path) — or hand over cloud credentials for an
+   interim GPU VM.
+2. **Buy "Grand Theft Auto V Enhanced" on Steam** (app 3240220; includes Legacy 271590 which we run).
+3. **Keys:** Anthropic API key (org must clear >$500/month — Build tier), Supabase project
+   (URL + publishable/anon + secret/service-role), Vercel access.
+4. **Stream channel** (Twitch recommended); stream key goes into OBS by hand only.
+5. Later, on the server: one-time Steam + Rockstar logins, offline args, BattlEye off.
 
 ## Cost
 
-- Measured $/hour: n/a (no harness yet). Target: < ~$1.50/streamed hour at L0.
-- **Design-model projection (RESEARCH.md §3, to be replaced by measurement in Phase 2):**
-  tactical `claude-haiku-4-5-20251001` ~240 calls/h ≈ $0.37/h; director `claude-sonnet-5`
-  ~40 calls/h ≈ $0.33/h → ≈ **$0.70/h ≈ $500/month at 24/7** — under target, but at the Start-tier
-  monthly spend cap, hence checklist item 3.
-- Server: ≈ €184/mo + ~€28 Windows + €1.10 HDMI emulator + €79 setup (confirm live prices in the
-  order form). VB-CABLE professional license to budget (self-priced donationware).
-- Supabase Realtime bills per recipient — negligible at launch audience, ≈ $1,900/mo at 300
-  concurrent viewers × 1 msg/s; mitigation path contracted (CONTRACTS §5, coalesced digests).
-- Full monthly projection table due before Phase 7 (per master brief).
+- Brain (design model, replace with measurement in Phase 2): ≈ **$0.70/streamed hour**
+  (tactical Haiku ~240 calls/h ≈ $0.37 + director Sonnet 5 ~40 calls/h ≈ $0.33) — under the
+  $1.50 target; ≈ $500/month at 24/7 → needs Build tier.
+- Server ≈ €184/mo + ~€28 Windows + €1.10 HDMI emulator + €79 setup. VB-CABLE pro license TBD.
+- Supabase Realtime bills per recipient (≈$1,900/mo at 300 viewers × 1 msg/s) — v1 fine at launch
+  scale; digest migration path is contracted (CONTRACTS §5 / D6).
 
-## Environment facts
+## Environment / operations notes (2026-08-25)
 
-- Repo root: `~/Downloads/GTAAA` on macOS (dev machine, docs/infra/web work only).
-- Game target: GTA V **Legacy** (Steam app 271590) via Enhanced purchase (3240220); SHV
-  1.0.3889.0/1.0.1158.13; SHVDN official nightly (pin recorded here at Phase 1 start);
-  .NET Framework 4.8; `-nobattleye`.
-- Paste-corruption note: the master brief arrived with minor copy damage; reconstructed spots are
-  flagged in CONTRACTS.md §2 (mood enum — `scared` restored). If the original differs, fix
-  CONTRACTS.md before Phase 2.
+- **Host disk is effectively full** (~421 of 460 GB is user data). During the build the disk hit
+  0 bytes twice; recovered by clearing rebuildable caches (npm/pip/Chrome/updater ≈ 7 GB) and
+  restarting colima's VM (its FS wedged on ENOSPC both times — `colima restart` heals it). The
+  full local Supabase stack (~6 GB images) is **not viable on this machine**; SQL verification
+  runs via `infra/verify-local.sh` (throwaway postgres:16-alpine). **Human: free some tens of GB
+  for comfort**, and note `~/Library/Containers/com.docker.docker/…/Docker.raw` (1.1 GB) is a
+  remnant of Docker Desktop — you run colima now; delete it if you no longer use Docker Desktop.
+- Local toolchain installed user-locally (removable): .NET SDK 8 in `~/.dotnet`, PowerShell 7.4.6
+  in `~/.powershell`.
+- Game target: GTA V **Legacy** (271590) via Enhanced purchase; SHV 1.0.3889.0/1158.13; SHVDN
+  **v3.7.0-nightly.189 pinned** (recorded in bridge/README); .NET Framework 4.8; `-nobattleye`.
+- Paste-corruption note: master brief arrived with minor copy damage; reconstructed spots flagged
+  in CONTRACTS.md §2 (mood enum — `scared` restored).

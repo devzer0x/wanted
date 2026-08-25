@@ -13,9 +13,13 @@ work is verified — nothing speculative goes here.
 5. **Session rule:** the game must run in the *console* session. A game launched from inside an RDP
    window lands in the RDP session and dies on disconnect. Exact reattach/tscon procedure: (0a).
 
-## 2. Start / stop / restart (Phase 0a/2)
+## 2. Start / stop / restart (authored; exercised for real in Phase 0a/2)
 
-- To be written from the real `scripts/run.ps1` + `watchdog.ps1` behavior once they exist.
+- The ops scripts exist and are parse-verified (see `scripts/README.md` for the order of use):
+  `server-setup.ps1` (one-time + idempotent re-runs) → `fetch-shvdn.ps1` → `deploy-bridge.ps1` →
+  `run.ps1` (Steam → game → harness → OBS) with `watchdog.ps1` alongside; `bridge-smoke.ps1` is
+  the Phase 1 acceptance tool; `detach-rdp.ps1` hands the display back to the console session
+  before disconnecting RDP. This section gains real observed behavior once they run on the server.
 
 ## 3. OBS scene setup (Phase 6)
 
