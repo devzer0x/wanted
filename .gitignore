@@ -1,0 +1,27 @@
+# secrets — never in the repo
+.env
+.env.*
+*.key
+secrets/
+
+# python
+__pycache__/
+*.pyc
+.venv/
+.pytest_cache/
+
+# node / next / vercel
+node_modules/
+.next/
+.vercel/
+out/
+
+# dotnet
+bin/
+obj/
+*.user
+
+# logs & local junk
+logs/
+*.log
+.DS_Store
