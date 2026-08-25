@@ -1,0 +1,163 @@
+@import "tailwindcss";
+
+/* WASTED design system — "street signal" brutalism.
+   Asphalt black, blood red, bone white. Sharp corners, hazard stripes, film grain.
+   The wordmark styling is original: heavy grotesque + red misprint offset. It deliberately
+   avoids any resemblance to the game's death-screen typography. */
+
+:root {
+  --void: #070606;
+  --tar: #100e0d;
+  --ash: #262220;
+  --bone: #ece4d4;
+  --smoke: #93897a;
+  --blood: #e02418;
+  --ember: #ff4a35;
+  --hazard: #f2a007;
+}
+
+@theme inline {
+  --color-void: var(--void);
+  --color-tar: var(--tar);
+  --color-ash: var(--ash);
+  --color-bone: var(--bone);
+  --color-smoke: var(--smoke);
+  --color-blood: var(--blood);
+  --color-ember: var(--ember);
+  --color-hazard: var(--hazard);
+  --font-display: var(--font-archivo-black), "Arial Black", "Helvetica Neue", sans-serif;
+  --font-sans: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
+  --font-mono: var(--font-plex-mono), "Courier New", monospace;
+}
+
+html {
+  background: var(--void);
+  scrollbar-color: var(--ash) var(--void);
+}
+
+body {
+  background: var(--void);
+  color: var(--bone);
+  font-family: var(--font-sans);
+  overflow-x: hidden;
+}
+
+::selection {
+  background: var(--blood);
+  color: var(--bone);
+}
+
+/* Film grain: inline SVG turbulence, fixed overlay, never intercepts input. */
+.grain::after {
+  content: "";
+  position: fixed;
+  inset: -50%;
+  z-index: 70;
+  pointer-events: none;
+  opacity: 0.055;
+  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
+}
+
+/* Hazard stripe divider */
+.stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--blood) 0 10px,
+    transparent 10px 22px
+  );
+}
+
+.stripes-dim {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    color-mix(in srgb, var(--blood) 45%, transparent) 0 8px,
+    transparent 8px 18px
+  );
+}
+
+/* Original WANTED wordmark: skewed heavy grotesque with a red misprint ghost. */
+.wordmark {
+  position: relative;
+  display: inline-block;
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
+  transform: skewX(-6deg);
+  color: var(--bone);
+  text-transform: uppercase;
+  line-height: 0.9;
+  /* Ghost is a same-text pseudo-element; both layers must lay out identically, so never wrap. */
+  white-space: nowrap;
+}
+.wordmark::before {
+  content: attr(data-text);
+  position: absolute;
+  left: 0.06em;
+  top: 0.05em;
+  z-index: -1;
+  color: var(--blood);
+  -webkit-user-select: none;
+  user-select: none;
+}
+
+.panel {
+  background: var(--tar);
+  border: 1px solid var(--ash);
+}
+
+.panel-title {
+  font-family: var(--font-mono);
+  font-size: 0.68rem;
+  letter-spacing: 0.28em;
+  text-transform: uppercase;
+  color: var(--smoke);
+}
+
+/* Red LED status dot */
+.led {
+  width: 9px;
+  height: 9px;
+  border-radius: 9999px;
+  flex: none;
+}
+.led-live {
+  background: var(--ember);
+  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--ember) 80%, transparent);
+  animation: led-pulse 1.6s ease-in-out infinite;
+}
+.led-dead {
+  background: var(--ash);
+  border: 1px solid var(--smoke);
+}
+@keyframes led-pulse {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.35; }
+}
+
+/* Offline banner pulse — loud but cheap (opacity only). */
+@keyframes banner-throb {
+  0%, 100% { opacity: 1; }
+  50% { opacity: 0.82; }
+}
+.banner-throb { animation: banner-throb 2.4s ease-in-out infinite; }
+
+/* Feed entries slide in */
+@keyframes feed-in {
+  from { opacity: 0; transform: translateY(-6px); }
+  to { opacity: 1; transform: none; }
+}
+.feed-in { animation: feed-in 240ms ease-out; }
+
+@media (prefers-reduced-motion: reduce) {
+  .led-live, .banner-throb, .feed-in { animation: none; }
+}
+
+/* Wanted stars */
+.star { color: var(--ash); }
+.star-lit { color: var(--hazard); }
+
+/* Marquee-less ticker strip: static, loud */
+.ticker {
+  font-family: var(--font-mono);
+  letter-spacing: 0.2em;
+  text-transform: uppercase;
+}
