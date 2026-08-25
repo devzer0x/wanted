@@ -1,0 +1,76 @@
+using System.Threading;
+using GTA;
+using Newtonsoft.Json.Linq;
+
+namespace WastedBridge
+{
+    /// <summary>
+    /// Fully validated /task request. Built on the HTTP thread (validation only, no natives),
+    /// consumed on the game thread. Fields are only meaningful for the task type they belong to.
+    /// </summary>
+    internal sealed class TaskRequest
+    {
+        public string Id;
+        public string Type;
+
+        public float X, Y, Z;               // drive_to, walk_to, set_waypoint
+        public float SpeedMps;              // drive_to
+        public VehicleDrivingFlags Style;   // drive_to, wander_drive
+        public float ArriveRadiusM;         // drive_to
+        public bool Run;                    // walk_to
+        public string Prefer;               // enter_nearest_vehicle: "nicer" | "any"
+        public float SearchRadiusM;         // enter_nearest_vehicle
+        public float RadiusM;               // combat_hated_targets_around
+        public float DurationS;             // seek_cover
+        public int Handle;                  // follow_entity
+        public bool InVehicle;              // follow_entity
+    }
+
+    /// <summary>
+    /// Synchronization handle for POST endpoints whose effect must run on the game thread
+    /// (/timescale, /control, /radio, /horn, /unstick). The HTTP thread blocks on Wait with a
+    /// short timeout so the 200 it returns reflects work that actually happened; natives are
+    /// still only ever called by the game thread.
+    /// </summary>
+    internal sealed class CommandReply
+    {
+        private readonly ManualResetEventSlim _done = new ManualResetEventSlim(false);
+
+        public int StatusCode { get; private set; }
+        public JObject Body { get; private set; }
+
+        public void Complete(int statusCode, JObject body)
+        {
+            StatusCode = statusCode;
+            Body = body;
+            _done.Set();
+        }
+
+        public bool Wait(int timeoutMs)
+        {
+            return _done.Wait(timeoutMs);
+        }
+    }
+
+    internal enum CommandKind
+    {
+        NewTask,
+        SetTimescale,
+        SetControl,
+        SetRadio,
+        Horn,
+        Unstick
+    }
+
+    /// <summary>One queued unit of work handed from the HTTP thread to the game thread.</summary>
+    internal sealed class BridgeCommand
+    {
+        public CommandKind Kind;
+        public TaskRequest Task;      // NewTask
+        public float TimescaleValue;  // SetTimescale (already clamped)
+        public bool ControlEnabled;   // SetControl
+        public string RadioStation;   // SetRadio ("off" or a station name)
+        public int HornMs;            // Horn (already clamped)
+        public CommandReply Reply;    // null for NewTask (202 was already returned)
+    }
+}
