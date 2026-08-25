@@ -11,6 +11,14 @@ alter table public.clips       enable row level security;
 alter table public.stats       enable row level security;
 alter table public.site_config enable row level security;
 
+-- Explicit grants (Supabase default privileges normally cover these; explicit is
+-- self-documenting and makes the policy layer testable on plain Postgres too).
+-- service_role needs sequence usage for identity-column inserts.
+grant usage on schema public to anon, authenticated, service_role;
+grant select on all tables in schema public to anon, authenticated;
+grant all on all tables in schema public to service_role;
+grant usage, select on all sequences in schema public to service_role;
+
 create policy sessions_public_read    on public.sessions    for select to anon, authenticated using (true);
 create policy decisions_public_read   on public.decisions   for select to anon, authenticated using (true);
 create policy events_public_read      on public.events      for select to anon, authenticated using (true);
