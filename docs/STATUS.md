@@ -5,9 +5,42 @@ run log, or URL) noted next to it. Last updated: 2026-08-25 (evening).
 
 ## Current phase
 
-**Phase 0 done · wait-work build-out done.** All four packages + infra are authored and verified
-to the maximum extent possible on this machine. **Everything further is blocked on the human
-checklist** (server, game purchase, keys) — see Blockers.
+**Phase 0 done · wait-work build-out done · CLOUD LAYER LIVE (2026-08-25 evening).** With the
+human's credentials, the entire non-game stack is now verified against real services and the site
+is publicly live. **Remaining work needs only: the Windows game server, the game purchase, and a
+Twitch channel name.**
+
+## Cloud layer — verified against REAL services (2026-08-25, workflow wf_04a3dc63-84d + inline)
+
+- **Site LIVE (production): https://wasted-lemon.vercel.app** — `/api/health` `{"ok":true,
+  "supabase_configured":true}`; renders the honest OFFLINE banner *and* the first real decision
+  rows server-side. Vercel project `wasted` in scope `<redacted>`; env vars set for
+  preview+production. ⚠ Production went live via Vercel CLI v53's changed default (plain
+  `vercel deploy` now targets production) — disclosed to the human; brand-new project, nothing
+  overwritten. Preview URLs are SSO-protected (Vercel Authentication) — disable in Project
+  Settings → Deployment Protection if preview access is wanted.
+- **Cloud Supabase schema applied + verified** (project wwluuzkboosvtupcexsp, empty pre-apply):
+  full RLS suite passed on the production DB (anon read-only ×7, writes denied ×3, service-role
+  writes ok, constraint rejections ×2), publication = exactly decisions/events/stats, buckets
+  clips+shots public. All verification rows cleaned up. The earlier "Secret API key required"
+  gate on publishable keys is **gone** — anon REST reads return 200; anon writes correctly denied.
+- **Brain verified vs real Claude API**: both model IDs valid (1-token calls); tactical static
+  prefix **7617 tokens** (≥4096 Haiku cache min), director 8532; two real structured decisions via
+  `messages.parse` — valid DecisionModels, word limits enforced; **prompt caching proven**
+  (call 2: `cache_read_input_tokens=8373`); measured cost **$0.011331 cold / $0.001714 warm** per
+  tactical call → ≈ **$0.41/h at full 240-calls/h cadence** (design estimate was $0.37 — confirmed).
+  Total verification spend ≈ $0.013.
+- **First honest data**: session `297839d7-c0cb-4907-bba1-fed9f85d8140` (harness_version
+  `api-verify`) with session_start event, 2 real decisions, stats heartbeat — left in place as the
+  project's first rows; the live site renders them.
+- **Realtime delivery measured**: postgres_changes INSERT → subscriber in **574–857 ms**
+  (Phase 5 bar: < 2 s). First-ever subscription failed silently during replication-slot warm-up —
+  the site's refetch-on-SUBSCRIBED covers this; test rows cleaned up.
+- `tools/post_event` online path verified (wrote → confirmed → test row deleted).
+
+Phase 5 DoD progress: Realtime latency ✔ measured; mobile ✔ (local Playwright); Playwright against
+the deployed URL still open — `web/playwright.config.ts` needs a BASE_URL env override (backlog,
+web executor next pass). `NEXT_PUBLIC_SITE_URL` env to set once the final domain is chosen.
 
 ## Works / verified locally (real commands, re-run independently by a verifier)
 
@@ -39,16 +72,18 @@ supabase-js pinned 2.109.0 until Node ≥22 baseline; drive/walk arrival = plana
 - Curated landmark/stunt coordinates in `behavior/activities.py` need live tuning in Phase 3.
 - `-scofflineonly` durability is best-effort (periodic Rockstar revalidation reported).
 
-## Blockers on the human (unchanged checklist, delivered 2026-08-25)
+## Blockers on the human (updated 2026-08-25 evening — keys DONE)
 
-1. **Order the server** (Hetzner GEX44 + Windows Server 2025 + "HDMI emulator" — lead time
-   currently "several weeks", this is the critical path) — or hand over cloud credentials for an
-   interim GPU VM.
+1. **The server** — cheapest plan: hourly cloud GPU (TensorDock/AWS, ~$10 total) to test first,
+   then a monthly box (Hetzner EX44-class ~€70/mo or budget GPU host ~€90–130/mo). Human decides
+   and provides IP + admin password.
 2. **Buy "Grand Theft Auto V Enhanced" on Steam** (app 3240220; includes Legacy 271590 which we run).
-3. **Keys:** Anthropic API key (org must clear >$500/month — Build tier), Supabase project
-   (URL + publishable/anon + secret/service-role), Vercel access.
-4. **Stream channel** (Twitch recommended); stream key goes into OBS by hand only.
+3. ~~Keys~~ ✔ DONE — Anthropic + Supabase + Vercel all provided and verified 2026-08-25.
+   (Anthropic org spend-cap tier still to confirm before 24/7.)
+4. **Twitch channel name** (free) — then it goes into `site_config` and OBS.
 5. Later, on the server: one-time Steam + Rockstar logins, offline args, BattlEye off.
+6. Housekeeping: free disk space on this Mac; decide whether the accidental production URL
+   (wasted-lemon.vercel.app) stays live (it only shows the honest offline page + verify data).
 
 ## Cost
 
