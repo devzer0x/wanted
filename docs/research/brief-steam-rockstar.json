@@ -1,0 +1,97 @@
+{
+ "answer": "(1) Steam silent install: winget id is `Valve.Steam` (installer type \"nullsoft\", pulled from cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe). Use `winget install --exact --id Valve.Steam --silent --accept-package-agreements --accept-source-agreements`; direct installer: `SteamSetup.exe /S /D=C:\\Steam` (NSIS flags, /D last, no quotes).\n\n(2) SteamCMD: `+login <user> +app_update 271590 validate` can download any owned title, but it's the wrong tool here. Steam Guard email = one-time code then cached; mobile authenticator is documented as painful for SteamCMD (code each login per TCAdmin/LinuxGSM docs). Crucially the downloaded files won't run standalone: Steamworks DRM launches Steam before the game, and GTA V additionally requires Rockstar Games Launcher activation. Verdict: yes, saner to install the Steam client, log in interactively once (do Steam Guard by hand), then trigger install via `steam://install/271590` (opens the client's install dialog) \u2014 SteamCMD buys you nothing for a client-side DRM'd game.\n\n(3) All `steam://` commands start Steam if it's not running (Valve dev wiki). `steam://rungameid/<appid>` shows the \"Launching...\" popup (steam://launch/<appid> doesn't); pass args as `steam://rungameid/<appid>//-arg1%20-arg2`. Alternative: `steam.exe -applaunch 271590 <args>`; run Steam with `-silent` to keep it minimized to tray. Launch chain: Steam \u2192 PlayGTAV.exe \u2192 Rockstar Games Launcher \u2192 GTA5.exe; the process you spawn exits quickly, so your harness must poll for the GTA5.exe process/window, not wait on the spawned PID. Focus behavior is undocumented \u2014 assume the game grabs foreground when its window is created, but don't rely on it (OBS: capture by window/process, not \"focused window\").\n\n(4) Offline: sign in to RGL online once and launch the game once (activation), then official method is Launcher \u2192 Settings \u2192 Grand Theft Auto V (left sidebar) \u2192 Launch Arguments \u2192 `-scofflineonly`. Story Mode then launches without network, but history shows periodic re-validation and breakage; keep network available.\n\n(5) commandline.txt (game root) official params: `-windowed`, `-borderless`, `-fullscreen`, `-width`, `-height`, `-adapter`, `-ignoreDifferentVideoCard`, `-safemode`. There is NO official intro-logo-skip param \u2014 use the SkipIntro ASI mod or bik replacement.\n\n(6) First launch: Steam first-run installs RGL + Social Club; mandatory Rockstar account sign-in and one-time Steam\u2194Rockstar link (one account, single-use key). No auto-benchmark; auto graphics detect writes settings.xml. Pre-seed `Documents\\Rockstar Games\\GTA V\\settings.xml` (Legacy) with `<ScreenWidth value=\"1280\"/> <ScreenHeight value=\"720\"/> <Windowed .../>`. Buy/install Legacy (appid 271590), not Enhanced (3240220): official ScriptHookVDotNet is Legacy-only.",
+ "facts": [
+  {
+   "claim": "winget package id for Steam is Valve.Steam; manifest InstallerType is 'nullsoft', InstallModes interactive+silent, installer URL https://cdn.akamai.steamstatic.com/client/installer/SteamSetup.exe",
+   "source": "https://github.com/microsoft/winget-pkgs/blob/master/manifests/v/Valve/Steam/2.10.91.91/Valve.Steam.installer.yaml"
+  },
+  {
+   "claim": "SteamSetup.exe is a Nullsoft (NSIS) installer; silent install via /S and custom dir via /D=C:\\Steam",
+   "source": "https://steamcommunity.com/discussions/forum/1/3183486955455340142/"
+  },
+  {
+   "claim": "SteamCMD login with a real account: first login triggers a Steam Guard email code prompt, entered once, then the machine stays authorized; mobile-authenticator Steam Guard is documented as requiring a code every SteamCMD login (bad for automation)",
+   "source": "https://docs.tcadmin.com/using-tcadmin/steamcmd/ and https://docs.linuxgsm.com/steamcmd"
+  },
+  {
+   "claim": "SteamCMD 'No subscription' error means the account must own the game; owned titles can be downloaded after +login",
+   "source": "https://docs.linuxgsm.com/steamcmd"
+  },
+  {
+   "claim": "An account can only be logged in at one place at a time \u2014 Steam client OR SteamCMD, not both simultaneously",
+   "source": "https://developer.valvesoftware.com/wiki/SteamCMD (via search snippet; direct fetch 403)"
+  },
+  {
+   "claim": "Steamworks DRM wrapper 'verifies game ownership and ensures that Steamworks features work properly by launching Steam before launching the game' \u2014 so SteamCMD-downloaded client games still need the Steam client to run",
+   "source": "https://partner.steamgames.com/doc/features/drm"
+  },
+  {
+   "claim": "All steam:// browser-protocol commands open Steam if it is not already running; steam://rungameid/<id>//<args> passes args with %20 separators and shows the Launching popup; steam://launch does not show it",
+   "source": "https://developer.valvesoftware.com/wiki/Steam_browser_protocol (via search snippet; direct fetch 403)"
+  },
+  {
+   "claim": "steam://install/<appid> opens a dialog in the Steam client to install that app",
+   "source": "https://developer.valvesoftware.com/wiki/Steam_browser_protocol (via search snippet)"
+  },
+  {
+   "claim": "steam.exe supports -applaunch <AppID> to launch a game and -silent to start Steam minimized to tray without taking focus",
+   "source": "https://developer.valvesoftware.com/wiki/Command_line_options_(Steam) (via search snippet)"
+  },
+  {
+   "claim": "Official offline method for GTA V PC: sign into Rockstar Games Launcher, Settings (top nav) \u2192 Grand Theft Auto V (left sidebar) \u2192 Launch Arguments \u2192 insert -scofflineonly",
+   "source": "https://support.rockstargames.com/articles/25mTxnG63MfCGZua50IhjH/launching-grand-theft-auto-v-on-pc-in-offline-mode (via search snippet; site times out on direct fetch)"
+  },
+  {
+   "claim": "Rockstar: 'Story mode generally does not require an internet connection to play' but games 'may require an internet connection for activation'; offline play requires launching from the Rockstar Launcher even for Steam copies",
+   "source": "https://support.rockstargames.com/articles/13xEcY8dWBDY4D7lC1Vsew/playing-games-offline-from-the-rockstar-games-launcher (via search snippet)"
+  },
+  {
+   "claim": "Official GTA V command line parameters include: -windowed ('Force windowed mode'), -borderless ('Set main window to be borderless'), -fullscreen, -width ('Set width of main render window, default 640'), -height (default 480), -adapter, -ignoreDifferentVideoCard, -safemode; commandline.txt lives in the game's root folder",
+   "source": "https://www.gta5.info/gtav-command-lines/ (mirror of https://support.rockstargames.com/articles/2VjbVziQCiTiiVhDbmnexc/full-list-of-command-line-parameters-for-grand-theft-auto-v-on-pc, which times out on fetch)"
+  },
+  {
+   "claim": "No official parameter skips the intro logos/legal screens; community solutions are the SkipIntro ASI plugin or replacing rockstar_logos.bik",
+   "source": "https://github.com/grasmanek94/SkipIntro"
+  },
+  {
+   "claim": "GTA V Legacy Steam appid is 271590; GTA V Enhanced is a separate app, appid 3240220, released March 4 2025; Enhanced purchase also grants Legacy",
+   "source": "https://steamcommunity.com/app/3240220/discussions/ and https://store.steampowered.com/agecheck/app/271590/"
+  },
+  {
+   "claim": "First launch of Steam GTA V prompts sign-in to a Rockstar/Social Club account; only one Rockstar account can be linked per Steam account; the key is single-use and non-transferable",
+   "source": "https://support.rockstargames.com/articles/5WMfPm1EskH6ZSzI9rF3Jq (Linking a Steam account to a Rockstar Games account, via search snippet)"
+  },
+  {
+   "claim": "Legacy graphics config is Documents\\Rockstar Games\\GTA V\\settings.xml with elements <ScreenWidth value=\"...\"/>, <ScreenHeight value=\"...\"/>, <Windowed value=\"...\"/>, <RefreshRate>, <AdapterIndex>, <OutputIndex> under root <Settings> with <version value=\"27\"/>",
+   "source": "https://raw.githubusercontent.com/9klips/GTA-V/master/settings.xml"
+  },
+  {
+   "claim": "Enhanced edition config/saves live in Documents\\Rockstar Games\\GTAV Enhanced (settings.xml plus Profiles\\<user-id> for saves)",
+   "source": "https://gamedecide.com/how-to-locate-gta-5-enhanced-directory-folder/ and https://www.minitool.com/news/grand-theft-auto-v-enhanced-save-file-location.html"
+  },
+  {
+   "claim": "Official ScriptHookVDotNet does not support GTA V Enhanced (issue closed 'not planned'); community fork ScriptHookVDotNetEnhanced supports both editions",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/issues/1558 and https://github.com/Chiheb-Bacha/scripthookvdotnetenhanced"
+  }
+ ],
+ "gotchas": [
+  "Edition trap: buying GTA V on Steam today centers on Enhanced (3240220, has BattlEye and heavier anti-cheat); your SHVDN bridge needs Legacy (271590), which Enhanced ownership includes \u2014 make the automation install 271590 explicitly, not 'GTA V'.",
+  "SteamCMD and the Steam client cannot be logged into the same account simultaneously; and SteamCMD-downloaded GTA V still needs the Steam client + Rockstar Launcher to run, so SteamCMD only adds a second Steam Guard headache. Use the client UI / steam://install/271590.",
+  "winget Valve.Steam pulls SteamSetup.exe from a live CDN URL that Valve updates in place \u2014 hash-mismatch or CDN-source complaints have been filed (winget-pkgs issue #59497); fall back to downloading SteamSetup.exe yourself and running /S if winget validation fails.",
+  "The process you spawn (steam:// or PlayGTAV.exe) exits before the game starts \u2014 the Rockstar Launcher window appears mid-chain; poll for GTA5.exe. Historical threads show the launcher sometimes shows 'Offline Mode' then exits without starting the game, and -scOfflineOnly has been repeatedly broken/fixed across launcher patches \u2014 treat offline mode as best-effort, keep the server online.",
+  "Sources disagree on offline durability: Rockstar says Story Mode 'generally' needs no connection, but community reports describe periodic license re-verification every few days that requires going online.",
+  "Rockstar support pages and PCGamingWiki and the Valve developer wiki all block or time out on automated fetches (403/timeout) \u2014 several claims above were verified only through search snippets of those pages.",
+  "-width/-height default to 640x480 if you pass -windowed without sizes; pre-seeding settings.xml at 1280x720 is more reliable than commandline args because the game rewrites settings.xml after auto-detect on true first run \u2014 seed the file after one launch, or set both.",
+  "No official intro-skip flag exists; the SkipIntro ASI route requires an ASI loader, which you already have via Script Hook V \u2014 but any exe/rpf-modifying variant risks anti-cheat flags if the account ever touches Online/Enhanced."
+ ],
+ "unconfirmed": [
+  "Focus/foreground behavior of steam://rungameid (whether the game window is guaranteed to take foreground, and whether the Steam main window pops up) \u2014 undocumented; only -silent (tray start) is documented.",
+  "Exact meaning of Windowed values in settings.xml (community belief: 0=fullscreen, 1=windowed, 2=borderless) \u2014 found value=\"2\" in a real file but no authoritative mapping.",
+  "Whether -scofflineonly works on the Enhanced edition (the official Rockstar article predates Enhanced; verified threads are Legacy).",
+  "Exact process names in the Legacy launch chain (PlayGTAV.exe \u2192 Launcher.exe \u2192 GTA5.exe) \u2014 widely reported community knowledge, not confirmed against an official doc.",
+  "Whether modern SteamCMD (2023+ refresh-token auth) now handles mobile-authenticator confirmation gracefully \u2014 the docs I could reach (TCAdmin/LinuxGSM) still describe it as incompatible with unattended use.",
+  "Whether steam.exe -login <user> <pass> works for scripted client login and how it interacts with Steam Guard \u2014 not verified, do not rely on it.",
+  "Whether Enhanced still honors every commandline.txt parameter from the official Legacy list \u2014 no authoritative Enhanced-specific parameter list found.",
+  "The exact interactive first-run sequence on a fresh Steam GTA V install (Steam first-time-setup installing Rockstar Games Launcher + Social Club redistributables before the launcher opens) \u2014 consistent community reports, no official page reached."
+ ]
+}

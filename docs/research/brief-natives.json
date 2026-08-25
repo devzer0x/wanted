@@ -1,0 +1,178 @@
+{
+ "answer": "All hashes verified against alloc8or's nativedb data (natives.json, updated 2026-07-16 to current builds); wrappers verified in SHVDN source (v3.6.0 stable tag and current main/nightly). Full signatures in facts.\n\n(1) TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE (speed, driveMode, stopRange) \u2014 SHVDN Ped.Task.DriveTo. Short-range: TASK_VEHICLE_DRIVE_TO_COORD. Mid-task tweaks: SET_DRIVE_TASK_DRIVING_STYLE, SET_DRIVE_TASK_CRUISE_SPEED.\n(2) Documented bits (FiveM eVehicleDrivingFlags = SHVDN VehicleDrivingFlags): 1 StopForVehicles, 2 StopForPeds, 4 SwerveAroundAllVehicles, 8 SteerAroundStationaryVehicles, 16 SteerAroundPeds, 32 SteerAroundObjects, 64 DontSteerAroundPlayerPed, 128 StopAtTrafficLights, 256 GoOffRoadWhenAvoiding, 512 AllowGoingWrongWay, 1024 Reverse, 262144 UseShortCutLinks, 524288 ChangeLanesAroundObstructions, 2097152 UseSwitchedOffNodes, 4194304 PreferNavmeshRoute, 16777216 ForceStraightLine, 1073741824 ForceJoinInRoadDirection, 2147483648 StopAtDestination (rest in facts). Combos: normal=786603; ignore-lights=786475 (FiveM) or 2883621 (SHVDN DrivingStyle.IgnoreLights); rushed=1074528293; avoid-traffic=786468/786469; extreme=6.\n(3) TASK_FOLLOW_NAV_MESH_TO_COORD / TASK_GO_STRAIGHT_TO_COORD \u2014 Ped.Task.GoTo/RunTo (stable); FollowNavMeshTo/GoStraightTo (nightly).\n(4) TASK_ENTER_VEHICLE \u2014 Ped.Task.EnterVehicle; nearest: GET_CLOSEST_VEHICLE (World.GetClosestVehicle) + EnterVehicle, or Ped.Task.EnterAnyVehicle.\n(5) TASK_VEHICLE_DRIVE_WANDER \u2014 Ped.Task.CruiseWithVehicle.\n(6) TASK_SMART_FLEE_PED/COORD \u2014 Ped.Task.FleeFrom; TASK_COMBAT_HATED_TARGETS_AROUND_PED/_IN_AREA \u2014 FightAgainstHatedTargets (stable) / CombatHatedTargetsAroundPed (nightly); TASK_SEEK_COVER_FROM_PED/_FROM_POS \u2014 no wrapper (raw Function.Call); TASK_FOLLOW_TO_OFFSET_OF_ENTITY \u2014 FollowToOffsetFromEntity.\n(7) SET_TIME_SCALE \u2014 Game.TimeScale (0.0\u20131.0).\n(8) GET_MISSION_FLAG \u2014 Game.IsMissionActive; also GET_RANDOM_EVENT_FLAG \u2014 Game.IsRandomEventActive.\n(9) IS_CUTSCENE_ACTIVE \u2014 Game.IsCutsceneActive; IS_CUTSCENE_PLAYING (no wrapper).\n(10) SET_PLAYER_CONTROL \u2014 Player.CanControlCharacter; read state: IS_PLAYER_CONTROL_ON.\n(11) NETWORK_IS_SESSION_STARTED (also NETWORK_IS_IN_SESSION, NETWORK_IS_GAME_IN_PROGRESS, NETWORK_IS_SESSION_ACTIVE) \u2014 no SHVDN wrapper.\n(12) Pure reads: GET_PLAYER_WANTED_LEVEL \u2014 Player.WantedLevel getter (stable) / Player.Wanted.WantedLevel (nightly); GET_MAX_WANTED_LEVEL.\n(13) GET_STREET_NAME_AT_COORD + GET_STREET_NAME_FROM_HASH_KEY \u2014 World.GetStreetName; GET_NAME_OF_ZONE \u2014 World.GetZoneDisplayName; localized via GET_FILENAME_FOR_AUDIO_CONVERSATION (World.GetZoneLocalizedName).\n(14) GET_CLOCK_HOURS/MINUTES/SECONDS \u2014 World.CurrentTimeOfDay (stable) / GTA.Chrono.GameClock (nightly); GET_PREV/NEXT_WEATHER_TYPE_HASH_NAME \u2014 World.Weather/.NextWeather.\n(15) SET_RADIO_TO_STATION_NAME / SET_VEH_RADIO_STATION / SET_RADIO_TO_STATION_INDEX \u2014 Game.RadioStation (get/set), Vehicle.RadioStation (set-only).\n(16) START_VEHICLE_HORN \u2014 Vehicle.SoundHorn(ms).\n(17) IS_ENTITY_UPSIDEDOWN \u2014 Entity.IsUpsideDown; IS_ENTITY_IN_WATER \u2014 Entity.IsInWater; GET_ENTITY_SUBMERGED_LEVEL \u2014 Entity.SubmersionLevel.\n(18) Enumerate GET_FIRST/NEXT_BLIP_INFO_ID (argument is a blip sprite id) + DOES_BLIP_EXIST; coords GET_BLIP_INFO_ID_COORD; identify via GET_BLIP_SPRITE/GET_BLIP_COLOUR/GET_BLIP_INFO_ID_TYPE. SHVDN: World.GetAllBlips/GetNearbyBlips (memory scan), Blip.Position/.Sprite/.Color/.ShowRoute. \"Mission objective = Standard sprite (1) + Yellow colour (66) + route\" is empirical convention, not documented.\n(19) IS_PLAYER_DEAD \u2014 Player.IsDead; IS_PLAYER_BEING_ARRESTED (no wrapper); IS_PED_DEAD_OR_DYING; IS_PLAYER_PLAYING covers dead/injured/arrested.\nLegacy/Enhanced: same hashes, one shared DB; official SHVDN targets Legacy (nightly \u22653.6.0-nightly.89 required on game b3258+); Enhanced needs the ScriptHookVDotNetEnhanced fork plus Enhanced ScriptHookV.",
+ "facts": [
+  {
+   "claim": "TASK::TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE 0x158BB33F920D360C \u2014 void(Ped ped, Vehicle vehicle, float x, float y, float z, float speed, int driveMode, float stopRange)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json (also browsable at https://alloc8or.re/gta5/nativedb/?n=0x158BB33F920D360C)"
+  },
+  {
+   "claim": "TASK::TASK_VEHICLE_DRIVE_TO_COORD 0xE2A2AA2F659D77A7 \u2014 void(Ped ped, Vehicle vehicle, float x, float y, float z, float speed, Any p6, Hash vehicleModel, int drivingMode, float stopRange, float straightLineDistance)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "TASK::SET_DRIVE_TASK_DRIVING_STYLE 0xDACE1BE37D88AF67 \u2014 void(Ped ped, int drivingStyle); TASK::SET_DRIVE_TASK_CRUISE_SPEED 0x5C9B84BD7D31D908 \u2014 void(Ped driver, float cruiseSpeed)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "SHVDN v3.6.0 stable: Ped.Task.DriveTo(Vehicle vehicle, Vector3 target, float radius, float speed, DrivingStyle style = DrivingStyle.Normal) and CruiseWithVehicle(Vehicle vehicle, float speed, DrivingStyle style = DrivingStyle.Normal), both calling TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE / TASK_VEHICLE_DRIVE_WANDER",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/v3.6.0/source/scripting_v3/GTA/Entities/Peds/TaskInvoker.cs"
+  },
+  {
+   "claim": "SHVDN nightly (main): DriveTo(Vehicle vehicle, Vector3 target, float speed, VehicleDrivingFlags drivingFlags, float radius) and CruiseWithVehicle(Vehicle vehicle, float speed, VehicleDrivingFlags drivingFlags); old DrivingStyle overloads moved to TaskInvoker.Obsolete.cs with [Obsolete]",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Entities/Peds/Task/TaskInvoker.cs and .../TaskInvoker.Obsolete.cs"
+  },
+  {
+   "claim": "eVehicleDrivingFlags documented bits: None=0, StopForVehicles=1, StopForPeds=2, SwerveAroundAllVehicles=4, SteerAroundStationaryVehicles=8, SteerAroundPeds=16, SteerAroundObjects=32, DontSteerAroundPlayerPed=64, StopAtTrafficLights=128, GoOffRoadWhenAvoiding=256, AllowGoingWrongWay=512, Reverse=1024, UseWanderFallbackInsteadOfStraightLine=2048, AvoidRestrictedAreas=4096, PreventBackgroundPathfinding=8192, AdjustCruiseSpeedBasedOnRoadSpeed=16384, UseShortCutLinks=262144, ChangeLanesAroundObstructions=524288, UseSwitchedOffNodes=2097152, PreferNavmeshRoute=4194304, PlaneTaxiMode=8388608, ForceStraightLine=16777216, UseStringPullingAtJunctions=33554432, TryToAvoidHighways=536870912, ForceJoinInRoadDirection=1073741824, StopAtDestination=2147483648",
+   "source": "https://github.com/citizenfx/natives/blob/master/TASK/SetDriveTaskDrivingStyle.md (renders at https://docs.fivem.net/natives/?_0xDACE1BE37D88AF67) \u2014 identical enum in https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/VehicleAi/Task/VehicleDrivingFlags.cs"
+  },
+  {
+   "claim": "FiveM-documented combined modes: DrivingModeStopForVehicles=786603 (1|2|8|32|128|262144|524288), DrivingModeStopForVehiclesStrict=262275, DrivingModeAvoidVehicles=786469, DrivingModeAvoidVehiclesReckless=786468, DrivingModeStopForVehiclesIgnoreLights=786475, DrivingModeAvoidVehiclesObeyLights=786597, DrivingModeAvoidVehiclesStopForPedsObeyLights=786599",
+   "source": "https://github.com/citizenfx/natives/blob/master/TASK/SetDriveTaskDrivingStyle.md"
+  },
+  {
+   "claim": "SHVDN legacy enum GTA.DrivingStyle ([Obsolete] on main): Normal=786603, IgnoreLights=2883621, SometimesOvertakeTraffic=5, Rushed=1074528293, AvoidTraffic=786468, AvoidTrafficExtremely=6",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/VehicleAi/Task/DrivingStyle.cs"
+  },
+  {
+   "claim": "TASK::TASK_FOLLOW_NAV_MESH_TO_COORD 0x15D3A79D4E44B913 \u2014 void(Ped ped, float x, float y, float z, float moveBlendRatio, int time, float targetRadius, int flags, float targetHeading); TASK::TASK_GO_STRAIGHT_TO_COORD 0xD76B57B44F1E6F8B \u2014 void(Ped ped, float x, float y, float z, float speed, int timeout, float targetHeading, float distanceToSlide); TASK::TASK_GO_TO_COORD_ANY_MEANS 0x5BC448CB78FA3E88 \u2014 void(Ped ped, float x, float y, float z, float moveBlendRatio, Vehicle vehicle, BOOL useLongRangeVehiclePathing, int drivingFlags, float maxRangeToShootTargets)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "SHVDN v3.6.0: Ped.Task.GoTo(Vector3 position, int timeout=-1) calls TASK_FOLLOW_NAV_MESH_TO_COORD with moveBlendRatio 1f; Ped.Task.RunTo(Vector3 position, bool ignorePaths=false, int timeout=-1) uses TASK_GO_STRAIGHT_TO_COORD (ignorePaths) or TASK_FOLLOW_NAV_MESH_TO_COORD at ratio 4f. Nightly adds FollowNavMeshTo(...) and GoStraightTo(...)",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/v3.6.0/source/scripting_v3/GTA/Entities/Peds/TaskInvoker.cs and main .../Task/TaskInvoker.cs"
+  },
+  {
+   "claim": "TASK::TASK_ENTER_VEHICLE 0xC20E50AA46D09CA8 \u2014 void(Ped ped, Vehicle vehicle, int timeout, int seat, float speed, int flag, const char* overrideEntryClipsetName); seat -1=driver; speed 1.0=walk 2.0=run; flag 1=normal, 3=teleport to vehicle, 16=teleport directly into vehicle",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "SHVDN: Ped.Task.EnterVehicle(Vehicle vehicle, VehicleSeat seat=Any, int timeout=-1, float speed=1f, EnterVehicleFlags flag=None) and Ped.Task.EnterAnyVehicle(...) (passes vehicle handle 0); VEHICLE::GET_CLOSEST_VEHICLE 0xF73EB622C4F1689B \u2014 Vehicle(float x, float y, float z, float radius, Hash modelHash, int flags) wrapped by World.GetClosestVehicle(Vector3 position, float radius, params Model[] models)",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Entities/Peds/Task/TaskInvoker.cs and .../GTA/World.cs; native from alloc8or natives.json"
+  },
+  {
+   "claim": "TASK::TASK_VEHICLE_DRIVE_WANDER 0x480142959D337D00 \u2014 void(Ped ped, Vehicle vehicle, float speed, int drivingStyle)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "TASK::TASK_SMART_FLEE_PED 0x22B0D0E37CCB840D \u2014 void(Ped ped, Ped fleeTarget, float safeDistance, int fleeTime, BOOL preferPavements, BOOL updateToNearestHatedPed); TASK::TASK_SMART_FLEE_COORD 0x94587F17E9C365D5 \u2014 void(Ped ped, float x, float y, float z, float distance, int time, BOOL preferPavements, BOOL quitIfOutOfRange); SHVDN Ped.Task.FleeFrom(Ped otherPed, float safeDistance, int duration) / FleeFrom(Vector3 position, ...)",
+   "source": "alloc8or natives.json + https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Entities/Peds/Task/TaskInvoker.cs"
+  },
+  {
+   "claim": "TASK::TASK_COMBAT_HATED_TARGETS_AROUND_PED 0x7BF835BB9E2698C8 \u2014 void(Ped ped, float radius, int combatFlags); TASK::TASK_COMBAT_HATED_TARGETS_IN_AREA 0x4CF5F55DAC3280A0 \u2014 void(Ped ped, float x, float y, float z, float radius, int combatFlags); DB note: despite the name it only attacks the ONE closest hated target. Wrappers: v3.6.0 Ped.Task.FightAgainstHatedTargets(float radius); nightly CombatHatedTargetsAroundPed(float radius, TaskCombatFlags) / CombatHatedTargetsInArea(Vector3, float, TaskCombatFlags)",
+   "source": "alloc8or natives.json + SHVDN v3.6.0 and main TaskInvoker.cs (URLs as above)"
+  },
+  {
+   "claim": "TASK::TASK_SEEK_COVER_FROM_PED 0x84D32B3BEC531324 \u2014 void(Ped ped, Ped target, int duration, BOOL allowPeekingAndFiring); TASK::TASK_SEEK_COVER_FROM_POS 0x75AC2B60386D89F2 \u2014 void(Ped ped, float x, float y, float z, int duration, BOOL allowPeekingAndFiring); no SHVDN TaskInvoker wrapper exists in v3.6.0 or main (grep for 'cover' returns none)",
+   "source": "alloc8or natives.json; absence verified in SHVDN v3.6.0 and main TaskInvoker.cs"
+  },
+  {
+   "claim": "TASK::TASK_FOLLOW_TO_OFFSET_OF_ENTITY 0x304AE42E357B8C7E \u2014 void(Ped ped, Entity entity, float offsetX, float offsetY, float offsetZ, float movementSpeed, int timeout, float stoppingRange, BOOL persistFollowing); SHVDN Ped.Task.FollowToOffsetFromEntity(Entity target, Vector3 offset, float movementSpeed, int timeout=-1, float distanceToFollow=10f, bool persistFollowing=true)",
+   "source": "alloc8or natives.json + SHVDN main TaskInvoker.cs"
+  },
+  {
+   "claim": "MISC::SET_TIME_SCALE 0x1D408577D440E81E \u2014 void(float timeScale); DB comment: maximum value is 1, at 0 the game still runs at a minimum time scale; SHVDN Game.TimeScale { get (memory read); set => SET_TIME_SCALE }",
+   "source": "alloc8or natives.json + https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Game.cs"
+  },
+  {
+   "claim": "MISC::GET_MISSION_FLAG 0xA33CDCCDA663159E \u2014 BOOL(); MISC::SET_MISSION_FLAG 0xC4301E5121A0ED73 \u2014 void(BOOL toggle); MISC::GET_RANDOM_EVENT_FLAG 0xD2D57F1D764117B1 \u2014 BOOL(); SHVDN Game.IsMissionActive { get => GET_MISSION_FLAG; set => SET_MISSION_FLAG } and Game.IsRandomEventActive",
+   "source": "alloc8or natives.json + SHVDN main Game.cs"
+  },
+  {
+   "claim": "CUTSCENE::IS_CUTSCENE_ACTIVE 0x991251AFC3981F84 \u2014 BOOL(); CUTSCENE::IS_CUTSCENE_PLAYING 0xD3C2E180A40F031E \u2014 BOOL(); SHVDN Game.IsCutsceneActive => IS_CUTSCENE_ACTIVE (no wrapper for IS_CUTSCENE_PLAYING)",
+   "source": "alloc8or natives.json + SHVDN main Game.cs"
+  },
+  {
+   "claim": "PLAYER::SET_PLAYER_CONTROL 0x8D32347D6D4C40A2 \u2014 void(Player player, BOOL bHasControl, int flags); DB documents flags SPC_AMBIENT_SCRIPT=(1<<1), SPC_CLEAR_TASKS=(1<<2), SPC_REMOVE_FIRES=(1<<3), SPC_REMOVE_EXPLOSIONS=(1<<4), SPC_REMOVE_PROJECTILES=(1<<5), SPC_DEACTIVATE_GADGETS=(1<<6), SPC_REENABLE_CONTROL_ON_DEATH=(1<<7)...; PLAYER::IS_PLAYER_CONTROL_ON 0x49C32D60007AFA47 \u2014 BOOL(Player player); SHVDN Player.CanControlCharacter { get => IS_PLAYER_CONTROL_ON; set => SET_PLAYER_CONTROL } (setter marked [Obsolete] on main)",
+   "source": "alloc8or natives.json + SHVDN main Player.cs"
+  },
+  {
+   "claim": "NETWORK::NETWORK_IS_SESSION_STARTED 0x9DE624D2FC4B603F \u2014 BOOL() (DB comment: 'checks if player is playing on gta online or not; block your mod if true'); NETWORK::NETWORK_IS_IN_SESSION 0xCA97246103B63917 \u2014 BOOL(); NETWORK::NETWORK_IS_GAME_IN_PROGRESS 0x10FAB35428CCC9D7 \u2014 BOOL(); NETWORK::NETWORK_IS_SESSION_ACTIVE 0xD83C2B94E7508980 \u2014 BOOL()",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "PLAYER::GET_PLAYER_WANTED_LEVEL 0xE28E54788CE8F12D \u2014 int(Player player) (pure read, no side effects); PLAYER::GET_MAX_WANTED_LEVEL 0x462E0DB9B137DC5F \u2014 int(); setters are separate: SET_PLAYER_WANTED_LEVEL 0x39FF19C64EF7DA5B (player, wantedLevel, disableNoMission) + SET_PLAYER_WANTED_LEVEL_NOW 0xE0A7D1E497FFCD6F, SET_MAX_WANTED_LEVEL 0xAA5F02DB48D704B9",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "SHVDN wanted read: v3.6.0 Player.WantedLevel getter => GET_PLAYER_WANTED_LEVEL (setter also calls SET_PLAYER_WANTED_LEVEL+_NOW, avoid); on main the property is [Obsolete] and replaced by Player.Wanted (GTA.Wanted class) with WantedLevel getter, SetWantedLevel(...) and ApplyWantedLevelChangeNow(...); Game.MaxWantedLevel wraps GET_MAX_WANTED_LEVEL/SET_MAX_WANTED_LEVEL",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Player.Obsolete.cs and .../GTA/Wanted.cs and .../GTA/Game.cs"
+  },
+  {
+   "claim": "PATHFIND (ns 'PATH' in alloc8or)::GET_STREET_NAME_AT_COORD 0x2EB41072B4C1E4C0 \u2014 void(float x, float y, float z, Hash* streetName, Hash* crossingRoad); HUD::GET_STREET_NAME_FROM_HASH_KEY 0xD0EF8A959B8A4CB9 \u2014 const char*(Hash hash); SHVDN World.GetStreetName(Vector3) and World.GetStreetName(Vector3, out string crossingRoadName) chain exactly these two natives",
+   "source": "alloc8or natives.json + https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/World.cs"
+  },
+  {
+   "claim": "ZONE::GET_NAME_OF_ZONE 0xCD90657D4C30E1CA \u2014 const char*(float x, float y, float z) returns zone code (e.g. AIRP, ALAMO); HUD::GET_FILENAME_FOR_AUDIO_CONVERSATION 0x7B5280EBA9840C72 \u2014 const char*(const char* labelName) resolves a GXT label to localized text; SHVDN World.GetZoneDisplayName(Vector3) => GET_NAME_OF_ZONE, World.GetZoneLocalizedName(Vector3) => Game.GetLocalizedString(zone code)",
+   "source": "alloc8or natives.json + SHVDN main World.cs"
+  },
+  {
+   "claim": "CLOCK::GET_CLOCK_HOURS 0x25223CA6B4D20B7F, GET_CLOCK_MINUTES 0x13D2B8ADD79640F2, GET_CLOCK_SECONDS 0x494E97C2EF27C470 (all int()); SHVDN stable: World.CurrentTimeOfDay (TimeSpan) / World.CurrentDate; on main both are [Obsolete] in World.Obsolete.cs, replaced by GTA.Chrono.GameClock (GameClock.Now, .Hour, .Minute, .Second)",
+   "source": "alloc8or natives.json + https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/World.Obsolete.cs and .../GTA.Chrono/GameClock.cs"
+  },
+  {
+   "claim": "MISC::GET_PREV_WEATHER_TYPE_HASH_NAME 0x564B884A05EC45A3 \u2014 Hash() (current weather) and MISC::GET_NEXT_WEATHER_TYPE_HASH_NAME 0x711327CD09C8F162 \u2014 Hash(); SHVDN World.Weather and World.NextWeather properties match these hashes against the weather-name table",
+   "source": "alloc8or natives.json + SHVDN main World.cs"
+  },
+  {
+   "claim": "AUDIO::SET_RADIO_TO_STATION_NAME 0xC69EDA28699D5107 \u2014 void(const char* stationName); AUDIO::SET_VEH_RADIO_STATION 0x1B9C0099CB942AC6 \u2014 void(Vehicle vehicle, const char* radioStation); AUDIO::SET_RADIO_TO_STATION_INDEX 0xA619B168B8A8570F \u2014 void(int radioStation); reads: GET_PLAYER_RADIO_STATION_NAME 0xF6D733C32076AD03, GET_PLAYER_RADIO_STATION_INDEX 0xE8AF77C4C06ADC93 (255 = radio off)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "SHVDN: Game.RadioStation (get via GET_PLAYER_RADIO_STATION_NAME, set via SET_RADIO_TO_STATION_NAME, RadioStation enum); Vehicle.RadioStation is SET-only (SET_VEH_RADIO_STATION)",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Game.cs and .../GTA/Entities/Vehicles/Vehicle.cs"
+  },
+  {
+   "claim": "VEHICLE::START_VEHICLE_HORN 0x9C8C6504B5B63D2C \u2014 void(Vehicle vehicle, int duration, Hash mode, BOOL forever); mode is hash of \"NORMAL\" or \"HELDDOWN\" (0 allowed); SHVDN Vehicle.SoundHorn(int duration) calls it with HELDDOWN",
+   "source": "alloc8or natives.json + SHVDN main Vehicle.cs"
+  },
+  {
+   "claim": "ENTITY::IS_ENTITY_UPSIDEDOWN 0x1DBD58820FA61D71 \u2014 BOOL(Entity) => Entity.IsUpsideDown; ENTITY::IS_ENTITY_IN_WATER 0xCFB0A0D8EDD145A3 \u2014 BOOL(Entity) => Entity.IsInWater; ENTITY::GET_ENTITY_SUBMERGED_LEVEL 0xE81AFC1BC4CC41CE \u2014 float(Entity) (1.0 = fully submerged) => Entity.SubmersionLevel",
+   "source": "alloc8or natives.json + https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/Entities/Entity.cs"
+  },
+  {
+   "claim": "Blip natives: HUD::GET_FIRST_BLIP_INFO_ID 0x1BEDE233E6CD2A1F \u2014 Blip(int blipSprite) and HUD::GET_NEXT_BLIP_INFO_ID 0x14F96AA50D6FBEA7 \u2014 Blip(int blipSprite) (iterator is PER SPRITE ID); HUD::DOES_BLIP_EXIST 0xA6DB27D19ECBB7DA; HUD::GET_BLIP_INFO_ID_COORD 0xFA7C7F0AADF25D09 \u2014 Vector3(Blip); HUD::GET_BLIP_COORDS 0x586AFE3FF72D996E; HUD::GET_BLIP_SPRITE 0x1FC877464A04FC4F; HUD::GET_BLIP_COLOUR 0xDF729E8D20CF7327; HUD::GET_BLIP_HUD_COLOUR 0x729B5F1EFBC0AAEE; HUD::GET_BLIP_INFO_ID_TYPE 0xBE9B0959FFD0779B (1 vehicle, 2 ped, 3 object, 4 coord, 6 pickup, 7 radius); HUD::SET_BLIP_ROUTE 0x4F7D8A9BFB0B43E9 \u2014 void(Blip, BOOL) (setter only; no GET_BLIP_ROUTE native exists in the DB)",
+   "source": "https://raw.githubusercontent.com/alloc8or/gta5-nativedb-data/master/natives.json"
+  },
+  {
+   "claim": "SHVDN blips: World.GetAllBlips(params BlipSprite[]) and World.GetNearbyBlips(Vector3, float, params BlipSprite[]) use SHVDN.NativeMemory.GetNonCriticalRadarBlipHandles (memory scan, NOT the iterator natives); Blip.Position => GET_BLIP_INFO_ID_COORD, Blip.Sprite => GET_BLIP_SPRITE, Blip.Color => GET_BLIP_COLOUR, Blip.BlipType => GET_BLIP_INFO_ID_TYPE; Blip.ShowRoute getter is a memory-flag read, setter => SET_BLIP_ROUTE; BlipSprite.Standard = 1, BlipSprite.Waypoint = 8; BlipColor.Yellow = 66",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/source/scripting_v3/GTA/World.cs, .../GTA/Blip/Blip.cs, .../GTA/Blip/BlipSprite.cs, .../GTA/Blip/BlipColor.cs"
+  },
+  {
+   "claim": "PLAYER::IS_PLAYER_DEAD 0x424D4687FA1E5652 \u2014 BOOL(Player) => SHVDN Player.IsDead; PLAYER::IS_PLAYER_BEING_ARRESTED 0x388A47C51ABDAC8E \u2014 BOOL(Player player, BOOL atArresting) (atArresting=1 fires earlier, during hands-up; no SHVDN wrapper exists); PLAYER::IS_PLAYER_PLAYING 0x5E9564D8246B909A \u2014 BOOL(Player) ('has a Ped, not dead, not injured, not arrested'); PED::IS_PED_DEAD_OR_DYING 0x3317DEDB88C95038 \u2014 BOOL(Ped, BOOL checkMeleeDeathFlags); ENTITY::IS_ENTITY_DEAD 0x5F9532F3B5CC2551 => Entity.IsDead",
+   "source": "alloc8or natives.json + SHVDN main Player.cs / Entity.cs (absence of arrest wrapper verified by grep of Player.cs and Ped.cs)"
+  },
+  {
+   "claim": "alloc8or gta5-nativedb-data last commit 2026-07-16 'update to 3889.0/1158.13' \u2014 the DB used for all hashes above is current as of July 2026 and contains no per-native Legacy/Enhanced (gen9) annotations (zero matches for 'gen9'/'enhanced' in natives.json)",
+   "source": "https://api.github.com/repos/alloc8or/gta5-nativedb-data/commits + local grep of natives.json"
+  },
+  {
+   "claim": "Official SHVDN README: latest stable GitHub release is v3.6.0 (2022-12-29); on game v1.0.3258.0+ users must run nightly v3.6.0-nightly.89 or later (v3.6.0/v3.5.1 have a compatibility issue with b3258+); devs are told to build against stable API, nightly-only APIs may break",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/ (README.md) + https://api.github.com/repos/scripthookvdotnet/scripthookvdotnet/releases"
+  },
+  {
+   "claim": "ScriptHookVDotNetEnhanced (Chiheb-Bacha fork, last pushed 2026-07-15) is 'an extended version of ScriptHookVDotNet to support both GTA5 Legacy and Enhanced'; scripts built for Legacy run as-is unless they rely on their own memory patterns",
+   "source": "https://github.com/Chiheb-Bacha/ScriptHookVDotNetEnhanced"
+  }
+ ],
+ "gotchas": [
+  "Hash drift in old tutorials: current DB hashes differ from many older forum pastes (e.g. GET_PLAYER_WANTED_LEVEL is 0xE28E54788CE8F12D, SET_PLAYER_WANTED_LEVEL is 0x39FF19C64EF7DA5B, SET_RADIO_TO_STATION_NAME is 0xC69EDA28699D5107, IS_CUTSCENE_ACTIVE is 0x991251AFC3981F84). Use SHVDN's GTA.Native.Hash enum or the July-2026 natives.json, not copy-pasted constants from 2015-era posts.",
+  "Sources disagree on the named 'ignore lights'/'rushed' combos: SHVDN's legacy DrivingStyle enum uses IgnoreLights=2883621 (= 786469 + UseSwitchedOffNodes 2097152) and Rushed=1074528293 (= 786469 + ForceJoinInRoadDirection 1073741824), while FiveM's documented modes are DrivingModeStopForVehiclesIgnoreLights=786475 and DrivingModeAvoidVehicles(Reckless)=786469/786468. The individual bits are documented; which combo to call 'rushed' is convention from the gtaforums 'Guide: Driving Styles' thread (empirical).",
+  "SHVDN API churn between stable v3.6.0 and nightly/main: DriveTo argument order changed ((veh, target, radius, speed, DrivingStyle) -> (veh, target, speed, VehicleDrivingFlags, radius)); GoTo(Vector3) -> FollowNavMeshTo; FightAgainstHatedTargets -> CombatHatedTargetsAroundPed; Player.WantedLevel -> Player.Wanted.WantedLevel; World.CurrentTimeOfDay -> GTA.Chrono.GameClock; Player.CanControlCharacter setter is obsoleted. Pin your SHVDN version and compile against it.",
+  "GET_FIRST/GET_NEXT_BLIP_INFO_ID iterate per blip SPRITE id, so enumerating 'all blips' via natives means looping over sprite ids; SHVDN World.GetAllBlips instead does an internal memory scan (GetNonCriticalRadarBlipHandles) \u2014 convenient, but memory-pattern-dependent, which is exactly the part the Enhanced fork warns about.",
+  "There is no native to READ a blip's route flag (SET_BLIP_ROUTE is set-only); SHVDN Blip.ShowRoute's getter is a raw memory-flag read. Identifying the story-mission objective blip as 'sprite Standard(1) + colour Yellow(66) + route enabled' is empirical community practice, not documented by any primary source \u2014 validate in-game per mission.",
+  "SET_MISSION_FLAG can only set the flag true (calling with false does nothing per the DB comment) and blocks saving; random events (Strangers & Freaks style ambient content) use GET_RANDOM_EVENT_FLAG instead of GET_MISSION_FLAG, so check both for 'is scripted content active'.",
+  "IS_PLAYER_BEING_ARRESTED(player, TRUE) returns true early (hands-up phase, player still has control); with FALSE it only returns true once actually busted. IS_PLAYER_PLAYING is a useful single check (false when dead/injured/arrested). TASK_COMBAT_HATED_TARGETS_* despite the plural name attacks only the single closest hated target, and requires relationship (hate/dislike/neutral) setup or the task exits immediately.",
+  "Legacy vs Enhanced: native names/hashes are shared (one alloc8or DB covers both, updated for 2026 builds of each), but tooling differs \u2014 official ScriptHookVDotNet targets Legacy (and needs nightly >= v3.6.0-nightly.89 on b3258+), while Enhanced requires the ScriptHookVDotNetEnhanced fork plus the Enhanced build of ScriptHookV. SHVDN features that bypass natives via memory patterns (GetAllBlips, Blip.ShowRoute getter, Game.TimeScale getter) are the risk area on Enhanced.",
+  "SET_TIME_SCALE only accepts 0.0-1.0 (cannot speed the game up), persists until changed, and at 0.0 the game still runs at a minimum time scale.",
+  "GET_CLOSEST_VEHICLE's flags parameter is only partially documented ('bitwise flags, commonly 70/71'); test empirically or use SHVDN World.GetClosestVehicle which hides it."
+ ],
+ "unconfirmed": [
+  "Whether any of the ~60 listed natives behaves differently (or is stubbed) in GTA V Enhanced vs Legacy: the alloc8or DB carries no per-edition annotations and I found no primary source documenting per-native Enhanced differences for these specific natives \u2014 treat as identical but verify on the Enhanced target if you switch editions.",
+  "Exact semantic difference between IS_CUTSCENE_ACTIVE and IS_CUTSCENE_PLAYING (commonly: ACTIVE becomes true once a cutscene is requested/loaded, PLAYING only while actually playing) \u2014 no comment in the native DB; community/empirical only.",
+  "The claim that ScriptHookV itself disables all custom scripts when a GTA Online session is active (dev-c.com's stated policy) \u2014 widely reported but I did not re-verify dev-c.com today; NETWORK_IS_SESSION_STARTED remains the correct in-script guard regardless.",
+  "Nightly SHVDN version labels seen in the wild (e.g. 'v3.7.0-nightly') \u2014 the official repo's nightly release repo exists (scripthookvdotnet-nightly), but I did not verify current nightly version numbers; third-party mirrors (libertycity, gta5-mods) are not primary sources.",
+  "Units of the speed parameter in TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE / TASK_VEHICLE_DRIVE_WANDER (commonly treated as meters/second) \u2014 not stated in the native DB.",
+  "Full meaning of GET_CLOSEST_VEHICLE's flags bitfield (DB comment is truncated/incomplete; '70' is the commonly used value).",
+  "BlipColor 66 = the yellow used by story-mission objective blips: SHVDN's enum documents 66 as Yellow, but the mapping 'story objective blip is always colour 66 + sprite 1' is empirical, and some missions use sprite-specific blips (character sprites for M/F/T) instead."
+ ]
+}

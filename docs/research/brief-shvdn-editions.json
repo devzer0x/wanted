@@ -1,0 +1,84 @@
+{
+ "answer": "RECOMMENDATION: Buy \"Grand Theft Auto V Enhanced\" on Steam (app 3240220 \u2014 the only purchasable SKU; ~$/S$39 base package) and INSTALL THE LEGACY EDITION (app 271590), which a fresh Enhanced purchase also grants. Run the bridge on Legacy with Script Hook V + official ScriptHookVDotNet nightly, launched with -nobattleye.\n\n(1) App IDs: Legacy = 271590 (\"Grand Theft Auto V Legacy\"), Enhanced = 3240220 (\"Grand Theft Auto V Enhanced\"). Legacy is delisted from sale (its package_groups are empty; store page hidden) but per Rockstar's March 4, 2025 Newswire and PCGamingWiki, every store's Enhanced purchase is \"Bundled with Grand Theft Auto V Legacy\" \u2014 so yes, a fresh Steam buyer can still install Legacy.\n\n(2) Script Hook V (dev-c.com): actively maintained and supports BOTH editions in one download since the \"Script Hook V for Enhanced\" release (Mar 23, 2025). Current release 15 Jul 2026, version v3889.0/1158.13, supported patches \"1.0.3889.0 / 1.0.1158.13\" (Legacy / Enhanced builds). Ships ASI Loader (dinput8.dll) + Native Trainer; SHV closes the game if you enter GTA Online.\n\n(3) ScriptHookVDotNet: official repo github.com/scripthookvdotnet/scripthookvdotnet is LEGACY-ONLY \u2014 Enhanced support was closed \"not_planned\" (issue #1558). Latest stable v3.6.0 (2022-12-29) is broken on game \u22651.0.3258.0; you must use nightlies (latest v3.7.0-nightly.189, 2026-08-05). For Enhanced there is a community fork, ScriptHookVDotNetEnhanced (Chiheb-Bacha), v1.1.0.6 (2026-07-15), drop-in compatible with both editions. Scripts run on .NET Framework \u22654.8 (not .NET Core); compiled .dll (and raw .cs/.vb) scripts go in the \"scripts\" folder next to GTA5.exe (ini: ScriptsLocation=\"scripts\"); releases ship XML API docs in a \"Docs\" folder.\n\n(4) BattlEye: present in BOTH editions \u2014 added to Legacy in the Sept 17, 2024 update; Enhanced has it since launch. Officially supported disable (Story Mode only): Rockstar Games Launcher \u2192 Settings BattlEye toggle, or launch argument -nobattleye (Steam Launch Options or commandline.txt in the game root) \u2014 added officially in title update 1.69 notes. Without it, ASI loader causes 0xc000009a/dinput8.dll startup errors; Online is blocked without BattlEye, which is fine for this project.\n\nBottom line: Legacy gives maximum reliability (official SHVDN, decade of ecosystem/docs, all tutorials assume it), and it IS available to a fresh Steam purchaser via the Enhanced bundle. Keep SHVDNE as a fallback if you ever must run Enhanced.",
+ "facts": [
+  {
+   "claim": "GTA V Legacy is Steam app ID 271590, named \"Grand Theft Auto V Legacy\"; its package_groups array is empty (not purchasable standalone)",
+   "source": "https://store.steampowered.com/api/appdetails?appids=271590"
+  },
+  {
+   "claim": "GTA V Enhanced is Steam app ID 3240220, purchasable (base package 1148516, bundle 1251933; both packages list only app 3240220)",
+   "source": "https://store.steampowered.com/api/packagedetails/?packageids=1148516"
+  },
+  {
+   "claim": "Every current store listing of GTA V Enhanced, including Steam 3240220, is \"Bundled with Grand Theft Auto V Legacy\"; the Legacy version \"is no longer sold separately and is included for free with the enhanced version\"",
+   "source": "https://www.pcgamingwiki.com/wiki/Grand_Theft_Auto_V_Enhanced (Availability table) and https://www.pcgamingwiki.com/wiki/Grand_Theft_Auto_V"
+  },
+  {
+   "claim": "Rockstar Newswire (Mar 4, 2025): new PC purchasers get GTAV Enhanced along with GTAV Legacy; existing owners keep Legacy access",
+   "source": "https://www.rockstargames.com/newswire/article/7551a7k917554a/free-upgrade-for-grand-theft-auto-v-on-pc-now-available (403 to direct fetch; confirmed via search results and PCGamingWiki)"
+  },
+  {
+   "claim": "Script Hook V current release: 15 Jul 2026, version v3889.0 / 1158.13, supported patches 1.0.3889.0 / 1.0.1158.13, single download including ASI Loader (dinput8.dll) and Native Trainer; ScriptHookV.dll goes next to GTA5.exe; it closes the game when the player enters GTA Online",
+   "source": "https://www.dev-c.com/gtav/scripthookv/ (fetched directly)"
+  },
+  {
+   "claim": "dev-c.com news item \"Script Hook V for Enhanced\" (Mar 23, 2025): \"ScriptHookV now supports recently released GTA V Enhanced. ASI script plugins for the legacy version of the game are compatible with the enhanced one\"",
+   "source": "https://dev-c.com/"
+  },
+  {
+   "claim": "Official SHVDN latest stable release is v3.6.0, published 2022-12-29; latest nightly is v3.7.0-nightly.189, published 2026-08-05",
+   "source": "GitHub API: repos/scripthookvdotnet/scripthookvdotnet/releases and repos/scripthookvdotnet/scripthookvdotnet-nightly/releases"
+  },
+  {
+   "claim": "Official SHVDN issue #1558 \"Add support for GTA V Enhanced along with Legacy with the same binaries\" was closed as not_planned (2025-03-24); maintainer kagikn said Enhanced would need a rewrite because NativeMemory patterns are not found in the Enhanced exe",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/issues/1558 (via GitHub API)"
+  },
+  {
+   "claim": "SHVDN requires C++ Script Hook V by Alexander Blade and .NET Framework >= 4.8; on game v1.0.3258.0+ users must use nightly v3.6.0-nightly.89 or later because v3.6.0/v3.5.1 have a compatibility issue",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/README.md"
+  },
+  {
+   "claim": "SHVDN loads scripts from ScriptsLocation=\"scripts\", relative to the root directory where GTA5.exe is; core files are ScriptHookVDotNet.asi, ScriptHookVDotNet2.dll, ScriptHookVDotNet3.dll",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/ScriptHookVDotNet.ini and README.md"
+  },
+  {
+   "claim": "SHVDN releases ship XML files in the Docs folder \"provided solely as API documentation for script developers\"",
+   "source": "https://raw.githubusercontent.com/scripthookvdotnet/scripthookvdotnet/main/README.md"
+  },
+  {
+   "claim": "ScriptHookVDotNetEnhanced (SHVDNE) fork supports both Legacy and Enhanced, is a drop-in replacement for SHVDN on Legacy, requires .NET Framework >= 4.8 and VC++ 2019 x64 redist, latest release v1.1.0.6 published 2026-07-15; it ticks on a dedicated thread instead of the game main thread",
+   "source": "https://github.com/Chiheb-Bacha/ScriptHookVDotNetEnhanced (README + releases via GitHub API)"
+  },
+  {
+   "claim": "Legacy edition anticheat is BattlEye, \"Added in September 17, 2024 update\" (citing SteamDB patchnotes 15680176); Enhanced edition anticheat field is also BattlEye",
+   "source": "https://www.pcgamingwiki.com/wiki/Grand_Theft_Auto_V and https://www.pcgamingwiki.com/wiki/Grand_Theft_Auto_V_Enhanced"
+  },
+  {
+   "claim": "-nobattleye is an official command line parameter: \"Launch the game with BattlEye Anti-Cheat disabled (works only for Story Mode)\", added in GTA V title update 1.69 \"to disable BattlEye Anti-Cheat when needed on third-party launchers and Story Mode play\"",
+   "source": "https://support.rockstargames.com/articles/eUgRHVRSN2V9gimBT32YX/gtav-title-update-1-69-notes-ps5-ps4-xbox-series-x-s-xbox-one-pc (as cited with snippet on https://www.pcgamingwiki.com/wiki/Grand_Theft_Auto_V)"
+  },
+  {
+   "claim": "BattlEye can alternatively be disabled via a checkbox in Rockstar Games Launcher settings; parameters can also be placed in commandline.txt in the game's root folder; launching without BattlEye blocks connecting to official GTA Online servers",
+   "source": "https://support.rockstargames.com/articles/ocorZr1KpQE8WvoHE3gBG/battleye-troubleshooting-for-grand-theft-auto-v (article fetch timed out; content confirmed via search-result quotes) and PCGamingWiki GTA V page"
+  }
+ ],
+ "gotchas": [
+  "Date confusion in secondary sources: a page-summary pass reported SHVDN v3.6.0 as Dec 2024 and nightly.189 as Aug 2024; the GitHub API (authoritative) says v3.6.0 = 2022-12-29 and v3.7.0-nightly.189 = 2026-08-05. Use the API dates.",
+  "Steam's packagedetails API for the Enhanced packages lists ONLY app 3240220 \u2014 the Legacy (271590) grant does not appear in package data, yet Rockstar, PCGamingWiki, and user reports all confirm buyers receive Legacy in their library. If the purchased library unexpectedly lacks Legacy, Rockstar Games Launcher's 'Scan for installed games' / its own store entitlement is the fallback path.",
+  "Official SHVDN stable v3.6.0 does NOT work on current Legacy builds (>=1.0.3258.0) \u2014 you must run a v3.7.0 nightly. Pin the exact nightly you validate against; nightly-only APIs can break without notice per the README.",
+  "Open SHVDN bug #1805 (updated 2026-08-23): GTA V Legacy 3889.0 (Epic) crashes on Story Mode with ScriptHookVDotNet.asi installed \u2014 current Legacy build 1.0.3889.0 may need the newest nightly; test before going live 24/7.",
+  "Legacy still receives patches (now 1.0.3889.0), and every patch breaks Script Hook V until Alexander Blade updates it (last update 15 Jul 2026). For a 24/7 stream, disable auto-updates or expect downtime windows after Rockstar patches.",
+  "BattlEye is in BOTH editions now (Legacy since 2024-09-17), so -nobattleye is required either way; without it the ASI loader triggers 0xc000009a / dinput8.dll startup errors (per PCGamingWiki).",
+  "Script Hook V deliberately terminates the game if the player enters GTA Online \u2014 irrelevant for Story Mode but never let the harness select Online menu items.",
+  "SHVDN v2 API is deprecated (warnings printed); write the bridge against the v3 API (ScriptHookVDotNet3.dll). Raw .cs scripts without an API suffix default to v3 in nightlies (e.g. name Script.2.cs to force v2).",
+  "Both editions require the Rockstar Games Launcher (DRM) even when launched via Steam \u2014 the rented Windows server needs an interactive session with the launcher logged in.",
+  "Two SHVDNE forks appear in searches (Chiheb-Bacha/... is the active canonical one, ~v1.1.0.6; dev-Akdelay/... is another fork) \u2014 don't confuse them if Enhanced support is ever needed."
+ ],
+ "unconfirmed": [
+  "Exact wording/existence of a Steam launch-dialog option like \"Play GTA V without BattlEye (Story Mode only)\" when clicking Play \u2014 could not verify from a primary source; the verified supported methods are the Rockstar Launcher settings toggle, Steam Launch Options with -nobattleye, and commandline.txt.",
+  "Rockstar support articles (BattlEye troubleshooting ocorZr1KpQE8WvoHE3gBG; full command-line list 2VjbVziQCiTiiVhDbmnexc) repeatedly timed out on direct fetch; their content is confirmed only via search-result quotes and PCGamingWiki citations with snippets.",
+  "Whether the Steam Legacy grant with a new Enhanced purchase arrives as a hidden comp package immediately at purchase time (mechanism not visible in Steam's public package API).",
+  "Whether Alexander Blade's SHV Enhanced support has any behavioral differences vs Legacy beyond the shared distribution (dev-c page and news imply full ASI compatibility, but no changelog detail is published).",
+  "SHV getGameVersion enum semantics on Enhanced (a maintainer comment notes it returned 1002 for Enhanced v1.0.812.8 \u2014 current values for 1.0.1158.13 unverified)."
+ ]
+}

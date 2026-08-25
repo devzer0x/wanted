@@ -1,0 +1,155 @@
+{
+ "answer": "All facts verified 2026-08-25 against Anthropic's official docs, now hosted at platform.claude.com (the successor to docs.claude.com/docs.anthropic.com; the bundled Anthropic skill confirms this is the canonical doc host).\n\nRECOMMENDED CONFIG for WANTED:\n- Tactical tier (cheap/fast): claude-haiku-4-5 (pinned snapshot: claude-haiku-4-5-20251001). $1/MTok in, $5/MTok out. Fastest model, 200K context, 64K max output, vision supported. Caveats: min cacheable prefix is 4,096 tokens; no `effort` param; standard-tier vision (cheaper screenshots).\n- Director tier (mid): claude-sonnet-5 (dateless ID, itself a pinned snapshot). $2/$10 \u2014 now the permanent standard price (the scheduled Sep 1, 2026 increase to $3/$15 was cancelled), making it cheaper than Sonnet 4.6 ($3/$15). 1M context, 128K output, adaptive thinking + effort, high-res vision.\n- Optional escalation: claude-opus-5 ($5/$25). claude-fable-5 ($10/$50) is overkill here.\n\nPricing/caching: cache write 1.25x base input (5-min TTL) or 2x (1-hour, via cache_control {\"type\":\"ephemeral\",\"ttl\":\"1h\"}); cache reads 0.1x; reads refresh TTL free. Haiku 4.5: $1.25/$2 write, $0.10 read. Sonnet 5: $2.50/$4 write, $0.20 read. Max 4 cache_control breakpoints; prefix order tools\u2192system\u2192messages. Batch API: 50% off input+output (not usable for real-time decisions; fine for offline recap jobs).\n\nVision: all current models accept images (JPEG/PNG/GIF/WebP, \u226410MB, \u22648000x8000). Billed as input tokens: ceil(w/28) x ceil(h/28) visual tokens at the model's normal input rate. Haiku 4.5 = standard tier (image capped at 1568 tokens; 1920x1080 downscaled to ~1560 tokens \u2248 $0.0016/frame). Sonnet 5 = high-res tier (same screenshot = 2691 tokens, no downscale) \u2014 pre-downscale director screenshots to control cost.\n\nStructured output (Python SDK): use client.messages.parse(model=..., messages=..., output_format=YourPydanticModel) \u2192 response.parsed_output; or client.messages.create(..., output_config={\"format\": {\"type\":\"json_schema\",\"schema\":{...}}}). GA, no beta header; old top-level output_format request param is deprecated (SDK v1 raises TypeError). Alternative: tool_choice={\"type\":\"tool\",\"name\":...} or {\"type\":\"any\"} plus strict:true on the tool definition (requires additionalProperties:false + required).\n\nRate limits: tiers are now named Start/Build/Scale/Custom (not Tier 1-4). Start tier: 1,000 RPM, 2M ITPM, 400K OTPM per model (Haiku 4.5/Sonnet 5/Opus 5) \u2014 a ~20 RPM 24/7 agent never touches these. Cache reads don't count toward ITPM. The real constraint is the monthly spend cap: Start $500, Build $1,000, Scale $200,000 \u2014 a 24/7 agent can exceed $500/month, so plan for Build/Scale.",
+ "facts": [
+  {
+   "claim": "Current GA lineup and exact Claude API model IDs: Claude Fable 5 = claude-fable-5, Claude Opus 5 = claude-opus-5, Claude Sonnet 5 = claude-sonnet-5, Claude Haiku 4.5 = claude-haiku-4-5-20251001 (Claude API alias: claude-haiku-4-5)",
+   "source": "https://platform.claude.com/docs/en/models/overview (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Legacy models still available: Claude Opus 4.8 (claude-opus-4-8), Opus 4.7 (claude-opus-4-7), Opus 4.6 (claude-opus-4-6), Opus 4.5, Sonnet 4.6 (claude-sonnet-4-6), Sonnet 4.5 (claude-sonnet-4-5-20250929 per structured-outputs supported-models list)",
+   "source": "https://platform.claude.com/docs/en/models/overview and https://platform.claude.com/docs/en/build-with-claude/structured-outputs (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Every Claude model ID is a pinned snapshot, including the dateless IDs used from the 4.6 generation on; for pre-4.6 models the alias resolves to the dated ID",
+   "source": "https://platform.claude.com/docs/en/models/overview (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Context/output: Fable 5, Opus 5, Sonnet 5 = 1M context / 128K max output; Haiku 4.5 = 200K context / 64K max output",
+   "source": "https://platform.claude.com/docs/en/models/overview (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Base pricing per MTok (input/output): Fable 5 $10/$50; Opus 5 $5/$25; Opus 4.8, 4.7, 4.6, 4.5 each $5/$25; Sonnet 5 $2/$10; Sonnet 4.6 $3/$15; Sonnet 4.5 $3/$15; Haiku 4.5 $1/$5",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Claude Sonnet 5's $2/$10 pricing, announced at launch as introductory through August 31 2026, is now the standard price; the previously scheduled increase to $3/$15 on September 1 2026 will not occur",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Prompt caching multipliers: 5-minute cache write = 1.25x base input; 1-hour cache write = 2x base input; cache read (hit) = 0.1x base input, same duration as the preceding write",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Per-model cache prices ($/MTok, 5m write / 1h write / read): Fable 5 $12.50/$20/$1; Opus 5 $6.25/$10/$0.50; Sonnet 5 $2.50/$4/$0.20; Sonnet 4.6 $3.75/$6/$0.30; Haiku 4.5 $1.25/$2/$0.10",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Batch API gives a 50% discount on both input and output tokens (e.g. Haiku 4.5 batch $0.50/$2.50, Sonnet 5 batch $1/$5, Opus 5 batch $2.50/$12.50 per MTok)",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Claude 4.6 and later models include the full 1M-token context window at standard pricing \u2014 no long-context (>200K) surcharge; caching and batch discounts apply across the full window",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "inference_geo: \"us\" applies a 1.1x pricing multiplier on all token categories for Claude 4.6+ models; global routing (default) is standard pricing",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Tool-use system prompt overhead per request (auto/none vs any/tool): Opus 5 286/406 tokens; Sonnet 5 354/474; Haiku 4.5 496/588",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "All current models (Fable 5, Opus 5, Sonnet 5, Haiku 4.5) support text and image input, vision, and tool use",
+   "source": "https://platform.claude.com/docs/en/models/overview (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Image token cost = ceil(width/28) x ceil(height/28) visual tokens (28x28-px patches), billed at the model's standard input token rate; supported formats JPEG, PNG, GIF, WebP; max 10MB per image on the Claude API and 8000x8000 px",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/vision (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Vision resolution tiers: Claude 4.7 and later models (includes Sonnet 5, Opus 5, Fable 5) are high-resolution (max long edge 2576 px, max 4784 visual tokens); all other models (includes Haiku 4.5, Sonnet 4.6) are standard (1568 px, 1568 tokens). A 1920x1080 screenshot costs 1560 tokens on standard tier (downscaled) vs 2691 on high-res tier (not resized)",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/vision (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Image request limits: 100 images/request for 200K-context models, 600 for others; more than 20 image blocks in one request triggers a stricter per-image dimension limit (keep each dimension <=2000 px)",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/vision (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Structured outputs: recommended request shape is output_config: {format: {type: \"json_schema\", schema: {...}}} on messages.create; GA with no beta header; the old output_format request parameter and structured-outputs-2025-11-13 beta header are deprecated (accepted only during a transition period), and Python SDK v1.0+ raises TypeError for output_format={...} on create()/count_tokens()",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Python SDK helper: client.messages.parse(model=..., max_tokens=..., messages=..., output_format=PydanticModelClass) returns a response with .parsed_output as a validated instance; anthropic.transform_schema() prepares raw JSON schemas for output_config",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Structured outputs supported models include claude-haiku-4-5-20251001, claude-sonnet-5, claude-opus-5, claude-fable-5, claude-opus-4-8/4-7/4-6, claude-sonnet-4-6",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Strict tool use: set strict: true as a top-level field on the tool definition; schema must have additionalProperties: false and required; guarantees tool_use.input validates exactly; no beta header",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/structured-outputs and https://platform.claude.com/docs/en/agents-and-tools/tool-use/overview (fetched 2026-08-25)"
+  },
+  {
+   "claim": "tool_choice options: {\"type\":\"auto\"} (default with tools), {\"type\":\"any\"} (must use some tool), {\"type\":\"tool\",\"name\":\"get_weather\"} (force specific tool), {\"type\":\"none\"}; optional disable_parallel_tool_use: true on auto/any; combine tool_choice any with strict: true to guarantee a schema-valid tool call",
+   "source": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Forced tool use (tool_choice any/tool) is NOT supported with manual extended thinking (thinking: {type:\"enabled\"} + budget_tokens) and errors; it IS supported with adaptive thinking, including models where thinking is on by default such as Claude Opus 5",
+   "source": "https://platform.claude.com/docs/en/agents-and-tools/tool-use/define-tools (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Prompt caching: cache_control {\"type\":\"ephemeral\"} on content blocks, max 4 breakpoints per request; a top-level cache_control on the request enables automatic caching (consumes one of the 4 slots); TTL options are 5 minutes (default) and 1 hour via {\"type\":\"ephemeral\",\"ttl\":\"1h\"}; each cache read refreshes the TTL at no cost",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Minimum cacheable prefix per model: Opus 5 / Fable 5 = 512 tokens; Opus 4.8 / Sonnet 5 / Sonnet 4.6 / Sonnet 4.5 = 1,024; Opus 4.7 = 2,048; Opus 4.6 / Opus 4.5 / Haiku 4.5 = 4,096. Shorter prompts silently fail to cache (no error; both cache usage fields are 0)",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Cache billing fields in usage: cache_creation_input_tokens (written, billed at write multiplier), cache_read_input_tokens (billed at 0.1x), input_tokens (only tokens AFTER the last cache breakpoint); total input = sum of all three. Cache prefix hierarchy is tools -> system -> messages; changing tool_choice invalidates cached message blocks but not tools/system",
+   "source": "https://platform.claude.com/docs/en/build-with-claude/prompt-caching (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Rate limit tiers are named Start, Build, Scale, and Custom; organizations are placed automatically based on usage history; new orgs may start in an Evaluation tier with limits below the published standard limits",
+   "source": "https://platform.claude.com/docs/en/api/rate-limits (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Start tier per-model limits: 1,000 RPM / 2,000,000 ITPM / 400,000 OTPM for Opus 5, Sonnet 5, Haiku 4.5, Opus 4.x, Sonnet 4.x (Fable 5: 1,000 RPM / 500,000 ITPM / 100,000 OTPM). Build tier: 5,000 RPM / 5M ITPM / 1M OTPM for those models; Scale: 10,000 RPM / 10M ITPM / 2M OTPM",
+   "source": "https://platform.claude.com/docs/en/api/rate-limits (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Monthly spend caps: Start $500, Build $1,000, Scale $200,000; hitting the cap pauses API usage (HTTP 429, error_code enforced_spend_limit_reached, no retry-after header) until the 1st of the next month or a tier increase",
+   "source": "https://platform.claude.com/docs/en/api/rate-limits (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Cache-aware ITPM: cache_read_input_tokens do NOT count toward ITPM for current models (only input_tokens + cache_creation_input_tokens count); exception is retired Claude Haiku 3.5. OTPM counts actual generated tokens; max_tokens does not factor in. Rate limits are per model and use a token-bucket algorithm",
+   "source": "https://platform.claude.com/docs/en/api/rate-limits (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Batch API rate limits (Start tier): 1,000 RPM, 200,000 batch requests in processing queue, 100,000 requests per batch",
+   "source": "https://platform.claude.com/docs/en/api/rate-limits (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Claude 4.7-and-later models (incl. Sonnet 5, Opus 5, Fable 5) use a newer tokenizer that produces ~30% more tokens for the same text than the tokenizer used by Sonnet 4.6 and earlier (incl. Haiku 4.5)",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  },
+  {
+   "claim": "Web search server tool costs $10 per 1,000 searches on top of tokens; web fetch has no extra charge beyond tokens",
+   "source": "https://platform.claude.com/docs/en/about-claude/pricing (fetched 2026-08-25)"
+  }
+ ],
+ "gotchas": [
+  "Source conflict resolved: the bundled Anthropic skill's cached table (2026-06-24) lists Sonnet 5 at $3/$15 with intro $2/$10 ending 2026-08-31; the live pricing page (fetched today) states $2/$10 is now the permanent standard price and the Sep 1, 2026 increase is cancelled. Trust the live page; do NOT bake an 08-31 price step into pricing.yaml.",
+  "Haiku 4.5's minimum cacheable prefix is 4,096 tokens (not 1,024 like Sonnet) \u2014 a tactical-tier system prompt shorter than that silently gets zero caching. Verify cache_read_input_tokens > 0 in telemetry.",
+  "Haiku 4.5 does not support the effort parameter and still uses old-style extended thinking (budget_tokens); forced tool_choice (any/tool) errors when manual extended thinking is enabled \u2014 on the tactical tier either leave thinking off or use tool_choice auto.",
+  "Sonnet 5 is a high-resolution vision model: a raw 1920x1080 game screenshot costs 2,691 tokens vs 1,560 on Haiku 4.5 (standard tier, auto-downscaled). Pre-downscale director-tier screenshots (~1456px long edge) to pay standard-tier token counts.",
+  "Rate limit tiers were renamed: docs now use Start/Build/Scale/Custom, not the old numbered Tiers 1-4 keyed to credit purchases. Per-minute limits are irrelevant at ~20 RPM; the binding constraint for a 24/7 agent is the monthly spend cap ($500 on Start). Budget: even $0.70/hr is ~$500/month.",
+  "Tokenizer asymmetry: Sonnet 5 tokenizes the same prompt into ~30% more tokens than Haiku 4.5, so the effective Haiku-to-Sonnet cost ratio is wider than the sticker $1-vs-$2 suggests.",
+  "The old top-level output_format request param is deprecated and the Python SDK v1 rejects it on create() \u2014 but messages.parse() confusingly still uses an output_format= kwarg to accept the Pydantic class. Don't mix the two up in the harness.",
+  "tool_choice changes invalidate cached message blocks (tools/system stay cached) \u2014 keep tool_choice constant across tactical-loop calls to preserve cache hits.",
+  "Cache TTL is measured from the start of the request that writes/reads it, and each read refreshes it free \u2014 a call every few seconds keeps the 5-minute cache warm indefinitely; the 2x-cost 1-hour TTL is unnecessary for the tactical loop (useful only for components idle >5 min).",
+  "docs.claude.com/docs.anthropic.com content now lives at platform.claude.com; cite platform.claude.com URLs in pricing.yaml. The pricing doc itself defers to claude.com/pricing as 'most current'.",
+  "Pin claude-haiku-4-5-20251001 (the snapshot) rather than the claude-haiku-4-5 alias in config for reproducibility; Sonnet 5/Opus 5/Fable 5 dateless IDs are themselves pinned snapshots \u2014 never append date suffixes to them.",
+  "New/low-history orgs may start in an 'Evaluation tier' with limits below the published Start-tier numbers; check the Console Rate limits page before launch."
+ ],
+ "unconfirmed": [
+  "Whether docs.claude.com and docs.anthropic.com URLs still resolve/redirect to platform.claude.com \u2014 I verified content only on platform.claude.com (the current official docs host per Anthropic's own bundled skill); I did not test the legacy domains.",
+  "The claude.com/pricing marketing page itself was not fetched; all pricing figures come from the official docs pricing page, which links to it as the most-current source.",
+  "Exact Evaluation-tier starting limits for new organizations (docs say only 'below the standard limits', no numbers published).",
+  "Whether a dated snapshot ID exists alongside claude-sonnet-4-6 (docs state 4.6-generation-and-later dateless IDs are themselves pinned snapshots, so none should exist).",
+  "Claude Fable 5's 30-day data retention requirement appears in Anthropic's bundled claude-api skill but I did not re-verify it on a live docs page today (not needed for the recommended Haiku/Sonnet tiers).",
+  "Per-model availability of the 1-hour cache TTL (the caching and pricing pages present the 1h option generally, without a per-model exclusion list)."
+ ]
+}

@@ -1,0 +1,92 @@
+{
+ "answer": "(1) Twitch: two integration styles \u2014 plain iframe `https://player.twitch.tv/?channel=<name>&parent=<domain>` or interactive script `https://player.twitch.tv/js/embed/v1.js` with `new Twitch.Player(divId, {channel, parent: [...], width, height})`; the combined player+chat uses `https://embed.twitch.tv/embed/v1.js` with `new Twitch.Embed(..., {layout: 'video-with-chat'})`. `parent` is required, one entry per embedding domain (repeat the query param), embedding pages must be HTTPS, min 400x300. `autoplay` defaults true, `muted` defaults false \u2014 for a 24/7 site use `muted=true&autoplay=true` since browsers block unmuted autoplay. On Vercel previews, compute `parent` at runtime from `window.location.hostname` (no wildcards). YouTube equivalent: iframe `https://www.youtube.com/embed/VIDEo_ID?autoplay=1&mute=1&playsinline=1&enablejsapi=1&origin=<your-origin>`; live-by-channel `embed/live_stream?channel=CHANNEL_ID` works but is undocumented \u2014 more robust is resolving the live videoId server-side (Data API) and embedding it. Make the switch a config union: `{provider:'twitch',channel}|{provider:'youtube',videoId|channelId}` rendered by one client component. (2) No Vercel constraint on client-side WebSockets: the browser connects directly to `wss://<ref>.supabase.co/realtime/v1/websocket` and never traverses Vercel. The old serverless limitation applied only to functions holding sockets \u2014 and even that is now lifted: Vercel Functions serve WebSockets under Fluid compute (default since 2025-04-23), closing at max duration. You don't need it; let Supabase hold the socket. (3) `import { ImageResponse } from 'next/og'` \u2014 `new ImageResponse(element, {width=1200, height=630, fonts, emoji='twemoji', debug, status, headers})`; use route handlers or `opengraph-image.tsx`. Satori limits: flexbox only (no grid), ttf/otf/woff fonts (no woff2), 500KB total bundle, Node.js runtime supported. (4) `NEXT_PUBLIC_*` is inlined at build time and frozen; server-only vars stay in Node. Vercel scopes values per environment (Production/Preview/Development, plus per-branch preview overrides); changes require redeploy; preview builds bake preview values \u2014 so `NEXT_PUBLIC_SUPABASE_URL` can safely differ per environment. (5) Statically render the shell (layout + Suspense), fetch the initial snapshot in a dynamic server component (`export const dynamic = 'force-dynamic'` or default-uncached fetch; note these segment configs are removed under Next 16 Cache Components), and let the client component take over via Realtime. Serve the dynamic data route with `Cache-Control: private, no-store`; shell/clip pages can use `s-maxage`/`stale-while-revalidate`. (6) Generate a bypass secret, then Playwright `use.extraHTTPHeaders: {'x-vercel-protection-bypass': process.env.VERCEL_AUTOMATION_BYPASS_SECRET, 'x-vercel-set-bypass-cookie': 'true'}` (Vercel's own documented example).",
+ "facts": [
+  {
+   "claim": "Twitch requires embed users to verify where embeds are used via the `parent` parameter; domains using Twitch embeds must use SSL certificates; embeds have minimum size requirements",
+   "source": "https://dev.twitch.tv/docs/embed/"
+  },
+  {
+   "claim": "Twitch iframe player base URL is https://player.twitch.tv/ with `parent` required (\"You must have one parent key for each domain your site uses\"), content params channel/video/collection, `autoplay` (boolean, default true), `muted` (boolean, default false), `time`; interactive embed script is https://player.twitch.tv/js/embed/v1.js with `new Twitch.Player(\"<div id>\", options)`, min 400x300, `parent` as array required when embedded cross-domain",
+   "source": "https://dev.twitch.tv/docs/embed/video-and-clips/"
+  },
+  {
+   "claim": "Twitch 'everything' (video+chat) embed script is https://embed.twitch.tv/embed/v1.js using `new Twitch.Embed()` with options including `parent` (string array), `layout: \"video-with-chat\"`, `autoplay` (default true), `muted` (default false), `theme` ('light'|'dark'), defaults 940x480",
+   "source": "https://dev.twitch.tv/docs/embed/everything/"
+  },
+  {
+   "claim": "Twitch clips embed URL format: https://clips.twitch.tv/embed?clip=<slug>&parent=<domain>",
+   "source": "https://dev.twitch.tv/docs/embed/video-and-clips/"
+  },
+  {
+   "claim": "Twitch parent values cannot carry a port; per a Twitch dev forum moderator, localhost/127.0.0.1 parents are assumed port 80 (HTTP) and other domains port 443, so dev servers on :3000 fail (forum guidance, not official docs)",
+   "source": "https://discuss.dev.twitch.com/t/embedding-player-on-localhost/25991"
+  },
+  {
+   "claim": "YouTube embed URL is https://www.youtube.com/embed/VIDEO_ID; documented params include `autoplay` (0 default/1), `enablejsapi` (1 enables IFrame API control), `origin` (recommended with enablejsapi for security), `playsinline` (1 = inline on iOS), `controls`, `loop`; `modestbranding`/`showinfo` are deprecated and non-functional",
+   "source": "https://developers.google.com/youtube/player_parameters"
+  },
+  {
+   "claim": "The official player_parameters page does NOT document a dedicated `mute` parameter (mute appears only as the [m] keyboard control under `disablekb`)",
+   "source": "https://developers.google.com/youtube/player_parameters?csw=1"
+  },
+  {
+   "claim": "Vercel Functions can serve WebSocket connections; a connection is pinned to one function instance; connections close when the function reaches its maximum duration; WebSockets require Fluid compute, the default for projects created on or after April 23, 2025; Next.js needs the experimental_upgradeWebSocket() API from @vercel/functions",
+   "source": "https://vercel.com/docs/functions/websockets"
+  },
+  {
+   "claim": "Supabase Realtime transport is WebSocket: connection URL wss://<PROJECT_REF>.supabase.co/realtime/v1/websocket?apikey=<API_KEY> (browser connects directly to Supabase, not through Vercel)",
+   "source": "https://supabase.com/docs/guides/realtime/protocol"
+  },
+  {
+   "claim": "ImageResponse is imported from 'next/og'; options: width (default 1200), height (default 630), emoji ('twemoji'|'blobmoji'|'noto'|'openmoji', default 'twemoji'), fonts [{name, data: ArrayBuffer, weight, style}], debug (default false), status (default 200), statusText, headers; moved from next/server to next/og in v14.0.0",
+   "source": "https://nextjs.org/docs/app/api-reference/functions/image-response"
+  },
+  {
+   "claim": "ImageResponse/@vercel/og limits: Satori+Resvg render to PNG; only flexbox and a CSS subset (no display:grid); max 500KB bundle including JSX, CSS, fonts, images; only ttf/otf/woff fonts (ttf/otf preferred); supported on the Node.js runtime; recommended OG size 1200x630; usable in opengraph-image.tsx file convention with exported alt/size/contentType",
+   "source": "https://vercel.com/docs/og-image-generation and https://nextjs.org/docs/app/api-reference/functions/image-response"
+  },
+  {
+   "claim": "NEXT_PUBLIC_ vars are inlined at build time into the JS bundle and frozen after build (\"After being built, your app will no longer respond to changes to these environment variables\"); dynamic lookups like process.env[varName] are NOT inlined; non-prefixed vars are server-only; load order: process.env, .env.$(NODE_ENV).local, .env.local, .env.$(NODE_ENV), .env",
+   "source": "https://nextjs.org/docs/app/guides/environment-variables"
+  },
+  {
+   "claim": "Vercel env vars are scoped to Production, Preview (with per-branch overrides that take precedence), Development (pulled via `vercel env pull`), and custom environments; changes apply only to new deployments; total limit 64KB per deployment (5KB per var on edge runtime)",
+   "source": "https://vercel.com/docs/environment-variables"
+  },
+  {
+   "claim": "In the non-Cache-Components model: `export const dynamic = 'force-dynamic'` forces per-request rendering (equivalent to fetch {cache:'no-store', next:{revalidate:0}}); `export const revalidate = 0` makes a page always dynamically rendered; fetch requests are NOT cached by default; revalidate value must be statically analyzable",
+   "source": "https://nextjs.org/docs/app/guides/caching-without-cache-components"
+  },
+  {
+   "claim": "In Next.js v16.0.0, the `dynamic`, `dynamicParams`, `revalidate`, and `fetchCache` route segment configs are removed when Cache Components (cacheComponents flag) is enabled",
+   "source": "https://nextjs.org/docs/app/api-reference/file-conventions/route-segment-config"
+  },
+  {
+   "claim": "Vercel default cache header is `cache-control: public, max-age=0, must-revalidate` (no caching); `s-maxage` and `stale-while-revalidate` are consumed by Vercel's CDN and stripped from client responses; header priority: Vercel-CDN-Cache-Control > CDN-Cache-Control > Cache-Control; use `private`/`no-store` for real-time or per-user data; SWR pattern example `Cache-Control: s-maxage=1, stale-while-revalidate=59`",
+   "source": "https://vercel.com/docs/headers/cache-control-headers (canonical: /docs/caching/cache-control-headers)"
+  },
+  {
+   "claim": "Protection Bypass for Automation: authenticate with header or query param `x-vercel-protection-bypass: <secret>`; secret auto-set as system env var VERCEL_AUTOMATION_BYPASS_SECRET; `x-vercel-set-bypass-cookie: true` (or `samesitenone` for iframes) sets a bypass cookie for follow-up in-browser requests; official Playwright example uses use.extraHTTPHeaders with both headers; bypasses Password Protection, Vercel Authentication, Trusted IPs, firewall blocks and bot challenges, but not active DDoS mitigations; regenerating the secret invalidates previous deployments until redeploy",
+   "source": "https://vercel.com/docs/deployment-protection/methods-to-bypass-deployment-protection/protection-bypass-automation"
+  }
+ ],
+ "gotchas": [
+  "Twitch parent + Vercel previews: parent values are exact hostnames (no wildcards, no ports), and preview URLs change per deployment. Since the JS embed takes `parent` as a runtime option, pass `[window.location.hostname]` so the same code works on localhost, previews, and production. Twitch parent on localhost: forum moderators say only port 80/443 is assumed (localhost:3000 fails) \u2014 this contradicts scattered community reports that :3000 works; official docs are silent, so verify empirically or test on a deployed preview.",
+  "YouTube `mute=1` is used everywhere (including Google-adjacent examples and vercel/next.js issue #77447 for @next/third-parties) but is absent from the official player_parameters reference \u2014 sources disagree. It does work in practice; the officially documented path is enablejsapi + player.mute() via the IFrame API. Either way, unmuted autoplay is blocked by modern browsers, so always pair autoplay with mute.",
+  "The `https://www.youtube.com/embed/live_stream?channel=CHANNEL_ID` endpoint is not in Google's official developer docs; secondary sources also report live-stream embedding requires the channel to have embedding allowed, historically gated on monetization/AdSense linkage \u2014 viewers otherwise see 'Playback on other websites has been disabled'. Safer: resolve the current live videoId server-side and embed it as a normal video.",
+  "The old 'Vercel serverless functions can't hold WebSockets' rule is obsolete as of Fluid compute (docs updated 2026): functions CAN now serve WebSockets, but connections still die at maxDuration. Neither constraint ever applied to browser->Supabase connections, which bypass Vercel entirely.",
+  "NEXT_PUBLIC_ values are baked in at build time per deployment \u2014 a Preview build permanently contains Preview values; you cannot flip them at runtime, and dynamic process.env[name] lookups silently fail to inline (undefined in the browser). Point the stream-provider toggle at a runtime-fetched config (or Supabase row) if you want to switch Twitch/YouTube without redeploying; env vars alone require a redeploy to change.",
+  "Do NOT try to make the page itself 1-second-fresh via ISR (`revalidate: 1`) \u2014 every visitor triggers regeneration and data still lags; the correct split is cached static shell + no-store initial data + Supabase Realtime push. If you adopt Next 16 with cacheComponents enabled, `dynamic`/`revalidate`/`fetchCache` exports are gone and force-dynamic behavior comes from request-time APIs like connection() instead.",
+  "Vercel strips `s-maxage` and `stale-while-revalidate` before responses reach the browser \u2014 they only steer Vercel's CDN; use plain max-age/private/no-store for browser behavior.",
+  "Playwright + preview protection: when the embed/player runs in an iframe context, `x-vercel-set-bypass-cookie: true` sets a SameSite=Lax cookie which may not be sent \u2014 use value `samesitenone`. Also note the bypass secret is per-project and regenerating it invalidates all existing deployments until you redeploy.",
+  "Twitch embeds must not be visually obscured \u2014 Twitch may disable features (e.g., chat messaging) if the player is hidden or covered by overlays, relevant for a commentary-overlay site design."
+ ],
+ "unconfirmed": [
+  "Whether Twitch's parent=localhost port-80/443 restriction still holds in 2026 \u2014 the claim comes from a Twitch dev forum moderator thread (2020-era), not current official docs; current official embed docs do not mention localhost at all.",
+  "The exact current requirements for YouTube live-stream embedding (monetization/AdSense linkage, 'enable embedding' toggle in live settings) \u2014 only secondary sources (EventMobi, SpatialChat, WebinarJam) found; the YouTube Help article at support.google.com/youtube/answer/2853700 no longer covers embedding.",
+  "The `youtube.com/embed/live_stream?channel=` URL's official status \u2014 it functions per many secondary sources but appears in no current Google developer documentation.",
+  "Plan availability of Vercel Protection Bypass for Automation (the docs page shows role requirements but no explicit plan/pricing gate; historically it was tied to plans with Deployment Protection features).",
+  "Whether the YouTube `mute` URL parameter is guaranteed stable \u2014 it works ubiquitously but is undocumented in the official player_parameters reference, so it could theoretically change without notice.",
+  "Precise minimum `revalidate` interval enforced by Vercel ISR (docs only say the value must be a statically analyzable number of seconds; per-second ISR was not explicitly documented as supported or bounded)."
+ ]
+}

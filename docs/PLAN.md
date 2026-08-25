@@ -96,14 +96,33 @@ says so with evidence.)
 
 ## Phase 0a spec — Server ready (next; blocked on human checklist)
 
-Written in detail once the server route is known (dedicated Hetzner vs cloud VM). Standing scope
-from the master brief: `scripts/server-setup.ps1` (idempotent, logged) covering NVIDIA driver,
-display (HDMI dummy / virtual display), virtual audio cable, auto-logon + no lock/screensaver +
-no auto-reboot updates + high-performance power plan, startup task (Steam → game → harness → OBS in
-the **console session**), RDP/SSH/Parsec access, firewall, toolchain (Git, Python 3.12+, Node LTS,
-.NET SDK, OBS + websocket, ViGEmBus or successor, Claude Code). Game install via Steam; human does
-the two one-time logins; Rockstar offline mode; BattlEye off; SHV + SHVDN installed and verified
-with the bundled native trainer.
+Research-informed scope (decisions D1, D9, D10 in docs/RESEARCH.md). ⚠ GEX44 lead time is
+currently **"several weeks"** — the human orders on day one; if they also provide cloud
+credentials, an interim AWS G4dn/G5 Windows VM (provisioned via `infra/server/`) unblocks Phases
+0a–2 development sooner.
+
+`scripts/server-setup.ps1` (idempotent, logged) covers: NVIDIA workstation driver; display via the
+Hetzner **HDMI emulator on the RTX card** (cloud VM route: virtual display driver instead);
+VB-CABLE **after** enabling Windows Audio + Endpoint Builder services (+ reboot; OBS captures the
+CABLE device explicitly, never "Default"); Sysinternals Autologon (LSA secret); NoLockScreen=1,
+InactivityTimeoutSecs=0, screensaver policy off; Windows Update notify-only (AUOptions 2/7 — the
+no-reboot-with-users policy is unreliable for disconnected sessions); high-performance power plan +
+monitor-timeout 0; startup task chain (Steam `-silent` → `steam.exe -applaunch 271590` → poll for
+GTA5.exe → harness → OBS) in the **console session**; OpenSSH Server (ships with Server 2025) with
+key auth + PowerShell default shell; firewall inbound RDP/SSH from the human's IP only; toolchain
+(Git, Python 3.12+, Node LTS, .NET SDK + Framework 4.8 targeting pack, OBS with websocket,
+Claude Code). **No Parsec** (commercial-license risk; HDMI emulator already provides the display) —
+RDP for setup with the `tscon /dest:console` detach procedure scripted as `scripts/detach-rdp.ps1`.
+**Day-one test:** vgamepad/ViGEmBus on Server 2025 (expected to fail with Code 28 → SendInput
+keyboard/mouse is the plan of record, CONTRACTS §2).
+
+Game install: human buys Enhanced (3240220), we install **Legacy (271590)** via
+`steam://install/271590`; human does the two one-time logins (Steam incl. Steam Guard; Rockstar
+sign-in + link); first launch auto-detects graphics, then we pre-seed
+`Documents\Rockstar Games\GTA V\settings.xml` to 1280×720 windowed-borderless and set
+`-nobattleye` (+ `-scofflineonly` best-effort) in commandline.txt / launcher settings. SHV
+(current build) + SHVDN nightly installed; verified with the bundled Native Trainer; SkipIntro ASI
+allowed.
 
 **DoD (from master brief §0):** game launches into Story Mode in the console session at 1280×720,
 GPU-accelerated (confirmed with vendor tool), keeps running after disconnect, comes back unattended

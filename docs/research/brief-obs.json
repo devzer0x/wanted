@@ -1,0 +1,89 @@
+{
+ "answer": "(1) obs-websocket v5 ships inside OBS since 28.0.0. Bundled versions (verified via the obs-websocket submodule at each OBS release tag): OBS 28.x\u21925.0.2, 29.0\u21925.1.0, 29.1.3\u21925.2.3, 30.0\u21925.3.3, 30.1.x\u21925.4.2, 30.2.3\u21925.5.2, 31.0\u21925.5.4, 31.1.2\u21925.6.2, 32.0\u21925.6.3, 32.2.2 (current)\u21925.7.4. rpcVersion has stayed 1 across all of v5, so any v5 client works with any modern OBS.\n\n(2) Auth: server sends Hello (op 0) with rpcVersion and optional authentication {challenge, salt}. Client computes base64_secret = b64(sha256(password+salt)), then authentication = b64(sha256(base64_secret+challenge)), sends it in Identify (op 1); server answers Identified (op 2) with negotiatedRpcVersion, or closes with AuthenticationFailed. Password is set in OBS under Tools \u2192 WebSocket Server Settings (default port 4455, min 6 chars; OBS stores it plaintext in its own config). The harness should keep it in its env/secrets (.env) and pass it as a kwarg; obsws-python alternatively reads a config.toml in the user home dir (host/port/password), defaulting to localhost:4455.\n\n(3) Exact v5 request names (all added 5.0.0): StartReplayBuffer, StopReplayBuffer, ToggleReplayBuffer, GetReplayBufferStatus (\u2192 outputActive), SaveReplayBuffer, GetLastReplayBufferReplay (\u2192 savedReplayPath). Events: ReplayBufferStateChanged (outputActive, outputState) and ReplayBufferSaved (savedReplayPath). Your guessed names were all exactly right.\n\n(4) Both official-README-listed Python clients are actively maintained (mid-2025 releases): obsws-python 1.8.0 (sync, `pip install obsws-python`, Python \u22653.9) and simpleobsws 1.4.3 (asyncio, `pip install simpleobsws`, \u22653.9). Recommend obsws-python for the harness: simpler sync ReqClient plus an EventClient with callbacks for ReplayBufferSaved; pick simpleobsws only if the harness loop is already asyncio.\n\n(5) Browser Source is embedded CEF. It does NOT reload on scene change unless \"Refresh browser source when scene becomes active\" is checked; \"Shutdown source when not visible\" unloads it when hidden. Default CSS makes background transparent; default 30 FPS unless custom. localhost URLs work like any page. Hardware accel is a global toggle: Settings \u2192 Advanced \u2192 Sources \u2192 \"Enable Browser Source Hardware Acceleration\", default ON on Windows. Pages get window.obsstudio JS bindings (visibility/scene events).\n\n(6) Replay buffer: Settings \u2192 Output \u2014 Simple mode: \"Enable Replay Buffer\", \"Maximum Replay Time\" (seconds; default 20 \u2014 set 30) and \"Maximum Memory\" (default 512 MB); Advanced mode: Replay Buffer tab, plus \"Replay Buffer Filename Prefix\" (default \"Replay\") and Suffix. Files land in the Recording Path with prefix + Filename Formatting pattern (Settings \u2192 Advanced \u2192 Recording; default %CCYY-%MM-%DD %hh-%mm-%ss). Race is real: SaveReplayBuffer just calls obs_frontend_replay_buffer_save() and returns Success immediately \u2014 the file is not yet written. Wait for the ReplayBufferSaved event (fires after the save completes, carries savedReplayPath) instead of polling GetLastReplayBufferReplay, which returns the previous replay's path (or errors) if called too early.",
+ "facts": [
+  {
+   "claim": "obs-websocket is included by default with OBS Studio 28.0.0 and above; README lists simpleobsws (Python 3.7+, asyncio, IRLToolkit) and obsws-python (non-asyncio) as Python client libraries",
+   "source": "https://github.com/obsproject/obs-websocket (README)"
+  },
+  {
+   "claim": "Bundled obs-websocket per OBS release (submodule sha at plugins/obs-websocket resolved to obs-websocket tags via GitHub API): OBS 28.0.0/28.1.2\u21925.0.2, 29.0.0\u21925.1.0, 29.1.3\u21925.2.3, 30.0.0\u21925.3.3, 30.2.3\u21925.5.2, 31.0.0\u21925.5.4, 31.1.2\u21925.6.2, 32.0.0\u21925.6.3, 32.2.2\u21925.7.4",
+   "source": "https://api.github.com/repos/obsproject/obs-studio/contents/plugins/obs-websocket?ref=<tag> cross-referenced with https://api.github.com/repos/obsproject/obs-websocket/tags"
+  },
+  {
+   "claim": "OBS 30.1.x release notes state 'Updated obs-websocket to version 5.4.2'",
+   "source": "https://github.com/obsproject/obs-studio/releases (30.1.0/30.1.1/30.1.2 notes)"
+  },
+  {
+   "claim": "Auth string: concatenate password+salt, SHA256 and base64-encode (base64 secret); concatenate base64_secret+challenge, SHA256 and base64-encode \u2192 authentication string sent in Identify; Hello carries rpcVersion and authentication{challenge,salt}; Identified returns negotiatedRpcVersion; wrong auth closes with WebSocketCloseCode::AuthenticationFailed",
+   "source": "https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md ('Creating an authentication string' and Hello/Identify/Identified sections)"
+  },
+  {
+   "claim": "Exact request names: GetReplayBufferStatus (response outputActive), ToggleReplayBuffer (response outputActive), StartReplayBuffer, StopReplayBuffer, SaveReplayBuffer (no response fields), GetLastReplayBufferReplay (response savedReplayPath: String, 'Gets the filename of the last replay buffer save file'); all Added in v5.0.0, Latest Supported RPC Version 1",
+   "source": "https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md (Outputs Requests section)"
+  },
+  {
+   "claim": "Events: ReplayBufferStateChanged (outputActive: Boolean, outputState: String) and ReplayBufferSaved (savedReplayPath: String, 'Path of the saved replay file'), both added v5.0.0",
+   "source": "https://github.com/obsproject/obs-websocket/blob/master/docs/generated/protocol.md (Outputs Events section)"
+  },
+  {
+   "claim": "SaveReplayBuffer handler calls obs_frontend_replay_buffer_save() and immediately returns RequestResult::Success() \u2014 the save is asynchronous; GetLastReplayBufferReplay reads Utils::Obs::StringHelper::GetLastReplayBufferFileName() and errors with OutputNotRunning/InvalidResourceState if the buffer is inactive/unavailable",
+   "source": "https://github.com/obsproject/obs-websocket/blob/master/src/requesthandler/RequestHandler_Outputs.cpp"
+  },
+  {
+   "claim": "ReplayBufferSaved is broadcast from EventHandler::HandleReplayBufferSaved (triggered by the OBS frontend replay-buffer-saved event) with savedReplayPath from GetLastReplayBufferFileName()",
+   "source": "https://github.com/obsproject/obs-websocket/blob/master/src/eventhandler/EventHandler_Outputs.cpp"
+  },
+  {
+   "claim": "obsws-python: pip install obsws-python; synchronous (ReqClient for requests, EventClient for events); connection via kwargs host/port/password/timeout, config.toml in user home dir, or defaults localhost:4455 with empty password; latest PyPI release 1.8.0 uploaded 2025-07-01, requires-python >=3.9",
+   "source": "https://github.com/aatikturk/obsws-python and https://pypi.org/pypi/obsws-python/json"
+  },
+  {
+   "claim": "simpleobsws: pip install simpleobsws; asyncio; v1.0.0+ only supports obs-websocket 5.0.0+; latest PyPI release 1.4.3 uploaded 2025-06-20, requires-python >=3.9",
+   "source": "https://github.com/IRLToolkit/simpleobsws and https://pypi.org/pypi/simpleobsws/json"
+  },
+  {
+   "claim": "OBS WebSocket Server Settings dialog: 'Enable WebSocket server', 'Server Port', 'Server Password', 'Generate Password' button; warning that 'obs-websocket stores the server password as plain text'; password must be 6+ characters",
+   "source": "https://raw.githubusercontent.com/obsproject/obs-websocket/master/data/locale/en-US.ini"
+  },
+  {
+   "claim": "Browser Source options: Local File toggle, URL, width/height (800x600 default), custom frame rate (default 30 FPS), custom CSS (default transparent background, no body margins), 'Shutdown source when not visible', 'Refresh browser source when scene becomes active', page permissions; engine is Chromium Embedded Framework",
+   "source": "https://obsproject.com/kb/browser-source"
+  },
+  {
+   "claim": "'Enable Browser Source Hardware Acceleration' (BrowserSource.EnableHardwareAcceleration, widget browserHWAccel) lives on the Advanced settings page in the 'Sources' group; default value true on Windows/macOS/Linux (config General/BrowserHWAccel)",
+   "source": "https://github.com/obsproject/obs-studio \u2014 frontend/forms/OBSBasicSettings.ui, frontend/data/locale/en-US.ini, frontend/OBSApp.cpp (config_set_default_bool General BrowserHWAccel true)"
+  },
+  {
+   "claim": "Replay buffer settings labels: 'Enable Replay Buffer', 'Maximum Replay Time', 'Maximum Memory', 'Replay Buffer Filename Prefix', 'Suffix'; replay buffer unavailable with Custom Output (FFmpeg) recording type; Filename Formatting default pattern completer starts with %CCYY-%MM-%DD %hh-%mm-%ss",
+   "source": "https://raw.githubusercontent.com/obsproject/obs-studio/master/frontend/data/locale/en-US.ini"
+  },
+  {
+   "claim": "Replay buffer defaults: RecRBTime=20 seconds, RecRBSize=512 MB, RecRBPrefix=\"Replay\" (both SimpleOutput and AdvOut sections)",
+   "source": "https://raw.githubusercontent.com/obsproject/obs-studio/master/frontend/widgets/OBSBasic.cpp (config_set_default_* calls)"
+  },
+  {
+   "claim": "window.obsstudio JS bindings in Browser Source pages include events such as obsSourceVisibleChanged and obsSourceActiveChanged plus methods like getCurrentScene()/getStatus() with permission levels",
+   "source": "https://github.com/obsproject/obs-browser (README)"
+  }
+ ],
+ "gotchas": [
+  "SaveReplayBuffer's success response does NOT mean the file exists yet \u2014 the handler returns immediately after triggering obs_frontend_replay_buffer_save(). Calling GetLastReplayBufferReplay right after can return the PREVIOUS replay's path, or an error if nothing was saved this session. Subscribe to Outputs events and use the ReplayBufferSaved event's savedReplayPath as the sync point.",
+  "GetLastReplayBufferReplay and SaveReplayBuffer error with OutputNotRunning if the replay buffer output is not active \u2014 StartReplayBuffer (or 'Automatically start replay buffer when streaming' in Settings \u2192 General) must run first; GetReplayBufferStatus.outputActive verifies it.",
+  "Replay Buffer is unavailable when the Advanced recording type is 'Custom Output (FFmpeg)'.",
+  "Default Maximum Replay Time is 20 s, not 30 \u2014 set it explicitly; also raise 'Maximum Memory' (default 512 MB) since with variable bitrate the memory cap can truncate the buffer below the requested seconds.",
+  "The obs-websocket standalone GitHub Releases page stops at 5.0.1 (2022) \u2014 later versions (5.1.0\u20265.7.4) exist only as git tags consumed as an obs-studio submodule, so don't judge project health by the Releases page.",
+  "Minor source disagreement: obs-websocket's README says obsws-python needs Python 3.10+, but the obsws-python repo/PyPI say >=3.9. Irrelevant for your 3.12 harness.",
+  "OBS stores the websocket password in plain text in its own config (its UI warns about this) \u2014 treat the rented Windows box's OBS config as sensitive; bind the server to localhost only.",
+  "Browser Source does not reload on scene change by default; if your overlay must re-init per scene, either check 'Refresh browser source when scene becomes active' or (better for a 24/7 stream) make the page react via window.obsstudio visibility events so state isn't lost.",
+  "Toggling 'Enable Browser Source Hardware Acceleration' (Settings \u2192 Advanced \u2192 Sources) requires an OBS restart to take effect (widely reported behavior; not verified against a doc \u2014 see unconfirmed).",
+  "Even after ReplayBufferSaved fires, allow a short settle (or open the file with retry) before uploading/remuxing \u2014 antivirus or the container finalization on Windows can briefly hold the handle; this is operational practice, not documented protocol behavior."
+ ],
+ "unconfirmed": [
+  "Whether the browser hardware acceleration toggle strictly requires an OBS restart (commonly stated in forums; not found in an official doc).",
+  "Default checkbox states of 'Shutdown source when not visible' and 'Refresh browser source when scene becomes active' (the KB documents the options but not their defaults; believed off by default).",
+  "Exact numeric WebSocket close codes (e.g. AuthenticationFailed's code number) \u2014 names confirmed in protocol.md, numbers not extracted.",
+  "OBS 30.1.x bundling exactly tag 5.4.2: the submodule commit at tag 30.1.2 is not itself a release tag (it sits past 5.4.2); the 5.4.2 figure comes from OBS release notes.",
+  "Whether ReplayBufferSaved fires strictly after the OS file handle is closed (it fires on OBS's frontend 'replay buffer saved' signal after muxing; byte-level flush timing on Windows not verified).",
+  "Any 2026 releases of obsws-python or simpleobsws newer than 1.8.0 / 1.4.3 (PyPI showed these as latest as of 2026-08-25)."
+ ]
+}

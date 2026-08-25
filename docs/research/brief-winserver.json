@@ -1,0 +1,163 @@
+{
+ "answer": "(1) Hetzner GEX44: NVIDIA RTX 4000 SFF Ada (20GB GDDR6 ECC), i5-13500, 64GB DDR4, 2x1.92TB NVMe. Launch price \u20ac184.00/mo + \u20ac79 setup (ex VAT); still listed at \u20ac184 by trackers \u2014 confirm in the order form. Windows Server 2025 Standard/Datacenter offered as add-on (Hetzner SPLA, auto-installed, priced by core count; Standard ~\u20ac27.90/mo at 8 cores). The dummy-plug add-on in the order form is literally called \"HDMI emulator\" (\u20ac1.10/mo). Provisioning: Hetzner's own page says GEX44-1 (Germany) currently \"several weeks\"; customized orders add 2\u20133+ business days.\n\n(2) The game must live in the physical console session: a disconnected RDP session has no GUI (capture/DDA dies with DXGI_ERROR_SESSION_DISCONNECTED). Check with `query session` \u2014 your session shows as `console` vs `rdp-tcp#N` (`>` marks current). To leave RDP without killing the desktop, run elevated: `tscon %SESSIONNAME% /dest:console` (or the SmartBear query-user loop batch).\n\n(3) Auto-logon: prefer Sysinternals Autologon (password stored as LSA secret) over raw registry (DefaultPassword is plaintext, remotely readable). Winlogon keys: AutoAdminLogon/DefaultUserName/DefaultPassword. Lock screen: NoLockScreen=1 policy. Screensaver: ScreenSaveActive policy. Idle lock: InactivityTimeoutSecs=0. Update reboots: AUOptions + NoAutoRebootWithLoggedOnUsers=1 (only active RDP counts as \"logged on\" \u2014 Microsoft suggests AUOptions=7 notify-only for servers). Power: `powercfg /setactive 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c`; `powercfg /change monitor-timeout-ac 0`.\n\n(4) dxcam was revived in 2026: v0.3.0 (Mar 2026), Python 3.10\u20133.14 wheels, dual backends (`backend=\"dxgi\"` DDA, plus winrt/Windows Graphics Capture), 240fps@1080p. Works headless with the HDMI emulator only in the console session. Fallbacks: winrt backend, windows-capture (active), OBS capture directly.\n\n(5) VB-CABLE (v45, Oct 2024, Win XP\u201311) creates a virtual playback\u2192recording pair with no audio hardware; donationware, but \"professional use/server installation\" is expected to buy a license. Enable the Windows Audio service on Server. Alternatives: Voicemeeter (donationware), Muzychenko VAC (paid).\n\n(6) ViGEmBus was retired/archived 2 Nov 2023 (final v1.22.0, trademark conflict); driver still signed and works on Win10/11. Successor \"Nefarius VirtualPad\" is commercial, business-partners only. vgamepad (actively maintained, June 2026) auto-installs ViGEmBus (only 1.17.333.0 tested) \u2014 but virtual X360 pads are reported broken (Code 28) on Windows Server 2019; test day one, consider a Windows 10/11 image if it fails.\n\n(7) OpenSSH Server is installed by default on Server 2025: `Start-Service sshd`, `Set-Service sshd -StartupType Automatic`, firewall rule OpenSSH-Server-In-TCP; DefaultShell via HKLM:\\SOFTWARE\\OpenSSH.\n\n(8) Parsec needs a display; its Virtual Display Driver is Teams/Warp-only, and the free tier is personal non-commercial \u2014 a monetized 24/7 stream needs Teams. With Hetzner's HDMI emulator you don't need Parsec's VDD.",
+ "facts": [
+  {
+   "claim": "GEX44 specs: NVIDIA RTX 4000 SFF Ada Generation with 20 GB GDDR6 ECC, Intel Core i5-13500, 64 GB DDR4, 2x 1.92 TB NVMe Datacenter Edition; OS options include Windows Server 2025 Standard and Datacenter Edition add-ons",
+   "source": "https://www.hetzner.com/dedicated-rootserver/gex44/"
+  },
+  {
+   "claim": "GEX44 launch pricing: \u20ac184.00/month plus \u20ac79.00 one-time setup fee, excluding VAT (announced March 4, 2024)",
+   "source": "https://www.hetzner.com/pressroom/new-gpu-server/"
+  },
+  {
+   "claim": "The GPU server line (GEX) lists 'HDMI emulator' as an available add-on in Hetzner's configurator",
+   "source": "https://docs.hetzner.com/robot/dedicated-server/server-lines/gpu-server/"
+  },
+  {
+   "claim": "'HDMI Emulator' add-on costs \u20ac1.10 monthly in Hetzner's dedicated-server add-on price list",
+   "source": "https://docs.hetzner.com/robot/dedicated-server/dedicated-server-hardware/price-server-addons/"
+  },
+  {
+   "claim": "Hetzner provisioning guidance: GEX44-1 in German locations 'several weeks'; GEX131 models usually 10\u201312 workdays; any customized order (e.g., 10 Gbit uplink) requires at least 2\u20133 business days",
+   "source": "https://docs.hetzner.com/general/infrastructure-and-availability/order-processing/"
+  },
+  {
+   "claim": "Hetzner Windows licenses are SPLA, installed automatically after ordering via Robot, then accessed via RDP with Administrator rights; you cannot bring your own license to a Hetzner-leased Windows image",
+   "source": "https://docs.hetzner.com/robot/dedicated-server/windows-server/windows-server-2025/"
+  },
+  {
+   "claim": "Hetzner Windows Server Standard pricing examples (post Jan-2025 increase): 8 cores \u20ac27.90/mo, 16 cores \u20ac55.90/mo; Datacenter 8 cores \u20ac173.40/mo; prices exclude VAT; the 2025-edition add-on price 'is based on the number of CPU [cores] on the server' and is billed per full calendar month",
+   "source": "https://docs.hetzner.com/robot/general/pricing/windows-2025-pricing/ and https://www.hetzner.com/add-on-product/show/windows-server-2025-standard-edition/"
+  },
+  {
+   "claim": "query session syntax: `query session [<sessionname>|<username>|<sessionID>] [/server:<servername>]`; output lists SESSIONNAME (e.g. console, rdp-tcp#1), USERNAME, ID, STATE; `>` marks the current session",
+   "source": "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/query-session"
+  },
+  {
+   "claim": "tscon syntax: `tscon {<sessionID>|<sessionname>} [/dest:<sessionname>] [/password:<pw>] [/v]`; requires Full Control or Connect special access permission; the docs state 'You can't connect to the console session' (as a target)",
+   "source": "https://learn.microsoft.com/en-us/windows-server/administration/windows-commands/tscon"
+  },
+  {
+   "claim": "Recommended disconnect-RDP-but-keep-desktop batch (run as Administrator): `for /f \"skip=1 tokens=3\" %%s in ('query user %USERNAME%') do (%windir%\\System32\\tscon.exe %%s /dest:console)`; closing RDP normally leaves the machine with no GUI so GUI automation fails",
+   "source": "https://support.smartbear.com/testcomplete/docs/testing-with/running/via-rdp/keeping-computer-unlocked.html"
+  },
+  {
+   "claim": "Sysinternals Autologon stores the password encrypted in the registry as an LSA secret (still recoverable by admins); CLI: `autologon user domain password`; holding Shift at boot skips autologon",
+   "source": "https://learn.microsoft.com/en-us/sysinternals/downloads/autologon"
+  },
+  {
+   "claim": "Registry autologon (KB324737): HKLM\\SOFTWARE\\Microsoft\\Windows NT\\CurrentVersion\\Winlogon with AutoAdminLogon=1, DefaultUserName, DefaultPassword (stored in PLAIN TEXT, remotely readable by Authenticated Users), optional DefaultDomainName; a logon banner GPO breaks autologon; another user's console logon overwrites DefaultUserName",
+   "source": "https://learn.microsoft.com/en-us/troubleshoot/windows-server/user-profiles-and-logon/turn-on-automatic-logon"
+  },
+  {
+   "claim": "'Do not display the lock screen' (CPL_Personalization_NoLockScreen): Computer Configuration > Control Panel > Personalization; registry Software\\Policies\\Microsoft\\Windows\\Personalization, value NoLockScreen (DWORD 1)",
+   "source": "https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-controlpaneldisplay"
+  },
+  {
+   "claim": "'Enable screen saver' policy maps to registry Software\\Policies\\Microsoft\\Windows\\Control Panel\\Desktop, value ScreenSaveActive (User Configuration); disabling the policy prevents screen savers from running",
+   "source": "https://learn.microsoft.com/en-us/windows/client-management/mdm/policy-csp-admx-controlpaneldisplay"
+  },
+  {
+   "claim": "'Interactive logon: Machine inactivity limit' = HKLM\\SOFTWARE\\Microsoft\\Windows\\CurrentVersion\\Policies\\System, InactivityTimeoutSecs; 0/blank disables idle session locking",
+   "source": "https://learn.microsoft.com/en-us/previous-versions/windows/it-pro/windows-10/security/threat-protection/security-policy-settings/interactive-logon-machine-inactivity-limit"
+  },
+  {
+   "claim": "Windows Update restart control: HKLM\\Software\\Policies\\Microsoft\\Windows\\WindowsUpdate\\AU \u2014 AUOptions (2 notify-download, 3 auto-download/notify-install, 4 scheduled install) and NoAutoRebootWithLoggedOnUsers=1 (only applies with AUOptions=4; when using RDP, only ACTIVE RDP sessions count as signed-in users \u2014 disconnected machines get restarted); active hours via SetActiveHours/ActiveHoursStart/ActiveHoursEnd under ...\\WindowsUpdate; for servers Microsoft recommends 'Configure Automatic Updates option 7 - notify to install and notify to reboot'",
+   "source": "https://learn.microsoft.com/en-us/windows/deployment/update/waas-restart"
+  },
+  {
+   "claim": "powercfg: `/setactive <scheme_GUID>` activates a plan, `/list` lists plans, `/aliases` shows GUID aliases, `/change monitor-timeout-ac 0` disables display timeout",
+   "source": "https://learn.microsoft.com/en-us/windows-hardware/design/device-experiences/powercfg-command-line-options"
+  },
+  {
+   "claim": "High performance power plan GUID is 8c5e7fda-e8bf-4a96-9a85-a6e23a8c635c (usable with powercfg -setactive / -duplicatescheme)",
+   "source": "https://learn.microsoft.com/en-us/answers/questions/8085a322-3b37-4330-9bec-4c29f3fd22f4/my-high-performance-mode-has-disappeared"
+  },
+  {
+   "claim": "dxcam latest PyPI release 0.3.0 uploaded 2026-03-12, requires Python >=3.10, author ra1nty; described as Desktop Duplication API screenshot library",
+   "source": "https://pypi.org/pypi/dxcam/json"
+  },
+  {
+   "claim": "dxcam README (2026): wheels for CPython 3.10\u20133.14; dual backend `dxcam.create(backend=\"dxgi\")` plus winrt (Windows Graphics Capture) via `pip install \"dxcam[cv2,winrt]\"`; API: create()/grab()/grab(region=...)/start(target_fps=...)/get_latest_frame()/release(); claims 240+fps at 1080p (benchmark: dxcam 239.19 avg fps vs python-mss 75.87, D3DShot 118.36)",
+   "source": "https://github.com/ra1nty/DXcam"
+  },
+  {
+   "claim": "IDXGIOutput1::DuplicateOutput returns E_ACCESSDENIED without access to the current desktop image (e.g., secure desktop needs LOCAL_SYSTEM), DXGI_ERROR_UNSUPPORTED for unsupported modes/scenarios, DXGI_ERROR_SESSION_DISCONNECTED when the session is disconnected; default limit 4 concurrent duplication processes per output",
+   "source": "https://learn.microsoft.com/en-us/windows/win32/api/dxgi1_2/nf-dxgi1_2-idxgioutput1-duplicateoutput"
+  },
+  {
+   "claim": "Alternatives status: BetterCam (RootKit-Org/BetterCam) last pushed 2024-06-14, PyPI bettercam 1.0.0 (Nov 2023); windows-capture (NiiightmareXD) actively maintained, last pushed 2026-08-11 (Rust+Python, Windows Graphics Capture based)",
+   "source": "https://api.github.com/repos/RootKit-Org/BetterCam and https://api.github.com/repos/NiiightmareXD/windows-capture"
+  },
+  {
+   "claim": "VB-CABLE is donationware ('free to use with all functions'); current Windows driver package v45 (Oct 2024) supports XP\u2013Win11 32/64/Arm64; forwards all audio from CABLE Input (playback device) to CABLE Output (recording device); extra cables A+B/C+D require purchase; VB-Audio expects payment for professional use/server installation, priced per users or PCs",
+   "source": "https://vb-audio.com/Cable/ and https://vb-audio.com/Services/licensing.htm"
+  },
+  {
+   "claim": "On Windows Server instances the Windows Audio (Audiosrv) service must be enabled/started (set Startup Type Automatic) before audio devices work",
+   "source": "https://docs.vultr.com/enable-windows-audio-on-a-windows-server-instance"
+  },
+  {
+   "claim": "ViGEmBus repo is archived (read-only), last push 2023-11-02; final release v1.22.0 'It's dead, Jim' (2023-11-02); retirement caused by trademark conflict with ViGEM GmbH; existing installations unaffected except updater endpoints; signed builds remain downloadable",
+   "source": "https://github.com/nefarius/ViGEmBus/releases and https://docs.nefarius.at/projects/ViGEm/End-of-Life/"
+  },
+  {
+   "claim": "Nefarius VirtualPad is 'a commercial framework for gaming peripherals emulation available to business partners of Nefarius Software Solutions e.U.' \u2014 not a public/open-source drop-in ViGEmBus replacement",
+   "source": "https://docs.nefarius.at/projects/VirtualPad/"
+  },
+  {
+   "claim": "vgamepad: repo actively maintained (last push 2026-06-02); latest PyPI release 0.1.0 (2023-10-14); Windows install via `pip install vgamepad` auto-runs the ViGEmBus driver installer; README states 'only ViGEmBus 1.17.333.0 is tested'; set VGAMEPAD_SKIP_VIGEMBUS_INSTALL=true to skip driver install; classes VX360Gamepad/VDS4Gamepad with press_button/release_button/update",
+   "source": "https://github.com/yannbouteiller/vgamepad and https://pypi.org/pypi/vgamepad/json"
+  },
+  {
+   "claim": "ViGEmBus virtual Xbox 360 controller reported non-functional on Windows Server 2019 Datacenter \u2014 Device Manager shows 'drivers for this device not installed (code 28)'; issue closed unresolved when repo archived",
+   "source": "https://github.com/nefarius/ViGEmBus/issues/102"
+  },
+  {
+   "claim": "Windows Server 2025: OpenSSH is installed by default; enable via Server Manager > Local Server > Remote SSH Access, or `Start-Service sshd` + `Set-Service -Name sshd -StartupType 'Automatic'`; verify/create firewall rule 'OpenSSH-Server-In-TCP' (TCP 22 inbound) with New-NetFirewallRule; older versions: `Add-WindowsCapability -Online -Name OpenSSH.Server~~~~0.0.1.0`",
+   "source": "https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_install_firstuse"
+  },
+  {
+   "claim": "OpenSSH default shell: New-ItemProperty -Path 'HKLM:\\SOFTWARE\\OpenSSH' -Name DefaultShell -Value 'C:\\Windows\\System32\\WindowsPowerShell\\v1.0\\powershell.exe' -PropertyType String -Force; sshd_config lives at %programdata%\\ssh\\sshd_config; admin users' keys go in %programdata%/ssh/administrators_authorized_keys (SYSTEM + Administrators ACL only)",
+   "source": "https://learn.microsoft.com/en-us/windows-server/administration/openssh/openssh_server_configuration"
+  },
+  {
+   "claim": "Parsec Virtual Display Driver (VDD) is an IddCx indirect display driver creating up to 3 virtual displays, official availability 'to Parsec Teams and Warp customers'; the signed driver can create displays for headless hosts (the parsec-vdd project drives it standalone)",
+   "source": "https://github.com/nomi-san/parsec-vdd (and https://support.parsec.app/hc/en-us/articles/32381178803604-VDD-Overview-Prerequisites-and-Installation)"
+  },
+  {
+   "claim": "Parsec licensing: 'Personal Use (free) and Individuals plans are licensed for personal, non-commercial use only'; commercial use requires Teams ($30/mo annual, $35 monthly) or Enterprise; Warp/Individuals $8.33/mo annual includes virtual monitors (up to 3)",
+   "source": "https://parsec.app/pricing"
+  },
+  {
+   "claim": "Parsec cloud hosting: GPU must run in WDDM mode (not TCC) and be able to drive a display output; GTX/RTX cards on hosting providers need a headless dongle or the Virtual Display Driver",
+   "source": "https://support.parsec.app/hc/en-us/articles/32381875912468-Cloud-Workstation-Setup-Guide"
+  }
+ ],
+ "gotchas": [
+  "Hetzner order-processing currently quotes 'several weeks' for GEX44-1 in Germany \u2014 much worse than the '1-3 business days' third-party sites claim; plan lead time and note the model is now listed as 'GEX44-1'.",
+  "Hetzner's \u20ac184/79 price is the March-2024 launch figure; the live gex44 page renders prices via JS so it could not be re-verified here \u2014 confirm in the Robot configurator before budgeting. Also GEX44 allows no RAM/disk upgrades at all.",
+  "Two Hetzner pricing sources partially disagree: the Windows pricing doc lists per-core-count monthly prices labeled for Server 2016/2019/2022, while the Server-2025 add-on page only says price is based on CPU core count without figures \u2014 treat \u20ac27.90\u201355.90/mo (Standard, 8\u201316 cores; i5-13500 has 14 cores) as an estimate.",
+  "Microsoft's tscon doc says 'You can't connect to the console session' \u2014 that refers to targeting the console; redirecting YOUR RDP session with /dest:console is the supported direction and is the standard trick. Run it elevated or it fails silently and locks the console.",
+  "NoAutoRebootWithLoggedOnUsers only works with AUOptions=4, and a DISCONNECTED session (e.g., after tscon to console with autologon) still counts as logged-on only if... actually Microsoft states only ACTIVE RDP sessions count as signed-in, and warns the policy 'doesn't work exactly as per description' \u2014 for a 24/7 server, AUOptions=2 or 7 (notify-only) plus a scheduled manual maintenance window is more deterministic.",
+  "The NoLockScreen policy's CSP applicability table lists Pro/Enterprise/Education/IoT editions \u2014 it exists as a GPO on Server via ControlPanelDisplay.admx, but behavior on Server 2025 SKUs isn't explicitly documented; with autologon + no idle lock (InactivityTimeoutSecs=0) the lock screen rarely matters anyway.",
+  "Desktop Duplication (dxcam backend=\"dxgi\") only works against the GPU's real outputs in the active console session: it breaks the moment someone RDPs in (session switches) and throws DXGI_ERROR_ACCESS_LOST/SESSION_DISCONNECTED on disconnect \u2014 your harness needs re-init logic, and the HDMI emulator must be plugged into the RTX 4000, not the motherboard.",
+  "dxcam was dormant for years and many guides recommend the BetterCam fork \u2014 as of 2026 that's reversed: dxcam is maintained again (0.3.0, Mar 2026) while BetterCam's last push was June 2024.",
+  "vgamepad silently launches a GUI driver installer on first pip install \u2014 on a headless server pre-install ViGEmBus silently (its setup supports it) or the pip install will hang waiting for the license dialog.",
+  "ViGEmBus virtual pads have unresolved 'Code 28' failures on Windows Server SKUs (issue #102, never fixed before archival) \u2014 if the gamepad path is critical, strongly consider whether GTA V + ScriptHookV native PAD input or keyboard SendInput suffices, or use a Windows 10/11 Pro image instead of Server 2025 (Hetzner's official images are Server only; own-license install possible).",
+  "SEO spam sites claim ViGEmBus '1.22.0 published Nov 2023' correctly but also invent 'ViGEm official sites' (vigembus.com, vigembusdriver.com etc.) \u2014 none are Nefarius; only download from github.com/nefarius/ViGEmBus/releases.",
+  "VB-CABLE works with zero physical audio hardware, but on Windows Server the Windows Audio + Windows Audio Endpoint Builder services are disabled by default \u2014 enable them before installing, and reboot after driver install. A 24/7 monetized stream is 'professional use' under VB-Audio's donationware terms, so budget the (self-priced) license.",
+  "Parsec free tier prohibits commercial use, and its Virtual Display Driver needs Warp ($100/yr) or Teams \u2014 since Hetzner's \u20ac1.10/mo HDMI emulator already gives you a real display, Parsec adds licensing risk for a monetized channel; RDP-for-setup + tscon + SSH may be all you need.",
+  "RDP audio redirection can hijack/remove the default audio device while an RDP session is open \u2014 configure OBS to capture the VB-CABLE device specifically, not 'Default'."
+ ],
+ "unconfirmed": [
+  "Current (Aug 2026) GEX44 monthly price and setup fee on hetzner.com \u2014 the page loads prices via JavaScript; only the March-2024 press-release figures (\u20ac184/\u20ac79) and third-party trackers (whtop, looking.house: \u20ac184) could be read.",
+  "Exact Hetzner price for the Windows Server 2025 Standard/Datacenter add-on (the add-on page shows a placeholder; the documented per-core table is labeled for 2016/2019/2022 editions under the 2025 price increase).",
+  "Whether Hetzner's Windows images can be ordered together with the HDMI emulator in one order form pass, and whether the emulator add-on changes GEX44's quoted 'several weeks' lead time.",
+  "Whether ViGEmBus/vgamepad works on Windows Server 2025 specifically \u2014 the documented failure is Server 2019 (issue #102, unresolved); the commonly cited workaround (manually installing the Xbox 360 controller driver xusb22.sys on Server SKUs) could not be confirmed in a primary source.",
+  "Whether dxcam's winrt (Windows Graphics Capture) backend works over an RDP session (WGC generally can capture in RDP sessions unlike DDA, but no primary source confirmed this for dxcam).",
+  "Parsec Teams' inclusion of the VDD is inferred from the parsec-vdd README and search snippets of support.parsec.app (the support site returned HTTP 403 to direct fetch).",
+  "Eugene Muzychenko's 'Virtual Audio Cable' current pricing (mentioned as a paid alternative but not verified against its vendor page).",
+  "Exact wording of Hetzner's HDMI emulator behavior (which port it occupies / resolution advertised) \u2014 only the add-on name and \u20ac1.10/mo price are documented."
+ ]
+}

@@ -1,0 +1,122 @@
+{
+ "answer": "(1) postgres_changes: enable per table with `alter publication supabase_realtime add table t;` (Dashboard \u2192 Publications also works); add `alter table t replica identity full;` if you need old records/filters on DELETE. RLS is enforced per subscriber: \"Postgres Changes authorizes every event against each subscriber\" \u2014 anon subscribers need `GRANT SELECT ... TO anon` plus a `for select to anon using (true)` policy, and only rows their policies allow are delivered. Exception: DELETE events are sent to all subscribers (RLS can't be checked). Scale: changes are processed single-threaded, and N subscribers means N authorization checks per change. Quotas: Free = 200 concurrent connections / 100 msgs/s; Pro = 500/500 (10,000/2,500 with spend cap off). At 1 insert/s \u00d7 ~300 subscribers you deliver ~300 msgs/s \u2014 over Free, at the edge of capped Pro.\n\n(2) Yes, prefer Broadcast \u2014 Supabase now explicitly recommends \"Broadcast from Database\" (an AFTER trigger calling `realtime.broadcast_changes(topic, event, op, table, schema, NEW, OLD)`) over postgres_changes for scalability: one fan-out instead of per-subscriber RLS checks, and auth is checked once at channel join then cached. Requires a private channel (`{config:{private:true}}`) plus a SELECT policy on `realtime.messages` (target `anon` for a public feed). Bonus: Broadcast Replay (public alpha, supabase-js \u22652.74.0) backfills missed messages (`replay:{since,limit\u226425}`, ~72h retention) \u2014 postgres_changes has no replay.\n\n(3) supabase-py: batch insert = pass a list of dicts to `.insert([...]).execute()`; stats row = `.upsert({...}, on_conflict=\"col\")` (PK is default conflict target; use `returning='minimal'` for a writer). API errors raise postgrest `APIError`; offline you get raw httpx exceptions (`ConnectError`, `ReadTimeout`, `RemoteProtocolError`) \u2014 wrap every `execute()` in retry/backoff. Plain PostgREST HTTP via httpx (`POST /rest/v1/t`, headers `apikey` + `Authorization: Bearer`, `Prefer: resolution=merge-duplicates, return=minimal`, `?on_conflict=col`, JSON array = bulk) is a perfectly sane, arguably simpler option for a long-running writer \u2014 explicit timeouts, your own retry queue, no client-lib state.\n\n(4) Storage: public bucket \u2192 reads bypass RLS (anyone with the URL); uploads/deletes still require policies (irrelevant to your service-key writer, which bypasses). Python: `supabase.storage.from_(\"clips\").upload(path=..., file=f, file_options={\"content-type\": \"video/mp4\", \"cache-control\": \"3600\"})`; `get_public_url(path)` for the link. Limits: global file cap 50MB Free, configurable to 500GB on paid; standard uploads \u22645GB but recommended <6MB \u2014 use TUS above that.\n\n(5) Enable RLS, add only `create policy ... for select to anon, authenticated using (true);` \u2014 no insert/update/delete policies = no public writes (RLS default-denies). The service_role/secret key maps to a Postgres role with `bypassrls`; that's fine and intended for your server-side writer \u2014 just never ship it to the browser/site.\n\n(6) Next.js: `@supabase/ssr` \u2014 `createServerClient` (cookies getAll/setAll) in a Server Component fetches initial rows with the anon/publishable key; pass them as props to a `'use client'` component that uses `createBrowserClient` and subscribes in `useEffect` (cleanup via `supabase.removeChannel`). Reconnection: `subscribe((status, err) => ...)` reports SUBSCRIBED / CHANNEL_ERROR / TIMED_OUT / CLOSED; there is no gap-fill for postgres_changes, so on re-SUBSCRIBED refetch rows newer than the last-seen id/created_at \u2014 or use Broadcast Replay with `since = lastSeenTs` to backfill.",
+ "facts": [
+  {
+   "claim": "Enable postgres_changes per table via `alter publication supabase_realtime add table <table>;` (or Dashboard Publications toggle); `alter table <t> replica identity full;` is required to filter/receive old records on DELETE",
+   "source": "https://supabase.com/docs/guides/realtime/postgres-changes"
+  },
+  {
+   "claim": "\"Postgres Changes authorizes every event against each subscriber\" \u2014 subscribers only receive rows their RLS policies allow; anon access needs GRANT SELECT to anon plus a `for select to anon using (true)` policy",
+   "source": "https://supabase.com/docs/guides/realtime/postgres-changes"
+  },
+  {
+   "claim": "RLS policies are NOT applied to DELETE events \u2014 all subscribers receive DELETE events regardless of policies",
+   "source": "https://supabase.com/docs/guides/realtime/postgres-changes"
+  },
+  {
+   "claim": "Postgres Changes are processed on a single thread to preserve order (larger compute doesn't raise throughput); 1 change with 100 subscribers = 100 authorization checks; above ~3,000 concurrent subscribers Supabase says to use Broadcast instead",
+   "source": "https://supabase.com/docs/guides/realtime/postgres-changes"
+  },
+  {
+   "claim": "Realtime quotas: concurrent connections Free 200 / Pro 500 / Pro-no-spend-cap & Team 10,000; messages per second Free 100 / Pro 500 / no-cap & Team 2,500; channel joins/s same tiers; 100 channels per connection; broadcast payload 256KB Free / 3,000KB paid; postgres_changes payload 1,024KB",
+   "source": "https://supabase.com/docs/guides/realtime/quotas"
+  },
+  {
+   "claim": "Realtime message usage counts per recipient: a broadcast to 4 clients = 5 messages (1 sent + 4 received); each database change counts as one message per listening client; $2.50 per million overage; 2M included Free, 5M Pro/Team",
+   "source": "https://supabase.com/docs/guides/platform/manage-your-usage/realtime-messages"
+  },
+  {
+   "claim": "Supabase recommends Broadcast (via `realtime.broadcast_changes` trigger) over postgres_changes for scalability and security when subscribing to database changes; client listens on a private channel: `.channel('topic:'+id, { config: { private: true } })` with a SELECT policy on realtime.messages",
+   "source": "https://supabase.com/docs/guides/realtime/subscribing-to-database-changes"
+  },
+  {
+   "claim": "`realtime.broadcast_changes(topic, event, operation, table, schema, new_record, old_record)` signature (used with TG_OP/TG_TABLE_NAME in an AFTER trigger); `realtime.send(payload, event, topic, is_private)` also exists; broadcast-from-database messages are stored in realtime.messages and deleted after ~3 days",
+   "source": "https://supabase.com/docs/guides/realtime/broadcast"
+  },
+  {
+   "claim": "Realtime Authorization: private-channel access is computed when the channel topic is joined and \"Client access policies are cached for the duration of the connection\" \u2014 the database is not queried per message",
+   "source": "https://github.com/supabase/supabase/blob/master/apps/docs/content/guides/realtime/authorization.mdx"
+  },
+  {
+   "claim": "Broadcast Replay (Public Alpha): channel config `broadcast: { replay: { since: <unix ms>, limit: <1-25> } }`, requires supabase-js \u2265 2.74.0, private channels, and only messages sent via Broadcast from Database; replayed messages carry meta.replayed=true; retention ~72h (partitions dropped after 72h, so 72h\u20134 days)",
+   "source": "https://supabase.com/blog/realtime-broadcast-replay"
+  },
+  {
+   "claim": "supabase-py batch insert: pass a list of dicts \u2014 `supabase.table(\"t\").insert([{...},{...}]).execute()`; options include count, returning ('minimal'|'representation', default representation), default_to_null",
+   "source": "https://supabase.com/docs/reference/python/insert"
+  },
+  {
+   "claim": "supabase-py upsert: `.upsert(json, count=None, returning='representation', ignore_duplicates=None, on_conflict=None, default_to_null=None)`; primary key must be included; on_conflict targets a UNIQUE column, PK is the default conflict target",
+   "source": "https://supabase.com/docs/reference/python/upsert"
+  },
+  {
+   "claim": "supabase-py raises postgrest `APIError` on API-level errors; connection-level failures surface as httpx exceptions (httpx.RemoteProtocolError, httpx.ConnectError, httpx.ReadTimeout) per issue reports",
+   "source": "https://github.com/supabase/supabase-py/issues/1064 and https://github.com/supabase-community/supabase-py/issues/293"
+  },
+  {
+   "claim": "PostgREST direct HTTP: bulk insert = POST a JSON array; upsert = `Prefer: resolution=merge-duplicates` (or ignore-duplicates) with optional `?on_conflict=col`; `Prefer: return=representation|minimal` controls response body",
+   "source": "https://docs.postgrest.org/en/v13/references/api/tables_views.html"
+  },
+  {
+   "claim": "Public storage buckets bypass access control for retrieving/serving files (anyone with the URL can read; cached better on CDN), but uploads/deletes/moves/copies still enforce policies",
+   "source": "https://supabase.com/docs/guides/storage/buckets/fundamentals"
+  },
+  {
+   "claim": "supabase-py storage upload: `supabase.storage.from_(\"bucket\").upload(path=..., file=f, file_options={\"cache-control\":\"3600\",\"upsert\":\"false\"})`; content-type defaults to text/html if unspecified; `get_public_url(\"folder/file.jpg\")` returns the public link",
+   "source": "https://supabase.com/docs/reference/python/storage-from-upload and https://supabase.com/docs/reference/python/storage-from-getpublicurl"
+  },
+  {
+   "claim": "Storage global file size limit: 50 MB max on Free, configurable up to 500 GB on paid plans; per-bucket limits can be set lower than the global limit",
+   "source": "https://supabase.com/docs/guides/storage/uploads/file-limits"
+  },
+  {
+   "claim": "Standard uploads recommended for files <6MB (hard cap 5GB); TUS resumable uploads recommended above 6MB; overwriting an existing path needs upsert and is discouraged due to CDN propagation/stale content \u2014 upload to a new path instead",
+   "source": "https://supabase.com/docs/guides/storage/uploads/standard-uploads"
+  },
+  {
+   "claim": "Public-read RLS pattern: `create policy \"...\" on public.t for select to anon, authenticated using ( true );` \u2014 with RLS enabled and no other policies, writes are denied to public roles",
+   "source": "https://supabase.com/docs/guides/database/postgres/row-level-security"
+  },
+  {
+   "claim": "\"A secret key authorizes access through the service_role Postgres role, which has the bypassrls attribute\"; \"Never use a secret key in the browser or expose it to customers\"; policy performance: wrap auth functions in (select ...), always use the TO clause, index policy filter columns",
+   "source": "https://supabase.com/docs/guides/database/postgres/row-level-security"
+  },
+  {
+   "claim": "Next.js App Router setup: install @supabase/supabase-js + @supabase/ssr; createBrowserClient in utils/supabase/client.ts for Client Components, createServerClient with cookie getAll/setAll in utils/supabase/server.ts for Server Components/Actions/Route Handlers; env vars NEXT_PUBLIC_SUPABASE_URL and NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY",
+   "source": "https://supabase.com/docs/guides/auth/server-side/nextjs"
+  },
+  {
+   "claim": "channel.subscribe((status, err) => ...) reports exactly: SUBSCRIBED, CHANNEL_ERROR, TIMED_OUT, CLOSED",
+   "source": "https://supabase.com/docs/reference/javascript/subscribe"
+  },
+  {
+   "claim": "Realtime delivers postgres changes by polling a logical replication slot and appending subscription IDs to WAL records (no persistence for postgres_changes deliveries is described)",
+   "source": "https://supabase.com/docs/guides/realtime/architecture"
+  },
+  {
+   "claim": "Official guide \"Using Realtime with Next.js\" covers client- and server-side patterns for receiving postgres changes (video-based)",
+   "source": "https://supabase.com/docs/guides/realtime/realtime-with-nextjs"
+  }
+ ],
+ "gotchas": [
+  "Cost math (derived from documented per-recipient counting): 1 insert/s \u00d7 300 subscribers, 24/7 \u2248 26M messages/day \u2248 780M/month \u2192 roughly $1,900/month overage at $2.50/M on Pro. This applies to BOTH postgres_changes and broadcast (fan-out is billed per recipient). For a live-commentary feed, coalesce events \u2014 e.g. one digest broadcast every 5\u201310 s \u2014 to cut this 5\u201310\u00d7.",
+  "Free plan caps at 100 messages/second \u2014 300 concurrent subscribers at 1 event/s exceeds it immediately; Pro with spend cap is 500 msgs/s (2,500 with cap off). Concurrent-connection caps (200 Free / 500 Pro capped) also bite at 'a few hundred' viewers.",
+  "postgres_changes leaks DELETE events to every subscriber regardless of RLS \u2014 don't rely on RLS to hide deletions.",
+  "Broadcast Replay only works on private channels and only for messages sent via Broadcast from Database; plain client/REST broadcasts and postgres_changes cannot be replayed \u2014 for those you must refetch missed rows over PostgREST after reconnect (keep a last-seen id/timestamp).",
+  "Realtime Authorization docs' example policies on realtime.messages all use `to authenticated`; for an anon-key public feed on a private channel you must write the policy `to anon` \u2014 and the docs never explicitly confirm anon-role private-channel joins, so test this before committing to broadcast+replay (fallback: public broadcast channel, losing replay).",
+  "Docs pages disagree on key naming: newer pages use publishable/secret keys (NEXT_PUBLIC_SUPABASE_PUBLISHABLE_KEY, sb_secret_...) while older guides and existing projects use anon/service_role JWTs \u2014 both currently work, but the RLS-bypass semantics quoted are worded for secret keys.",
+  "supabase-py network failures raise raw httpx exceptions, not APIError \u2014 a long-running writer must catch (httpx.HTTPError, APIError) broadly, use its own retry queue, and never let one failed insert kill the loop; consider buffering events locally and flushing as batched inserts.",
+  "Uploading clips: don't overwrite the same storage path (CDN serves stale content); write each clip/screenshot to a new timestamped path. Content-type defaults to text/html in supabase-py if you forget file_options.",
+  "Realtime Authorization caches channel policies for the connection lifetime \u2014 RLS changes don't apply to already-connected subscribers until they reconnect.",
+  "Adding a table to supabase_realtime publication only affects new WAL entries; also ensure RLS is enabled on the table itself or anon postgres_changes subscribers with a grant get everything."
+ ],
+ "unconfirmed": [
+  "Whether an anon-key client with no signed-in user can join a private Realtime channel with its policies evaluated as the `anon` role (docs compute permissions 'based on RLS policies and JWT claims' but only show `to authenticated` examples; realtime.setAuth() behavior for anon tokens not documented on the pages fetched).",
+  "Official wording on postgres_changes delivery guarantees (e.g. 'at-most-once'): no explicit statement found in the architecture or limitations docs \u2014 only implied by Broadcast Replay existing solely for broadcast-from-database messages.",
+  "Exact exception class raised by supabase-py Storage operations on failure (StorageException vs generic) \u2014 not shown in the reference pages fetched.",
+  "Whether the 'messages per second' soft quota counts each per-recipient delivery the same way billing does (billing explicitly counts per recipient; the quotas page doesn't define the counting unit).",
+  "The concrete code content of the 'Using Realtime with Next.js' guide (the page is video-centric; the server-fetch-then-client-subscribe pattern is assembled from the @supabase/ssr docs + subscribe reference rather than one canonical code sample).",
+  "The supabase-py docs excerpt showed `.insert(...).select(...)` chaining to control returned columns \u2014 could not verify this chain exists in the Python client (it may be a JS-docs artifact); rely on `returning='minimal'|'representation'` instead.",
+  "Current-generation API key names (sb_publishable_/sb_secret_) fully supporting Realtime private-channel authorization \u2014 not verified on a primary source in this session."
+ ]
+}
