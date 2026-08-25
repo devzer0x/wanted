@@ -25,3 +25,10 @@ obj/
 logs/
 *.log
 .DS_Store
+
+# third-party binaries & runtime state (fetched by scripts, never committed)
+bridge/lib/
+harness/state/
+web/test-results/
+web/playwright-report/
+infra/supabase/.temp/

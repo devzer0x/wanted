@@ -1,8 +1,10 @@
 # WANTED — CONTRACTS
 
-**Version: 1.0 — FROZEN 2026-08-25.** Executors treat this file as read-only; changes go through
+**Version: 1.1 — FROZEN 2026-08-25.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
+Changelog: v1.1 adds the `site_config` table (§5) so stream provider/channel are runtime-switchable
+(D8 — `NEXT_PUBLIC_*` values are baked per-deployment and cannot switch at runtime).
 
 Platform baseline (D1): GTA V **Legacy** edition (Steam app 271590, granted by an Enhanced
 purchase), Script Hook V (current: 1.0.3889.0/1.0.1158.13 build), **official SHVDN nightly
@@ -215,6 +217,10 @@ stats      session_id uuid pk (one row per session, upserted): deaths int, buste
            missions_passed int, hours_alive real, cost_today_usd numeric, cost_per_hour_usd
            numeric, governor_level smallint, heartbeat_at timestamptz, current_goal text,
            hud jsonb
+site_config key text pk, value jsonb, updated_at timestamptz — public read; known keys (v1.1):
+           "stream" → {"provider": "twitch"|"youtube", "channel": str, "video_id": str|null}.
+           Written only by operators (service role); the web app reads it at request time with an
+           env-var fallback when the row is absent.
 ```
 
 - Indexes: `(session_id, ts)` on `decisions` and `events`.
