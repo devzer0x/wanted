@@ -1,0 +1,34 @@
+# WANTED brain pricing — the runtime source of truth for model IDs and prices.
+# Values per CONTRACTS.md §3 (D4) and docs/research/brief-claude-api.json.
+#
+# source: https://platform.claude.com/docs/en/about-claude/pricing
+# fetched: 2026-08-25
+#
+# Notes that matter to the code reading this file:
+# - All prices are USD per million tokens (MTok).
+# - cache_write_5m is the 5-minute-TTL cache write price (1.25x input). The 2x
+#   1-hour TTL is deliberately absent: the 8-25 s tactical cadence keeps the
+#   5-min cache warm (each read refreshes the TTL for free), so 1h is never used.
+# - The tactical model ID is the pinned dated snapshot; claude-sonnet-5's
+#   dateless ID is itself a pinned snapshot (never append a date to it).
+# - Haiku 4.5 minimum cacheable prefix is 4096 tokens; Sonnet 5 is 1024. The
+#   harness verifies the static prefixes against these at startup.
+
+source_url: "https://platform.claude.com/docs/en/about-claude/pricing"
+fetched: "2026-08-25"
+
+models:
+  tactical:
+    id: "claude-haiku-4-5-20251001"
+    input_per_mtok: 1.00
+    output_per_mtok: 5.00
+    cache_read_per_mtok: 0.10
+    cache_write_5m_per_mtok: 1.25
+    min_cacheable_prefix_tokens: 4096
+  director:
+    id: "claude-sonnet-5"
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+    cache_read_per_mtok: 0.20
+    cache_write_5m_per_mtok: 2.50
+    min_cacheable_prefix_tokens: 1024

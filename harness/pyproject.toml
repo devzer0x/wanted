@@ -1,0 +1,38 @@
+[build-system]
+requires = ["setuptools>=68"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "wasted_harness"
+version = "0.1.0"
+description = "WANTED harness: the agent's brain, perception, behavior, events, overlay and clips service."
+requires-python = ">=3.12"
+license = { text = "Proprietary" }
+dependencies = [
+    "httpx>=0.28",
+    "pydantic>=2.7",
+    "anthropic>=1.0",
+    "supabase>=2.31",
+    "obsws-python>=1.8",
+    "fastapi>=0.115",
+    "uvicorn>=0.30",
+    "pillow>=10.4",
+    "pyyaml>=6.0",
+    "python-dotenv>=1.0",
+]
+
+[project.optional-dependencies]
+# dxcam only installs/works on Windows; the capture code is additionally guarded
+# by sys.platform == "win32" so a non-Windows dev install stays functional.
+windows = ["dxcam>=0.3.0"]
+dev = ["pytest>=8.0"]
+
+[tool.setuptools.packages.find]
+include = ["wasted_harness*"]
+
+[tool.setuptools.package-data]
+"wasted_harness.brain.prompts" = ["*.md"]
+
+[tool.pytest.ini_options]
+testpaths = ["tests"]
+addopts = "-q"
