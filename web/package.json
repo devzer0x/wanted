@@ -8,7 +8,8 @@
     "start": "next start",
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
-    "test:e2e": "playwright test"
+    "test:e2e": "playwright test",
+    "test:e2e:offline": "PLAYWRIGHT_OFFLINE=1 playwright test"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",

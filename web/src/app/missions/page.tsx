@@ -1,14 +1,16 @@
 import type { Metadata } from "next";
 import { fetchMissions, fetchStats } from "@/lib/data";
 import { formatCompact, formatDuration, formatUtcStamp } from "@/lib/format";
+import { routeMetadata } from "@/lib/metadata";
 import type { MissionRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = routeMetadata({
+  path: "/missions",
   title: "Missions",
   description: "Every story mission the agent has attempted, passed, or fumbled — live from the rig.",
-};
+});
 
 const OUTCOME_STYLES: Record<string, string> = {
   passed: "border-bone text-bone",
@@ -29,7 +31,9 @@ function MissionCard({ m }: { m: MissionRow }) {
   return (
     <article className="panel flex flex-col gap-2 p-3 sm:p-4">
       <div className="flex items-start justify-between gap-2">
-        <h3 className="font-display text-base leading-tight text-bone">{m.name}</h3>
+        <h3 className="font-display text-base leading-tight text-bone [overflow-wrap:anywhere]">
+          {m.name}
+        </h3>
         <span
           className={`ticker shrink-0 border px-1.5 py-0.5 text-[0.58rem] ${OUTCOME_STYLES[outcome] ?? "border-hazard text-hazard"}`}
         >
@@ -54,7 +58,9 @@ function MissionCard({ m }: { m: MissionRow }) {
           <dd className="text-bone">{formatCompact(m.tokens)}</dd>
         </div>
       </dl>
-      {m.summary && <p className="text-xs leading-relaxed text-smoke">{m.summary}</p>}
+      {m.summary && (
+        <p className="text-xs leading-relaxed text-smoke [overflow-wrap:anywhere]">{m.summary}</p>
+      )}
       <p className="font-mono text-[0.55rem] text-ash">{formatUtcStamp(m.started_at)}</p>
     </article>
   );

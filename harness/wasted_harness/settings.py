@@ -44,8 +44,11 @@ class Settings:
     poll_hz: float = field(default=3.0)  # perception poll rate, clamped 2-4 Hz
 
     @classmethod
-    def load(cls, env_file: Path | None = None) -> "Settings":
-        load_dotenv(env_file if env_file is not None else _HARNESS_ROOT / ".env")
+    def load(cls, env_file: Path | None = None) -> Settings:
+        load_dotenv(
+            env_file if env_file is not None else _HARNESS_ROOT / ".env",
+            encoding="utf-8",
+        )
         try:
             hourly_cap = float(_env("WASTED_HOURLY_CAP_USD", "1.50"))  # type: ignore[arg-type]
         except ValueError as exc:
@@ -58,7 +61,13 @@ class Settings:
             overlay_port = int(_env("WASTED_OVERLAY_PORT", "7788"))  # type: ignore[arg-type]
         except ValueError as exc:
             raise ConfigError(f"port env vars must be integers: {exc}") from exc
-        poll_hz = float(_env("WASTED_POLL_HZ", "3.0"))  # type: ignore[arg-type]
+        try:
+            poll_hz = float(_env("WASTED_POLL_HZ", "3.0"))  # type: ignore[arg-type]
+        except ValueError as exc:
+            raise ConfigError(
+                f"WASTED_POLL_HZ must be a number, got "
+                f"{os.environ.get('WASTED_POLL_HZ')!r}"
+            ) from exc
         poll_hz = min(4.0, max(2.0, poll_hz))
         return cls(
             anthropic_api_key=_env("ANTHROPIC_API_KEY"),
@@ -71,10 +80,16 @@ class Settings:
             overlay_host=_env("WASTED_OVERLAY_HOST", "127.0.0.1"),  # type: ignore[arg-type]
             overlay_port=overlay_port,
             hourly_cap_usd=hourly_cap,
-            state_dir=Path(_env("WASTED_STATE_DIR", str(_HARNESS_ROOT / "state"))),  # type: ignore[arg-type]
+            # Both paths are anchored to the package, never to the CWD: on the
+            # server the harness starts from a scheduled task whose working
+            # directory is not the repo. expanduser() so %USERPROFILE%-style
+            # overrides written as ~/... behave on Windows too.
+            state_dir=Path(
+                _env("WASTED_STATE_DIR", str(_HARNESS_ROOT / "state"))  # type: ignore[arg-type]
+            ).expanduser(),
             pricing_file=Path(
                 _env("WASTED_PRICING_FILE", str(_HARNESS_ROOT / "config" / "pricing.yaml"))  # type: ignore[arg-type]
-            ),
+            ).expanduser(),
             poll_hz=poll_hz,
         )
 

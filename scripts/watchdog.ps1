@@ -12,6 +12,12 @@
     `python -m wasted_harness.tools.post_event` and keeps retrying on a slow cadence.
     It never exits silently: every probe, kill, relaunch, and error is logged, and any
     unexpected exception is caught, logged, and survived.
+
+    Before every relaunch it records the state of the two things that actually break on this
+    server (Intel UHD 770 iGPU, no monitor, no HDMI emulator): which session owns the desktop,
+    and whether any display adapter still reports a usable desktop mode. A game that will not
+    come back because the indirect display driver dropped its virtual monitor looks exactly
+    like a game that crashed, and only that logged line tells them apart at 3am.
 .EXAMPLE
     pwsh -File .\watchdog.ps1
 .EXAMPLE
@@ -82,15 +88,49 @@ function Stop-GameChain {
     }
 }
 
+function Write-DisplayForensics {
+    <#
+    Snapshot the session and display state. On this server the desktop only exists because an
+    indirect display driver supplies one, so "no adapter reports an active mode" and "the
+    console session is gone" are the two diagnoses worth having in the log before a relaunch.
+    #>
+    $sessionName = $env:SESSIONNAME
+    if (-not $sessionName) { $sessionName = '<unset>' }
+    Write-WastedInfo "forensics: SESSIONNAME=$sessionName"
+    try {
+        $adapters = @(Get-CimInstance -ClassName Win32_VideoController -ErrorAction Stop)
+    }
+    catch {
+        Write-WastedWarn "forensics: Win32_VideoController query failed: $($_.Exception.Message)"
+        return
+    }
+    if ($adapters.Count -eq 0) {
+        Write-WastedError 'forensics: no display adapter is enumerated at all.'
+        return
+    }
+    $active = 0
+    foreach ($vc in $adapters) {
+        $w = [int]($vc.CurrentHorizontalResolution ?? 0)
+        $h = [int]($vc.CurrentVerticalResolution ?? 0)
+        $err = [int]($vc.ConfigManagerErrorCode ?? 0)
+        Write-WastedInfo ("forensics: adapter '{0}' driver {1} mode {2}x{3} cmError {4}" -f $vc.Name, $vc.DriverVersion, $w, $h, $err)
+        if ($w -ge 1280 -and $h -ge 720) { $active++ }
+    }
+    if ($active -eq 0) {
+        Write-WastedError 'forensics: NO adapter reports a desktop mode of at least 1280x720. The virtual display driver has stopped providing a display target — the game cannot present and OBS capture will be black. Relaunching will not fix this; check the display device in Device Manager.'
+    }
+}
+
 function Invoke-Relaunch {
     [CmdletBinding(SupportsShouldProcess)]
     param()
     if (-not $PSCmdlet.ShouldProcess('game chain', 'kill and relaunch via run.ps1')) { return }
+    Write-DisplayForensics
     Stop-GameChain
     Start-Sleep -Seconds 5
     $pwshPath = (Get-Process -Id $PID).Path
     Write-WastedInfo "Relaunching chain: $pwshPath -File $runScript"
-    & $pwshPath -NoProfile -File $runScript
+    & $pwshPath -NoProfile -File $runScript 2>&1 | ForEach-Object { Write-WastedInfo "run.ps1: $_" }
     Write-WastedInfo "run.ps1 exited with code $LASTEXITCODE."
     # Give SHVDN + the bridge script time to come up before the next probe judges the relaunch.
     Start-Sleep -Seconds 30

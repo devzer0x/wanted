@@ -6,7 +6,20 @@ export const alt = "WANTED — an auto-captured highlight clip";
 export const size = { width: 1200, height: 630 };
 export const contentType = "image/png";
 
-// Satori supports flexbox only — no grid, no CSS shorthand tricks beyond its subset.
+// Reads the clip row at request time; the CDN absorbs crawler traffic.
+export const dynamic = "force-dynamic";
+
+const CARD_CACHE_CONTROL = "public, max-age=0, s-maxage=300, stale-while-revalidate=86400";
+
+// Satori supports flexbox only — no grid, no line-clamp — so long captions are trimmed here
+// rather than allowed to overflow the card.
+const CAPTION_MAX = 120;
+
+function clamp(text: string): string {
+  if (text.length <= CAPTION_MAX) return text;
+  return `${text.slice(0, CAPTION_MAX - 1).trimEnd()}…`;
+}
+
 export default async function OgImage({ params }: { params: Promise<{ id: string }> }) {
   const { id: raw } = await params;
   const id = Number(raw);
@@ -17,7 +30,7 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
     const clip = await fetchClip(id);
     const row = clip.ok ? clip.rows[0] : undefined;
     if (row) {
-      caption = row.caption || `Clip #${row.id}`;
+      caption = clamp(row.caption || `Clip #${row.id}`);
       meta = `CLIP #${row.id} · ${formatDuration(row.duration_s)}`;
     } else {
       meta = `CLIP #${raw}`;
@@ -104,6 +117,6 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
         <div style={{ display: "flex", height: 18, width: "100%", backgroundColor: "#e02418" }} />
       </div>
     ),
-    size
+    { ...size, headers: { "cache-control": CARD_CACHE_CONTROL } }
   );
 }

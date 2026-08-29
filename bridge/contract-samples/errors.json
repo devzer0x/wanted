@@ -1,0 +1,93 @@
+{
+  "_note": "Real responses captured from the compiled bridge by bridge/tools/offline-checks. Every body below came out of BridgeRouter over a real HTTP connection; nothing is hand-written.",
+  "contract_version": "1.2",
+  "captured": [
+    {
+      "request": "GET /state",
+      "status": 503,
+      "body": {
+        "error": "not_ready",
+        "detail": "the first game tick has not completed yet"
+      }
+    },
+    {
+      "request": "POST /task  {\"type\":\"teleport\"}",
+      "status": 400,
+      "body": {
+        "error": "unknown_task_type",
+        "detail": "\"teleport\" is not a CONTRACTS §1 task type"
+      }
+    },
+    {
+      "request": "POST /task  {\"type\":\"drive_to\",\"params\":{}}",
+      "status": 400,
+      "body": {
+        "error": "invalid_params",
+        "detail": "drive_to requires numeric x, y, z"
+      }
+    },
+    {
+      "request": "POST /task  not json",
+      "status": 400,
+      "body": {
+        "error": "invalid_json",
+        "detail": "Unexpected character encountered while parsing value: n. Path '', line 0, position 0."
+      }
+    },
+    {
+      "request": "POST /unstick  {}",
+      "status": 409,
+      "body": {
+        "error": "unstick_conditions_not_met",
+        "detail": "no game state yet"
+      }
+    },
+    {
+      "request": "POST /timescale  {\"value\":0.5}",
+      "status": 503,
+      "body": {
+        "error": "game_thread_stalled",
+        "detail": "the game tick did not process the command within 1500 ms (loading screen or hang)"
+      }
+    },
+    {
+      "request": "GET /teleport",
+      "status": 404,
+      "body": {
+        "error": "not_found",
+        "detail": "unknown path /teleport"
+      }
+    },
+    {
+      "request": "POST /state  {}",
+      "status": 405,
+      "body": {
+        "error": "method_not_allowed",
+        "detail": "/state requires GET"
+      }
+    },
+    {
+      "request": "POST /task  {\"type\":\"stop\"}",
+      "status": 503,
+      "body": {
+        "error": "queue_full",
+        "detail": "the game thread has not drained the command queue (depth 128); it is loading or hung"
+      }
+    },
+    {
+      "request": "GET /state",
+      "status": 503,
+      "body": {
+        "error": "online_session_active",
+        "detail": "a GTA Online session was detected; the bridge disabled itself"
+      }
+    }
+  ],
+  "not_capturable_offline": [
+    {
+      "error": "not_in_vehicle",
+      "status": 409,
+      "why": "raised by the game thread (POST /horn on foot); needs the game"
+    }
+  ]
+}

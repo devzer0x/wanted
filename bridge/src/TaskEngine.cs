@@ -57,7 +57,12 @@ namespace WastedBridge
         {
             if (_status == "running" && _req != null)
             {
-                BridgeLog.Info("task " + _req.Id + " (" + _req.Type + ") preempted by " + req.Id);
+                // CONTRACTS §1: the preempted task ends as failed/"preempted". last_task is a
+                // single slot, so the new task overwrites it in the same tick and the terminal
+                // state of the old one is only ever visible here, in the log. The harness sees the
+                // preemption as last_task.id changing while the old task was still running.
+                BridgeLog.Info("task " + _req.Id + " (" + _req.Type
+                               + ") failed: preempted by " + req.Id + " (" + req.Type + ")");
             }
 
             _req = req;
@@ -68,17 +73,29 @@ namespace WastedBridge
             _targetVehicleHandle = 0;
 
             Ped ped = Game.Player.Character;
+            if (ped == null || !ped.Exists())
+            {
+                // Happens during a player switch or a load transition; the harness retries.
+                Fail("no_player_ped");
+                return;
+            }
+
             switch (req.Type)
             {
                 case "drive_to":
-                    if (!ped.IsInVehicle())
+                {
+                    Vehicle veh = CurrentVehicle(ped);
+                    if (veh == null)
                     {
                         Fail("not_in_vehicle");
                         return;
                     }
-                    ped.Task.DriveTo(ped.CurrentVehicle, new Vector3(req.X, req.Y, req.Z),
+                    // Nightly signature: DriveTo(vehicle, target, speed, VehicleDrivingFlags, radius)
+                    // — argument order differs from stable v3.6.0 (bridge/README).
+                    ped.Task.DriveTo(veh, new Vector3(req.X, req.Y, req.Z),
                         req.SpeedMps, req.Style, req.ArriveRadiusM);
                     break;
+                }
 
                 case "walk_to":
                     ped.Task.FollowNavMeshTo(new Vector3(req.X, req.Y, req.Z),
@@ -97,13 +114,16 @@ namespace WastedBridge
                     break;
 
                 case "wander_drive":
-                    if (!ped.IsInVehicle())
+                {
+                    Vehicle veh = CurrentVehicle(ped);
+                    if (veh == null)
                     {
                         Fail("not_in_vehicle");
                         return;
                     }
-                    ped.Task.CruiseWithVehicle(ped.CurrentVehicle, WanderCruiseSpeedMps, req.Style);
+                    ped.Task.CruiseWithVehicle(veh, WanderCruiseSpeedMps, req.Style);
                     break;
+                }
 
                 case "flee_police":
                     if (Game.Player.Wanted.WantedLevel == 0)
@@ -156,6 +176,11 @@ namespace WastedBridge
         {
             if (_status != "running" || _req == null)
             {
+                return;
+            }
+            if (ped == null || !ped.Exists())
+            {
+                Fail("no_player_ped");
                 return;
             }
             if (playerDead)
@@ -257,9 +282,25 @@ namespace WastedBridge
             }
         }
 
+        /// <summary>
+        /// The vehicle the ped is actually in, or null. IsInVehicle() and CurrentVehicle can
+        /// disagree for a frame while entering/exiting, and CurrentVehicle can hand back a handle
+        /// whose entity is already gone — dereferencing either blindly is a null-ref on the game
+        /// thread, which SHVDN turns into an aborted script.
+        /// </summary>
+        private static Vehicle CurrentVehicle(Ped ped)
+        {
+            if (ped == null || !ped.IsInVehicle())
+            {
+                return null;
+            }
+            Vehicle veh = ped.CurrentVehicle;
+            return veh != null && veh.Exists() ? veh : null;
+        }
+
         private void StartEnterNearestVehicle(Ped ped, TaskRequest req)
         {
-            Vehicle current = ped.IsInVehicle() ? ped.CurrentVehicle : Game.Player.LastVehicle;
+            Vehicle current = CurrentVehicle(ped) ?? Game.Player.LastVehicle;
             int baselineRank = (current != null && current.Exists())
                 ? VehicleRank.Rank(current.ClassType)
                 : -1;
@@ -271,7 +312,8 @@ namespace WastedBridge
             float bestNicerDist = float.MaxValue;
             bool bestNicerEmpty = false;
 
-            Vehicle[] candidates = World.GetNearbyVehicles(ped, req.SearchRadiusM);
+            Vehicle[] candidates = World.GetNearbyVehicles(ped, req.SearchRadiusM)
+                                   ?? new Vehicle[0];
             for (int i = 0; i < candidates.Length; i++)
             {
                 Vehicle v = candidates[i];
@@ -354,13 +396,14 @@ namespace WastedBridge
             }
             if (req.InVehicle)
             {
-                if (!ped.IsInVehicle())
+                Vehicle veh = CurrentVehicle(ped);
+                if (veh == null)
                 {
                     Fail("not_in_vehicle");
                     return;
                 }
-                ped.Task.VehicleFollow(ped.CurrentVehicle, target, FollowVehicleCruiseSpeedMps,
-                    (VehicleDrivingFlags)DrivingStyles.Normal, FollowVehicleDistanceM);
+                ped.Task.VehicleFollow(veh, target, FollowVehicleCruiseSpeedMps,
+                    DrivingStyles.Normal, FollowVehicleDistanceM);
             }
             else
             {
@@ -394,7 +437,7 @@ namespace WastedBridge
         private static int CountHatedTargets(Ped player, float radiusM)
         {
             int count = 0;
-            Ped[] peds = World.GetNearbyPeds(player, radiusM);
+            Ped[] peds = World.GetNearbyPeds(player, radiusM) ?? new Ped[0];
             for (int i = 0; i < peds.Length; i++)
             {
                 Ped p = peds[i];
@@ -430,7 +473,7 @@ namespace WastedBridge
         {
             _status = "done";
             _detail = detail;
-            BridgeLog.Info("task " + _req.Id + " (" + _req.Type + ") done"
+            BridgeLog.Info("task " + Describe() + " done"
                            + (detail.Length > 0 ? " (" + detail + ")" : ""));
         }
 
@@ -438,7 +481,12 @@ namespace WastedBridge
         {
             _status = "failed";
             _detail = detail;
-            BridgeLog.Info("task " + _req.Id + " (" + _req.Type + ") failed: " + detail);
+            BridgeLog.Info("task " + Describe() + " failed: " + detail);
+        }
+
+        private string Describe()
+        {
+            return _req == null ? "<none>" : _req.Id + " (" + _req.Type + ")";
         }
     }
 

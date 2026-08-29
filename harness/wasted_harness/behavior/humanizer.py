@@ -12,6 +12,7 @@ import time
 from dataclasses import dataclass, field
 from typing import Any
 
+from ..events import EMITTED_EVENT_TYPES
 from ..logsetup import get_logger
 
 log = get_logger("wasted.humanizer")
@@ -20,12 +21,57 @@ REACTION_JITTER_S = (0.300, 0.900)
 BREAK_EVERY_S = (40 * 60.0, 70 * 60.0)
 BREAK_LENGTH_S = (3 * 60.0, 7 * 60.0)
 
+#: §4 event → the mood it forces. The intent for every event lives here…
+_EVENT_MOOD_INTENT: dict[str, str] = {
+    "death": "scared",
+    "busted": "bored",
+    "mission_end": "smug",
+    "mission_fail": "chill",
+    "stunt": "hyped",
+}
+#: …but only the ones something actually emits are armed. A mood rule keyed off
+#: an event that never arrives is dead wiring that reads like a working feature
+#: (`stunt` was exactly that). Wiring the event up in events.py re-arms its mood
+#: rule automatically — see events.UNPRODUCED_EVENT_REASONS and the README.
+EVENT_MOOD: dict[str, str] = {
+    event: mood
+    for event, mood in _EVENT_MOOD_INTENT.items()
+    if event in EMITTED_EVENT_TYPES
+}
+
 MOOD_DRIVING_STYLE: dict[str, str] = {
     "chill": "normal",
     "bored": "normal",
     "hyped": "rushed",
     "scared": "avoid_traffic",  # scared avoids traffic (CONTRACTS §2 note)
     "smug": "normal",
+}
+
+#: Mood → tactical-timer window, in seconds. Mood has to be visible in the
+#: PACING, not only in the words: hyped the agent talks over a chase, bored the agent
+#: lets a long drive breathe.
+#:
+#: Both ends stay inside the global 8-25 s band, but be honest about what that
+#: does and does not buy: narrowing the window DOES change calls/hour (hyped
+#: ~313/h vs bored ~180/h — brain.tactical.calls_per_hour_by_mood). The ceiling
+#: is held by brain.tactical.MIN_TACTICAL_GAP_S, not by these windows.
+MOOD_TIMER_RANGE_S: dict[str, tuple[float, float]] = {
+    "hyped": (8.0, 15.0),
+    "scared": (8.0, 17.0),
+    "smug": (10.0, 20.0),
+    "chill": (12.0, 25.0),
+    "bored": (15.0, 25.0),
+}
+
+#: Mood → cruising speed for harness-issued drive tasks (m/s). The reflex layer
+#: and the activity runner use this so an unattended stretch still looks like a
+#: person in a mood rather than a constant-velocity robot.
+MOOD_CRUISE_MPS: dict[str, float] = {
+    "chill": 15.0,
+    "bored": 17.0,
+    "hyped": 26.0,
+    "scared": 12.0,
+    "smug": 19.0,
 }
 
 
@@ -49,21 +95,20 @@ class MoodModel:
     mood: str = "chill"
     rng: random.Random = field(default_factory=random.Random)
     clock: Any = time.monotonic
-    _changed_at: float = 0.0
+    _changed_at: float = field(default=0.0, init=False)
     _min_hold_s: float = 90.0
+
+    def __post_init__(self) -> None:
+        # Must be "now", not 0.0: with a monotonic clock, 0.0 makes the very
+        # first quiet tick look like the mood has been held for the machine's
+        # entire uptime, so the agent booted straight into `bored`.
+        self._changed_at = self.clock()
 
     def observe(self, event: str) -> str:
         """Feed a §4 event type (or 'quiet' for a no-event tick)."""
         now = self.clock()
-        forced = {
-            "death": "scared",
-            "busted": "bored",
-            "mission_end": "smug",
-            "mission_fail": "chill",
-            "stunt": "hyped",
-        }
-        if event in forced:
-            self._set(forced[event], now, force=True)
+        if event in EVENT_MOOD:
+            self._set(EVENT_MOOD[event], now, force=True)
         elif event == "wanted_high":
             self._set("scared", now, force=True)
         elif event == "wanted_clear" and self.mood == "scared":
@@ -91,6 +136,15 @@ class MoodModel:
 
     def driving_style(self) -> str:
         return MOOD_DRIVING_STYLE[self.mood]
+
+    def cruise_speed_mps(self) -> float:
+        return MOOD_CRUISE_MPS[self.mood]
+
+    def timer_range_s(self) -> tuple[float, float]:
+        return MOOD_TIMER_RANGE_S[self.mood]
+
+    def held_for_s(self) -> float:
+        return max(0.0, self.clock() - self._changed_at)
 
 
 # --- idle behaviors -----------------------------------------------------------

@@ -13,7 +13,6 @@ from __future__ import annotations
 
 import threading
 import time
-from datetime import datetime, timezone
 from pathlib import Path
 
 from .events import SupabaseWriter
@@ -52,12 +51,12 @@ class ObsClips:
         last_exc: Exception | None = None
         for attempt in range(1, CONNECT_RETRIES + 1):
             try:
-                kwargs = dict(
-                    host=self._settings.obs_ws_host,
-                    port=self._settings.obs_ws_port,
-                    password=self._settings.obs_ws_password or "",
-                    timeout=5,
-                )
+                kwargs = {
+                    "host": self._settings.obs_ws_host,
+                    "port": self._settings.obs_ws_port,
+                    "password": self._settings.obs_ws_password or "",
+                    "timeout": 5,
+                }
                 self._req = obs.ReqClient(**kwargs)
                 self._events = obs.EventClient(**kwargs)
                 self._events.callback.register(self._make_saved_callback())
@@ -158,26 +157,20 @@ class ObsClips:
         """
         local = self.save_replay()
         data = self._read_with_retry(local)
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        storage_path = f"{self._writer.session_id or 'nosession'}/{ts}-{event_type}{local.suffix or '.mp4'}"
-        content_type = "video/mp4" if local.suffix.lower() in ("", ".mp4") else "video/x-matroska"
+        suffix = local.suffix or ".mp4"
+        storage_path = self._writer.storage_path_for(event_type, suffix)
+        content_type = "video/mp4" if suffix.lower() == ".mp4" else "video/x-matroska"
         if not self._writer.configured:
             log.warning(
                 "supabase not configured: replay saved locally only",
                 extra={"kv": {"path": str(local)}},
             )
-        else:
-            try:
-                self._writer._get_client().storage.from_("clips").upload(
-                    path=storage_path,
-                    file=data,
-                    file_options={"content-type": content_type, "cache-control": "3600"},
-                )
-            except Exception as exc:
-                raise ObsError(
-                    f"clip upload to bucket 'clips' failed "
-                    f"({type(exc).__name__}: {exc}); local file kept at {local}"
-                ) from exc
+        elif self._writer.upload_bytes("clips", storage_path, data, content_type) is None:
+            raise ObsError(
+                f"clip upload to bucket 'clips' failed; the local file is kept "
+                f"at {local} and no clips row was written (a row pointing at an "
+                f"object that does not exist would break the site)"
+            )
         clip_id = self._writer.insert_clip(
             {
                 "event_id": event_id,

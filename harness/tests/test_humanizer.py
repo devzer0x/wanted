@@ -3,8 +3,10 @@
 import random
 
 from wasted_harness.behavior.humanizer import (
+    _EVENT_MOOD_INTENT,
     BREAK_EVERY_S,
     BREAK_LENGTH_S,
+    EVENT_MOOD,
     IDLE_BEHAVIORS,
     REACTION_JITTER_S,
     BreakScheduler,
@@ -12,6 +14,7 @@ from wasted_harness.behavior.humanizer import (
     MoodModel,
     reaction_delay,
 )
+from wasted_harness.events import UNPRODUCED_EVENT_TYPES
 
 
 def test_reaction_jitter_bounds() -> None:
@@ -85,6 +88,33 @@ def test_mood_transitions_and_styles() -> None:
     clock.t += 500.0
     m.observe("quiet")
     assert m.mood == "bored"  # long quiet drifts to bored
-    m.observe("stunt")
-    assert m.mood == "hyped"
-    assert m.driving_style() == "rushed"
+    m.observe("wanted_high")
+    assert m.mood == "scared"
+    assert m.driving_style() == "avoid_traffic"
+    m.observe("wanted_clear")
+    assert m.mood == "smug"
+    assert m.driving_style() == "normal"
+
+
+def test_mood_rules_only_arm_events_the_harness_actually_emits() -> None:
+    """No mood rule may key off an event nothing produces.
+
+    `stunt` used to sit in the forced-mood table looking wired up while nothing
+    could ever emit it (no airtime/on-ground field in /state v1.2). The intent
+    for every §4 event is still declared in `_EVENT_MOOD_INTENT`, but only the
+    emitted ones are armed, so wiring the event up in events.py re-arms its mood
+    rule and nothing has to remember this file.
+    """
+    assert UNPRODUCED_EVENT_TYPES, "nothing to check — keep this test honest"
+    assert "stunt" in _EVENT_MOOD_INTENT, "keep the intent; it returns in Phase 3"
+    assert not (set(EVENT_MOOD) & UNPRODUCED_EVENT_TYPES)
+    assert set(EVENT_MOOD) == set(_EVENT_MOOD_INTENT) - UNPRODUCED_EVENT_TYPES
+
+    m = MoodModel(clock=FakeClock())
+    for event in UNPRODUCED_EVENT_TYPES:
+        # The forced-mood table bypasses the min-hold, so a mapped event would
+        # change the mood here on the spot.
+        before = m.mood
+        assert m.observe(event) == before, f"{event} moves the mood but is never emitted"
+    # And the events that DO get emitted still move it.
+    assert m.observe("death") == "scared"

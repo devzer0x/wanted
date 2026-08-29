@@ -4,6 +4,14 @@
 
 Set-StrictMode -Version Latest
 
+# When $PSNativeCommandUseErrorActionPreference is $true, a native command's nonzero exit code
+# throws under $ErrorActionPreference = 'Stop'. Every script here treats nonzero exits as data,
+# not failure, and inspects $LASTEXITCODE itself (winget probes, pnputil, dism, tscon, nefconw,
+# child pwsh runs). It is $false on the PowerShell 7.4.6 this was authored against, but the
+# default has moved before and the server will have whatever winget installs, so pin it rather
+# than inherit it. Dot-sourcing runs in the caller's scope, so this binds the sourcing script.
+$PSNativeCommandUseErrorActionPreference = $false
+
 # Callers that expose a -WastedRoot parameter bind it before dot-sourcing; do not clobber it.
 if (-not (Test-Path variable:script:WastedRoot)) {
     $script:WastedRoot = 'C:\wasted'

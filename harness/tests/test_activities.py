@@ -61,8 +61,8 @@ def test_mood_affinity_shapes_selection() -> None:
     picker = ActivityPicker(random.Random(3), clock=clock)
     scared = {a.name for a, _ in picker.eligible("scared")}
     assert "deliberate_chase" not in scared
-    bored = dict((a.name, w) for a, w in picker.eligible("bored"))
-    chill = dict((a.name, w) for a, w in picker.eligible("chill"))
+    bored = {a.name: w for a, w in picker.eligible("bored")}
+    chill = {a.name: w for a, w in picker.eligible("chill")}
     assert bored["steal_nicer_car"] > chill["steal_nicer_car"]  # boredom breeds crime
 
 

@@ -12,7 +12,7 @@ read them with `cat`:
 from __future__ import annotations
 
 import json
-from datetime import datetime, timezone
+from datetime import UTC, datetime
 from pathlib import Path
 
 from ..logsetup import get_logger
@@ -56,7 +56,7 @@ class Memory:
 
     def append_fact(self, fact: str, source: str) -> None:
         entry = {
-            "ts": datetime.now(timezone.utc).isoformat(),
+            "ts": datetime.now(UTC).isoformat(),
             "fact": fact,
             "source": source,
         }
@@ -78,13 +78,13 @@ class Memory:
     # -- day log ---------------------------------------------------------------
 
     def log_day(self, kind: str, text: str) -> None:
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
-        entry = {"ts": datetime.now(timezone.utc).isoformat(), "kind": kind, "text": text}
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
+        entry = {"ts": datetime.now(UTC).isoformat(), "kind": kind, "text": text}
         with (self._daylog_dir / f"{day}.jsonl").open("a", encoding="utf-8") as f:
             f.write(json.dumps(entry, ensure_ascii=False) + "\n")
 
     def today_tail(self, n: int = 20) -> list[dict]:
-        day = datetime.now(timezone.utc).strftime("%Y-%m-%d")
+        day = datetime.now(UTC).strftime("%Y-%m-%d")
         path = self._daylog_dir / f"{day}.jsonl"
         if not path.exists():
             return []

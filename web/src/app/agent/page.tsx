@@ -1,11 +1,13 @@
 import type { Metadata } from "next";
 import Link from "next/link";
+import { routeMetadata } from "@/lib/metadata";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = routeMetadata({
+  path: "/agent",
   title: "Who is the agent?",
   description:
     "the agent is an AI that plays a famous open-world story mode 24/7 — no cheats, no god mode, full cost transparency.",
-};
+});
 
 function Rule() {
   return <div className="stripes-dim h-1 w-full" aria-hidden="true" />;

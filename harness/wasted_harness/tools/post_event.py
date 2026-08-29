@@ -56,10 +56,14 @@ def main(argv: list[str] | None = None) -> int:
         return 2
     try:
         payload = json.loads(args.payload)
-        if not isinstance(payload, dict):
-            raise ValueError("payload must be a JSON object")
     except ValueError as exc:
-        print(f"error: --payload is not a JSON object: {exc}", file=sys.stderr)
+        print(f"error: --payload is not valid JSON: {exc}", file=sys.stderr)
+        return 2
+    if not isinstance(payload, dict):
+        print(
+            f"error: --payload must be a JSON object, got {type(payload).__name__}",
+            file=sys.stderr,
+        )
         return 2
 
     settings = Settings.load()

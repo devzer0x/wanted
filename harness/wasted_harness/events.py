@@ -12,14 +12,26 @@ Rows queued by out-of-process writers (tools/post_event.py) may carry
 Rows that still have no session id when no session is known stay queued —
 inserting them would violate the schema, and inventing a session row for them
 would put untrue data on the site.
+
+Concurrency: the queue file has two writers — the harness loop and the
+watchdog's ``tools/post_event`` CLI. On Windows a file opened by another
+process has no FILE_SHARE_DELETE, so ``os.replace`` onto it fails with a
+sharing violation; an unguarded rewrite would raise inside ``flush()`` and take
+the main loop down while dropping every pending row. Every queue operation
+therefore runs under a cross-process advisory lock (msvcrt.locking on Windows,
+fcntl.flock elsewhere) plus an in-process lock, and the rewrite retries.
 """
 
 from __future__ import annotations
 
+import contextlib
 import json
 import os
 import tempfile
-from datetime import datetime, timezone
+import threading
+import time
+from collections.abc import Iterator
+from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
 
@@ -54,11 +66,98 @@ EVENT_TYPES: frozenset[str] = frozenset(
     }
 )
 
+#: §4 types nothing in this package emits yet, each with the reason. Declaring
+#: them here is what stops a trigger set, a mood rule or a vision rule from
+#: silently waiting for an event that never arrives; every such set is built by
+#: subtracting these, so wiring one up is a one-line change in this file.
+UNPRODUCED_EVENT_REASONS: dict[str, str] = {
+    "stunt": (
+        "needs airtime_s, and /state v1.2 exposes no on-ground flag and no "
+        "vertical velocity — at a 2-4 Hz poll a large z delta is equally a "
+        "jump, a hill, a car-park ramp or a lift, so a detector built on the "
+        "documented fields would be inventing the number it reports. Needs a "
+        "bridge-side field (a contract change): Phase 3, harness/README.md."
+    ),
+    "mission_end": (
+        "outcome detection (the passed/failed screen) is Phase 4; "
+        "behavior/missions.py is the flag-driven skeleton and emits only "
+        "mission_start, because emitting an outcome it cannot see would be a "
+        "fabrication."
+    ),
+    "mission_fail": "same as mission_end — Phase 4 outcome detection.",
+}
+UNPRODUCED_EVENT_TYPES: frozenset[str] = frozenset(UNPRODUCED_EVENT_REASONS)
+
+#: The §4 types the harness really does emit. Every trigger set is built from
+#: this, never from EVENT_TYPES.
+EMITTED_EVENT_TYPES: frozenset[str] = EVENT_TYPES - UNPRODUCED_EVENT_TYPES
+
 MAX_BATCH = 20
+
+# A Supabase outage must not fill the server's disk. At ~1 KB/row this caps the
+# backlog around 40 MB; past it the OLDEST rows are dropped (loudly) so the most
+# recent hours of the show survive.
+MAX_QUEUED_ROWS = 40_000
+#: Byte tripwire so the common (small) queue is never fully parsed on append.
+MAX_QUEUE_BYTES = 40 * 1024 * 1024
+
+_REPLACE_RETRIES = 10
+_REPLACE_DELAY_S = 0.15
 
 
 def _now_iso() -> str:
-    return datetime.now(timezone.utc).isoformat()
+    return datetime.now(UTC).isoformat()
+
+
+@contextlib.contextmanager
+def _queue_file_lock(lock_path: Path) -> Iterator[None]:
+    """Advisory cross-process lock around queue mutations. Best effort.
+
+    Failing to acquire is logged and the operation proceeds — losing the lock is
+    strictly better than losing the event, and the rewrite path retries anyway.
+    """
+    lock_path.parent.mkdir(parents=True, exist_ok=True)
+    handle = None
+    locked = False
+    try:
+        handle = lock_path.open("a+b")
+        if os.name == "nt":
+            import msvcrt
+
+            for _ in range(_REPLACE_RETRIES):
+                try:
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_NBLCK, 1)
+                    locked = True
+                    break
+                except OSError:
+                    time.sleep(_REPLACE_DELAY_S)
+        else:
+            import fcntl
+
+            fcntl.flock(handle.fileno(), fcntl.LOCK_EX)
+            locked = True
+        if not locked:
+            log.warning(
+                "queue lock not acquired; proceeding unlocked",
+                extra={"kv": {"lock": str(lock_path)}},
+            )
+        yield
+    finally:
+        if handle is not None:
+            try:
+                if locked and os.name == "nt":
+                    import msvcrt
+
+                    handle.seek(0)
+                    msvcrt.locking(handle.fileno(), msvcrt.LK_UNLCK, 1)
+                elif locked:
+                    import fcntl
+
+                    fcntl.flock(handle.fileno(), fcntl.LOCK_UN)
+            except OSError:
+                pass
+            handle.close()
 
 
 class SupabaseWriter:
@@ -68,8 +167,12 @@ class SupabaseWriter:
         self._settings = settings
         self.session_id = session_id
         self.queue_path = settings.ensure_state_dir() / "queue.jsonl"
+        self.lock_path = self.queue_path.with_suffix(".lock")
         self._client: Any = None
         self._buffer: list[dict[str, Any]] = []
+        # The clip pipeline writes from a worker thread; the loop writes from
+        # the main thread. Guards the buffer swap, not the network call.
+        self._buffer_lock = threading.Lock()
 
     # -- config / client -------------------------------------------------------
 
@@ -109,21 +212,26 @@ class SupabaseWriter:
         }
         if screenshot_url is not None:
             row["screenshot_url"] = screenshot_url
-        self._buffer.append({"table": "events", "op": "insert", "row": row})
-        if len(self._buffer) >= MAX_BATCH:
+        with self._buffer_lock:
+            self._buffer.append({"table": "events", "op": "insert", "row": row})
+            full = len(self._buffer) >= MAX_BATCH
+        if full:
             self.flush()
 
     def record_decision(self, row: dict[str, Any]) -> None:
         row.setdefault("session_id", self.session_id)
         row.setdefault("ts", _now_iso())
-        self._buffer.append({"table": "decisions", "op": "insert", "row": row})
+        with self._buffer_lock:
+            self._buffer.append({"table": "decisions", "op": "insert", "row": row})
 
     def upsert_stats(self, row: dict[str, Any]) -> None:
         row.setdefault("session_id", self.session_id)
-        self._buffer.append({"table": "stats", "op": "upsert", "row": row})
+        with self._buffer_lock:
+            self._buffer.append({"table": "stats", "op": "upsert", "row": row})
 
     def insert_session(self, row: dict[str, Any]) -> None:
-        self._buffer.append({"table": "sessions", "op": "insert", "row": row})
+        with self._buffer_lock:
+            self._buffer.append({"table": "sessions", "op": "insert", "row": row})
 
     def insert_clip(self, row: dict[str, Any]) -> int | None:
         """Insert a clips row immediately; returns its id, or None when offline
@@ -150,19 +258,34 @@ class SupabaseWriter:
         Returns True when the buffer is fully drained to Supabase; False when
         rows went to (or stayed in) the offline queue.
         """
-        buffered, self._buffer = self._buffer, []
+        with self._buffer_lock:
+            buffered, self._buffer = self._buffer, []
         if not self.configured:
             if buffered:
                 self._enqueue(buffered, reason="supabase not configured")
             return False
-        # Reconnect path: backlog first so ordering roughly holds.
-        backlog = self._read_queue()
-        pending = backlog + buffered
-        if not pending:
-            return True
-        ok, still_pending = self._write_entries(pending)
-        self._rewrite_queue(still_pending)
-        return ok and not still_pending
+        still_pending: list[dict[str, Any]] = list(buffered)
+        try:
+            # Reconnect path: backlog first so ordering roughly holds. The whole
+            # read → write → rewrite cycle is one critical section so a
+            # concurrent post_event CLI cannot lose rows between the read and
+            # the rewrite.
+            with _queue_file_lock(self.lock_path):
+                backlog = self._read_queue()
+                pending = backlog + buffered
+                if not pending:
+                    return True
+                ok, still_pending = self._write_entries(pending)
+                self._rewrite_queue(still_pending)
+            return ok and not still_pending
+        except OSError as exc:
+            # Disk full / permission / sharing violation: hold everything still
+            # unwritten in the in-process buffer rather than dropping it, and
+            # never raise into the main loop.
+            self._log_write_failure("queue maintenance", exc)
+            with self._buffer_lock:
+                self._buffer = still_pending + self._buffer
+            return False
 
     def _write_entries(
         self, entries: list[dict[str, Any]]
@@ -224,9 +347,15 @@ class SupabaseWriter:
     # -- queue -----------------------------------------------------------------
 
     def _enqueue(self, entries: list[dict[str, Any]], reason: str) -> None:
-        with self.queue_path.open("a", encoding="utf-8") as f:
-            for e in entries:
-                f.write(json.dumps(e, ensure_ascii=False, default=str) + "\n")
+        try:
+            with _queue_file_lock(self.lock_path):
+                with self.queue_path.open("a", encoding="utf-8") as f:
+                    for e in entries:
+                        f.write(json.dumps(e, ensure_ascii=False, default=str) + "\n")
+                self._trim_queue_if_oversized()
+        except OSError as exc:
+            self._log_write_failure("offline queue append", exc)
+            return
         log.warning(
             "queued offline",
             extra={
@@ -242,8 +371,8 @@ class SupabaseWriter:
         if not self.queue_path.exists():
             return []
         entries: list[dict[str, Any]] = []
-        for line in self.queue_path.read_text(encoding="utf-8").splitlines():
-            line = line.strip()
+        for raw in self.queue_path.read_text(encoding="utf-8", errors="replace").splitlines():
+            line = raw.strip()
             if not line:
                 continue
             try:
@@ -252,39 +381,120 @@ class SupabaseWriter:
                 log.error("dropping corrupt queue line", extra={"kv": {"line": line[:120]}})
         return entries
 
+    def _trim_queue_if_oversized(self) -> None:
+        """Drop the OLDEST rows once the backlog passes either cap.
+
+        A multi-day Supabase outage must not fill the server's disk; the most
+        recent hours of the show are the ones worth keeping. The cheap byte
+        check runs first so a small queue is never fully parsed on append.
+        """
+        try:
+            size = self.queue_path.stat().st_size
+        except FileNotFoundError:
+            return
+        if size < MAX_QUEUE_BYTES:
+            return
+        entries = self._read_queue()
+        keep: list[dict[str, Any]] = []
+        budget = MAX_QUEUE_BYTES
+        for entry in reversed(entries):  # newest first
+            cost = len(json.dumps(entry, ensure_ascii=False, default=str)) + 1
+            if cost > budget or len(keep) >= MAX_QUEUED_ROWS:
+                break
+            budget -= cost
+            keep.append(entry)
+        keep.reverse()
+        dropped = len(entries) - len(keep)
+        if dropped <= 0:
+            return
+        log.error(
+            "offline queue over cap; dropping oldest rows",
+            extra={
+                "kv": {
+                    "dropped": dropped,
+                    "kept": len(keep),
+                    "row_cap": MAX_QUEUED_ROWS,
+                    "byte_cap": MAX_QUEUE_BYTES,
+                    "queue": str(self.queue_path),
+                }
+            },
+        )
+        self._rewrite_queue(keep)
+
     def _rewrite_queue(self, entries: list[dict[str, Any]]) -> None:
+        """Atomically replace the queue file. Retries on Windows sharing violations."""
         if not entries:
-            self.queue_path.unlink(missing_ok=True)
+            for attempt in range(_REPLACE_RETRIES):
+                try:
+                    self.queue_path.unlink(missing_ok=True)
+                    return
+                except PermissionError:
+                    if attempt == _REPLACE_RETRIES - 1:
+                        raise
+                    time.sleep(_REPLACE_DELAY_S)
             return
         fd, tmp = tempfile.mkstemp(dir=str(self.queue_path.parent), suffix=".tmp")
-        with os.fdopen(fd, "w", encoding="utf-8") as f:
-            for e in entries:
-                f.write(json.dumps(e, ensure_ascii=False, default=str) + "\n")
-        os.replace(tmp, self.queue_path)
+        try:
+            with os.fdopen(fd, "w", encoding="utf-8") as f:
+                for e in entries:
+                    f.write(json.dumps(e, ensure_ascii=False, default=str) + "\n")
+            for attempt in range(_REPLACE_RETRIES):
+                try:
+                    os.replace(tmp, self.queue_path)
+                    return
+                except PermissionError:
+                    # Another process (the watchdog CLI) has the queue open;
+                    # Windows refuses MoveFileEx without FILE_SHARE_DELETE.
+                    if attempt == _REPLACE_RETRIES - 1:
+                        raise
+                    time.sleep(_REPLACE_DELAY_S)
+        finally:
+            if os.path.exists(tmp):
+                with contextlib.suppress(OSError):
+                    os.unlink(tmp)
 
     def queue_depth(self) -> int:
-        return len(self._read_queue())
+        try:
+            return len(self._read_queue())
+        except OSError as exc:
+            self._log_write_failure("queue depth", exc)
+            return -1
 
     # -- storage ---------------------------------------------------------------
+
+    def storage_path_for(self, name_hint: str, suffix: str) -> str:
+        """A NEW timestamped object path (§5: uploads never overwrite)."""
+        ts = datetime.now(UTC).strftime("%Y%m%dT%H%M%S%fZ")
+        return f"{self.session_id or 'nosession'}/{ts}-{name_hint}{suffix}"
+
+    def upload_bytes(
+        self, bucket: str, path: str, data: bytes, content_type: str
+    ) -> str | None:
+        """Upload one object with an explicit content type; returns its public URL.
+
+        Raises nothing: storage is best-effort everywhere it is used, and the
+        caller decides what a missing URL means.
+        """
+        if not self.configured:
+            return None
+        try:
+            storage = self._get_client().storage.from_(bucket)
+            storage.upload(
+                path=path,
+                file=data,
+                file_options={"content-type": content_type, "cache-control": "3600"},
+            )
+            return str(storage.get_public_url(path))
+        except Exception as exc:  # broad by design: storage never kills the loop
+            self._log_write_failure(f"{bucket} upload", exc)
+            return None
 
     def upload_screenshot(self, jpeg: bytes, name_hint: str) -> str | None:
         """Upload to the `shots` bucket at a new timestamped path; returns the
         public URL or None on failure (screenshots are best-effort)."""
-        if not self.configured:
-            return None
-        ts = datetime.now(timezone.utc).strftime("%Y%m%dT%H%M%S%fZ")
-        path = f"{self.session_id or 'nosession'}/{ts}-{name_hint}.jpg"
-        try:
-            storage = self._get_client().storage.from_("shots")
-            storage.upload(
-                path=path,
-                file=jpeg,
-                file_options={"content-type": "image/jpeg", "cache-control": "3600"},
-            )
-            return str(storage.get_public_url(path))
-        except Exception as exc:
-            self._log_write_failure("shots upload", exc)
-            return None
+        return self.upload_bytes(
+            "shots", self.storage_path_for(name_hint, ".jpg"), jpeg, "image/jpeg"
+        )
 
     # -- misc ------------------------------------------------------------------
 

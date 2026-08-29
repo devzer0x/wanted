@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Stand-in for the pinned ScriptHookVDotNet3 assembly, for the off-server checks ONLY.
+       arm64 CoreCLR cannot load the real x64 SHVDN PE, so WastedBridge.dll gets this instead:
+       same assembly identity, one type, values generated verbatim from the real DLL's metadata
+       (VehicleDrivingFlags.g.cs — see tools/offline-checks/StubGenerator.cs). Never deployed. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>ScriptHookVDotNet3</AssemblyName>
+    <RootNamespace>GTA</RootNamespace>
+    <AssemblyVersion>3.7.0.189</AssemblyVersion>
+    <FileVersion>3.7.0.189</FileVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+</Project>

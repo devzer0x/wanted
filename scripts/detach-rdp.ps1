@@ -5,9 +5,15 @@
 .DESCRIPTION
     Runs `tscon <current session> /dest:console` (RESEARCH.md §7). Closing an RDP window
     normally leaves the machine without a GUI session, which kills Desktop Duplication capture
-    and the game's display; this script hands the desktop back to the physical console (the
-    HDMI-emulator display) instead. Must run elevated — an unelevated tscon fails silently and
-    locks the console. Your RDP window will close when it succeeds; that is the success mode.
+    and the game's display; this script hands the desktop back to the console session instead.
+
+    On this server the console session's display is the **virtual display driver's** monitor,
+    not a physical one: the machine is an auction box with an Intel UHD 770 iGPU, no monitor
+    and no HDMI emulator, so an indirect display driver supplies the only display target.
+    That does not change the procedure — it is why the procedure matters.
+
+    Must run elevated — an unelevated tscon fails silently and locks the console. Your RDP
+    window will close when it succeeds; that is the success mode.
 .EXAMPLE
     pwsh -File .\detach-rdp.ps1
 #>

@@ -14,9 +14,14 @@ const eslintConfig = [
   {
     ignores: [
       "node_modules/**",
+      // `.next-*` covers the alternate build outputs used by the Playwright offline suite
+      // (see next.config.ts distDir).
       ".next/**",
+      ".next-*/**",
       "out/**",
       "build/**",
+      "test-results/**",
+      "playwright-report/**",
       "next-env.d.ts",
     ],
   },

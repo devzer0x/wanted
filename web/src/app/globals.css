@@ -147,8 +147,15 @@ body {
 }
 .feed-in { animation: feed-in 240ms ease-out; }
 
+/* Route-level loading skeleton: shape only, never stand-in content. */
+@keyframes skeleton-pulse {
+  0%, 100% { opacity: 0.45; }
+  50% { opacity: 0.8; }
+}
+.skeleton-pulse { animation: skeleton-pulse 1.4s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .led-live, .banner-throb, .feed-in { animation: none; }
+  .led-live, .banner-throb, .feed-in, .skeleton-pulse { animation: none; }
 }
 
 /* Wanted stars */

@@ -21,6 +21,7 @@ namespace WastedBridge
 
         private int _stoppedVehicleHandle;
         private int _stoppedSinceMs = -1;
+        private int _lastBlipErrorAt = int.MinValue;
 
         /// <summary>stopped_for_s of the current vehicle as of the last Build call.</summary>
         public float CurrentStoppedForS { get; private set; }
@@ -30,6 +31,13 @@ namespace WastedBridge
         {
             Player player = Game.Player;
             Ped ped = player.Character;
+            if (ped == null || !ped.Exists())
+            {
+                // Normal during a load transition or a character switch; the caller keeps serving
+                // the previous snapshot and logs this (throttled) rather than publishing garbage.
+                throw new InvalidOperationException(
+                    "the player ped does not exist yet (loading screen or character switch)");
+            }
             Vector3 pos = ped.Position;
             bool inVehicle = ped.IsInVehicle();
             Vehicle veh = inVehicle ? ped.CurrentVehicle : null;
@@ -61,6 +69,8 @@ namespace WastedBridge
                 World = new WorldDto
                 {
                     Clock = GameClock.Hour.ToString("D2") + ":" + GameClock.Minute.ToString("D2"),
+                    // World.Weather wraps GET_PREV_WEATHER_TYPE_HASH_NAME, which despite the name
+                    // is the weather in force right now (World.NextWeather is the one coming).
                     Weather = World.Weather.ToString().ToUpperInvariant(),
                     Timescale = Game.TimeScale
                 },
@@ -69,7 +79,7 @@ namespace WastedBridge
                     Active = Game.IsMissionActive,                 // GET_MISSION_FLAG
                     RandomEventActive = Game.IsRandomEventActive,  // GET_RANDOM_EVENT_FLAG
                     CutsceneActive = Game.IsCutsceneActive,        // IS_CUTSCENE_ACTIVE
-                    ObjectiveBlip = FindObjectiveBlip()
+                    ObjectiveBlip = FindObjectiveBlipSafe()
                 },
                 Nearby = BuildNearby(ped, veh),
                 LastTask = engine.ToDto(),
@@ -123,6 +133,30 @@ namespace WastedBridge
             };
         }
 
+        /// <summary>
+        /// Objective-blip lookup, isolated behind its own guard: World.GetAllBlips is an SHVDN
+        /// memory scan and is by far the most likely call here to break on a game update. One
+        /// nullable field is an acceptable loss; freezing all of /state is not.
+        /// </summary>
+        private ObjectiveBlipDto FindObjectiveBlipSafe()
+        {
+            try
+            {
+                return FindObjectiveBlip();
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastBlipErrorAt) > 5000)
+                {
+                    _lastBlipErrorAt = now;
+                    BridgeLog.Error("objective-blip scan failed (World.GetAllBlips memory scan); "
+                                    + "mission.objective_blip stays null", ex);
+                }
+                return null;
+            }
+        }
+
         private static ObjectiveBlipDto FindObjectiveBlip()
         {
             // EMPIRICAL RULE (CONTRACTS §1 / RESEARCH.md §2): the story-mission objective blip is
@@ -131,6 +165,10 @@ namespace WastedBridge
             // Phase 4 and refinements land here without changing the field's shape.
             // World.GetAllBlips is an SHVDN memory scan — the fragile part on any edition change.
             Blip[] blips = World.GetAllBlips(BlipSprite.Standard);
+            if (blips == null)
+            {
+                return null;
+            }
             for (int i = 0; i < blips.Length; i++)
             {
                 Blip b = blips[i];
@@ -173,7 +211,8 @@ namespace WastedBridge
             Vector3 origin = playerPed.Position;
 
             var vehicles = new List<NearbyVehicleDto>();
-            Vehicle[] rawVehicles = World.GetNearbyVehicles(playerPed, NearbyVehicleRadiusM);
+            Vehicle[] rawVehicles = World.GetNearbyVehicles(playerPed, NearbyVehicleRadiusM)
+                                    ?? new Vehicle[0];
             for (int i = 0; i < rawVehicles.Length; i++)
             {
                 Vehicle v = rawVehicles[i];
@@ -199,7 +238,7 @@ namespace WastedBridge
             nearby.Vehicles = Truncate(vehicles);
 
             var peds = new List<NearbyPedDto>();
-            Ped[] rawPeds = World.GetNearbyPeds(playerPed, NearbyPedRadiusM);
+            Ped[] rawPeds = World.GetNearbyPeds(playerPed, NearbyPedRadiusM) ?? new Ped[0];
             for (int i = 0; i < rawPeds.Length; i++)
             {
                 Ped p = rawPeds[i];

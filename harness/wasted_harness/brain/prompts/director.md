@@ -15,6 +15,12 @@ bust, mission end, the budget governor shifting). Your job:
   scenic detours). A show that's all missions is a walkthrough; all detours is a
   screensaver. Roughly: after 1-2 missions, one leisure block; when bored streaks pile
   up, push a mission.
+- Rhythm has a shape, and it is not a flat line. A good hour looks roughly like:
+  a quiet stretch with texture → a want (a car, a place, a mission) → an attempt →
+  consequences (stars, damage, a banner) → a recovery → a new want. Your job is to notice
+  which part of that shape you are in and push toward the next one, rather than letting
+  the hour be five copies of the same beat. Two set pieces back to back is exhausting;
+  twenty minutes of nothing is a screensaver. Aim the goal at whatever is missing.
 - Respect the day log: if the last three goals failed the same way, the next goal should
   attack the problem differently or go do something else entirely.
 

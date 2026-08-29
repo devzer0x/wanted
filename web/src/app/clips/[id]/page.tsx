@@ -4,6 +4,7 @@ import { notFound } from "next/navigation";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { fetchClip } from "@/lib/data";
 import { formatDuration, formatUtcStamp } from "@/lib/format";
+import { routeMetadata } from "@/lib/metadata";
 import { publicObjectUrl } from "@/lib/storage";
 
 export const dynamic = "force-dynamic";
@@ -17,16 +18,27 @@ function parseId(raw: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
+const CLIP_DESCRIPTION = "An auto-captured WASTED highlight. The agent is an AI; the chaos is real.";
+
+// A clip permalink is an explicit share surface with its own OG image, so it must carry its own
+// og:title, og:url and canonical rather than inheriting the homepage's from the root layout.
+// The caption may be unavailable (row missing, or the database unreachable); the identity of the
+// route never is, so title/url/canonical stay clip-specific either way.
 export async function generateMetadata({ params }: Props): Promise<Metadata> {
   const { id: raw } = await params;
   const id = parseId(raw);
+  // An unparseable id renders the 404 below, which resolves with the root layout's metadata; a
+  // canonical here would just claim a URL that returns 404, so none is emitted.
   if (id === null) return { title: "Clip" };
   const clip = await fetchClip(id);
   const caption = clip.ok && clip.rows[0]?.caption ? clip.rows[0].caption : `Clip #${id}`;
-  return {
+  return routeMetadata({
+    path: `/clips/${id}`,
     title: caption,
-    description: "An auto-captured WASTED highlight. The agent is an AI; the chaos is real.",
-  };
+    description: CLIP_DESCRIPTION,
+    // ./opengraph-image.tsx renders this clip's own card; naming images here would suppress it.
+    hasOwnOgImage: true,
+  });
 }
 
 export default async function ClipPage({ params }: Props) {
@@ -80,7 +92,7 @@ export default async function ClipPage({ params }: Props) {
           </div>
         )}
         <div className="flex flex-col gap-2 p-4">
-          <h1 className="font-display text-xl leading-tight text-bone">
+          <h1 className="font-display text-xl leading-tight text-bone [overflow-wrap:anywhere]">
             {row.caption || `Clip #${row.id}`}
           </h1>
           <div className="flex flex-wrap items-center justify-between gap-2">

@@ -1,10 +1,16 @@
 # WANTED — CONTRACTS
 
-**Version: 1.1 — FROZEN 2026-08-25.** Executors treat this file as read-only; changes go through
+**Version: 1.2 — FROZEN 2026-08-29.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
-Changelog: v1.1 adds the `site_config` table (§5) so stream provider/channel are runtime-switchable
-(D8 — `NEXT_PUBLIC_*` values are baked per-deployment and cannot switch at runtime).
+Changelog:
+- v1.1 adds the `site_config` table (§5) so stream provider/channel are runtime-switchable
+  (D8 — `NEXT_PUBLIC_*` values are baked per-deployment and cannot switch at runtime).
+- v1.2 (from the delivery-day readiness pass, all three found by cross-package verification):
+  `last_task.id`/`type` are **nullable** before the first task (this exact mismatch would have
+  crashed the harness on its first poll); `/health.edition` may be `unknown` before edition
+  detection completes; and the bridge **error-code set is enumerated** above and closed per
+  version, with consumers required to tolerate unknown codes.
 
 Platform baseline (D1): GTA V **Legacy** edition (Steam app 271590, granted by an Enhanced
 purchase), Script Hook V (current: 1.0.3889.0/1.0.1158.13 build), **official SHVDN nightly
@@ -15,6 +21,14 @@ Conventions used everywhere:
 - Timestamps: ISO 8601 UTC (`ts`).
 - Coordinates: world-space meters, floats `{x, y, z}`. Heading: degrees 0–360. Speed: m/s.
 - JSON over HTTP, UTF-8. Errors: HTTP status + `{"error": "<snake_code>", "detail": "human text"}`.
+- **v1.2 — the error-code set** (closed per contract version; adding one bumps the version):
+  `online_session_active` (503, every endpoint, online-session latch) · `not_ready` (503, /state
+  before the first tick has published a snapshot) · `game_thread_stalled` (503, a queued command
+  was not applied because the game thread is not ticking) · `queue_full` (503) ·
+  `unknown_task_type` (400) · `invalid_params` (400) · `invalid_json` (400) ·
+  `not_in_vehicle` (409, vehicle-only task while on foot) ·
+  `unstick_conditions_not_met` (409). Consumers must handle unknown codes gracefully
+  (log + treat as a transient failure) rather than crashing.
 
 ---
 
@@ -71,6 +85,8 @@ Field notes:
 - `nearby.peds[]` (top 8): `{"handle": 9012, "model": "...", "distance": 5.2,
   "relationship": "neutral|hostile"}`.
 - `last_task.status` lifecycle: `idle` (no task ever / cleared) → `running` → `done` | `failed`.
+  **v1.2:** when no task has ever been posted (fresh bridge load / script reload), `id` and `type`
+  are `null`; every consumer must treat them as nullable. `status` and `detail` are always present.
   `detail` carries failure reason (`"preempted"`, `"timeout"`, `"target_lost"`, ...).
 - Entity `handle`s are the game's entity/blip handles; valid only while the entity exists. The
   harness must treat them as ephemeral and re-read them from `/state` before use.
@@ -117,7 +133,7 @@ Preconditions enforced bridge-side: speed ≈ 0 for > 20 s **and** a drive task 
 commentary.
 
 ### GET /health → 200
-`{"version": "1.0.0", "edition": "legacy|enhanced", "tick_hz": 60.0, "queue_depth": 0,
+`{"version": "1.0.0", "edition": "legacy|enhanced|unknown", "tick_hz": 60.0, "queue_depth": 0,
 "game_fps": 59.8, "online_blocked": false}` — the watchdog's liveness probe. Connection refused ⇒
 game/bridge down; `503` ⇒ online session detected.
 

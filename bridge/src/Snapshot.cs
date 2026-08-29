@@ -1,4 +1,5 @@
 using System.Collections.Generic;
+using System.Globalization;
 using Newtonsoft.Json;
 
 namespace WastedBridge
@@ -96,6 +97,9 @@ namespace WastedBridge
 
     internal sealed class LastTaskDto
     {
+        // CONTRACTS v1.2: id and type are NULL — key present, value null — until the first task is
+        // posted (status "idle"). status and detail are always present. Do not "fix" the nulls
+        // away: the harness's model declares them Optional and a missing key is the mismatch.
         [JsonProperty("id")] public string Id;
         [JsonProperty("type")] public string Type;
         [JsonProperty("status")] public string Status; // idle | running | done | failed
@@ -105,7 +109,8 @@ namespace WastedBridge
     internal sealed class BridgeInfoDto
     {
         [JsonProperty("version")] public string Version;
-        [JsonProperty("edition")] public string Edition; // "legacy" | "enhanced"
+        // CONTRACTS v1.2 enum: "legacy" | "enhanced" | "unknown" (before detection succeeds).
+        [JsonProperty("edition")] public string Edition;
     }
 
     internal sealed class Snapshot
@@ -120,5 +125,31 @@ namespace WastedBridge
         [JsonProperty("nearby")] public NearbyDto Nearby;
         [JsonProperty("last_task")] public LastTaskDto LastTask;
         [JsonProperty("bridge")] public BridgeInfoDto Bridge;
+    }
+
+    /// <summary>
+    /// The single place /state JSON is produced. The game thread publishes through it every tick,
+    /// and the offline contract-sample tool (bridge/tools/offline-checks) calls this exact method
+    /// on the compiled assembly — so bridge/contract-samples/*.json are byte-for-byte what the
+    /// bridge serves, not a hand-written approximation of it.
+    /// </summary>
+    internal static class SnapshotJson
+    {
+        /// <summary>
+        /// NullValueHandling is pinned to Include on purpose: CONTRACTS v1.2 requires
+        /// <c>last_task.id</c>/<c>type</c> to be present-and-null before the first task, and
+        /// <c>vehicle</c>/<c>mission.objective_blip</c> to be present-and-null when absent.
+        /// Switching this to Ignore would drop the keys and break every consumer.
+        /// </summary>
+        private static readonly JsonSerializerSettings Settings = new JsonSerializerSettings
+        {
+            NullValueHandling = NullValueHandling.Include,
+            Culture = CultureInfo.InvariantCulture
+        };
+
+        public static string Serialize(Snapshot snapshot)
+        {
+            return JsonConvert.SerializeObject(snapshot, Settings);
+        }
     }
 }

@@ -36,3 +36,33 @@ include = ["wasted_harness*"]
 [tool.pytest.ini_options]
 testpaths = ["tests"]
 addopts = "-q"
+
+[tool.ruff]
+target-version = "py312"
+line-length = 100
+
+[tool.ruff.lint]
+select = ["E", "F", "W", "I", "UP", "B", "C4", "SIM", "FURB", "RUF", "TRY", "BLE", "S"]
+ignore = [
+    # Deliberate design decisions in this package, not oversights:
+    "BLE001", # broad `except Exception` guards every I/O boundary on purpose —
+              # the Supabase writer, the OBS clip pipeline and the action
+              # executor must never take the 24/7 loop down with them.
+    "S110",   # try/except/pass appears only in teardown paths where a second
+              # failure has nothing useful to report.
+    "TRY003", # error messages here are long on purpose: they are what the 3am
+              # operator reads instead of a stack trace.
+    "TRY300", # `return` inside `try` is clearer than an `else:` block here.
+    "TRY400", # log.error (not .exception) is right where the message already
+              # carries the formatted cause and a traceback would be noise.
+    "E501",   # long lines are limited to prose in docstrings and log strings.
+    "S101",   # asserts are used as internal invariants, never for validation.
+    "S311",   # `random` drives behavioural variety (which line, which activity,
+              # how long to hesitate). Nothing here is a security decision.
+    "RUF001", # prose in docstrings uses real typography (em dashes, §).
+    "RUF002",
+    "RUF003",
+]
+
+[tool.ruff.lint.per-file-ignores]
+"tests/*" = ["S101", "SLF001"]

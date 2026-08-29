@@ -10,7 +10,14 @@ namespace WastedBridge
     /// </summary>
     internal sealed class BridgeShared
     {
-        public readonly ConcurrentQueue<BridgeCommand> Commands = new ConcurrentQueue<BridgeCommand>();
+        /// <summary>
+        /// Hard cap on queued commands. The queue only grows when the game thread has stopped
+        /// ticking (loading screen, hang), and an unbounded queue would turn that into a slow
+        /// memory leak plus a burst of stale commands the moment the game resumes.
+        /// </summary>
+        public const int MaxQueueDepth = 128;
+
+        private readonly ConcurrentQueue<BridgeCommand> _commands = new ConcurrentQueue<BridgeCommand>();
 
         private volatile string _stateJson;
         private volatile Snapshot _lastSnapshot;
@@ -20,6 +27,7 @@ namespace WastedBridge
         private volatile float _gameFps;
         private long _lastTickUnixMs;
         private int _taskCounter;
+        private int _queueDepth;
 
         public string StateJson
         {
@@ -56,6 +64,39 @@ namespace WastedBridge
         {
             get { return _gameFps; }
             set { _gameFps = value; }
+        }
+
+        /// <summary>O(1) queue depth; ConcurrentQueue.Count walks segments.</summary>
+        public int QueueDepth
+        {
+            get { return Volatile.Read(ref _queueDepth); }
+        }
+
+        /// <summary>
+        /// Enqueues unless the queue is at <see cref="MaxQueueDepth"/>. HTTP threads only.
+        /// Reserves the slot before enqueueing so concurrent requests cannot both slip past the
+        /// bound.
+        /// </summary>
+        public bool TryEnqueue(BridgeCommand command)
+        {
+            if (Interlocked.Increment(ref _queueDepth) > MaxQueueDepth)
+            {
+                Interlocked.Decrement(ref _queueDepth);
+                return false;
+            }
+            _commands.Enqueue(command);
+            return true;
+        }
+
+        /// <summary>Game thread only.</summary>
+        public bool TryDequeue(out BridgeCommand command)
+        {
+            if (!_commands.TryDequeue(out command))
+            {
+                return false;
+            }
+            Interlocked.Decrement(ref _queueDepth);
+            return true;
         }
 
         public void MarkTickNow()

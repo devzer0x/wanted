@@ -35,12 +35,17 @@ namespace WastedBridge
     internal sealed class CommandReply
     {
         private readonly ManualResetEventSlim _done = new ManualResetEventSlim(false);
+        private volatile bool _abandoned;
 
         public int StatusCode { get; private set; }
         public JObject Body { get; private set; }
 
         public void Complete(int statusCode, JObject body)
         {
+            if (_abandoned)
+            {
+                return;
+            }
             StatusCode = statusCode;
             Body = body;
             _done.Set();
@@ -49,6 +54,15 @@ namespace WastedBridge
         public bool Wait(int timeoutMs)
         {
             return _done.Wait(timeoutMs);
+        }
+
+        /// <summary>
+        /// Called by the HTTP thread when it gave up waiting. The event is deliberately never
+        /// disposed: the game thread may still hold this reply and must not fault on Complete.
+        /// </summary>
+        public void Abandon()
+        {
+            _abandoned = true;
         }
     }
 

@@ -118,9 +118,10 @@ export function parseHud(value: unknown): HudState | null {
   };
 }
 
-/** A fetch outcome that never throws: either rows or an honest error. */
+/** A fetch outcome that never throws: either rows or an honest error (with the PostgREST code
+ *  when the failure came from the API rather than the transport). */
 export type Fetched<T> =
   | { ok: true; rows: T[] }
-  | { ok: false; error: string };
+  | { ok: false; error: string; code?: string };
 
 export const MOODS = ["chill", "bored", "hyped", "scared", "smug"] as const;

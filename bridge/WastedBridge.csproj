@@ -14,6 +14,13 @@
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- tools/ holds the off-server check harness (net8.0) and its SHVDN stubs; the SDK's default
+         **/*.cs glob would otherwise pull them into the shipped net48 script. -->
+    <Compile Remove="tools/**" />
+    <None Remove="tools/**" />
+  </ItemGroup>
+
+  <ItemGroup>
     <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
     <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
   </ItemGroup>

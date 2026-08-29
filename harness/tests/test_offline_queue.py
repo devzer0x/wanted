@@ -51,7 +51,7 @@ def test_configured_but_unreachable_queues(tmp_path: Path) -> None:
     writer.record_event("death", {"cause": "?", "street": "x", "deaths_total": 1})
     writer.record_event("bridge_up", {"downtime_s": 12.5})
     assert writer.flush() is False
-    entries = [json.loads(l) for l in writer.queue_path.read_text().splitlines()]
+    entries = [json.loads(line) for line in writer.queue_path.read_text().splitlines()]
     assert [e["row"]["type"] for e in entries] == ["death", "bridge_up"]
 
 
@@ -61,7 +61,7 @@ def test_queue_survives_repeated_failed_flushes(tmp_path: Path) -> None:
     writer.record_event("unstick", {"distance_m": 2.4, "stuck_for_s": 25})
     writer.flush()
     writer.flush()  # retries the backlog against the refused port
-    entries = [json.loads(l) for l in writer.queue_path.read_text().splitlines()]
+    entries = [json.loads(line) for line in writer.queue_path.read_text().splitlines()]
     assert len(entries) == 1  # no duplication, no loss
     assert writer.queue_depth() == 1
 

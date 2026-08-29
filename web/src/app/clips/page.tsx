@@ -3,40 +3,49 @@ import Link from "next/link";
 import { CopyLinkButton } from "@/components/CopyLinkButton";
 import { fetchClips } from "@/lib/data";
 import { formatDuration, formatUtcStamp } from "@/lib/format";
+import { routeMetadata } from "@/lib/metadata";
 import { publicObjectUrl } from "@/lib/storage";
 import type { ClipRow } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
-export const metadata: Metadata = {
+export const metadata: Metadata = routeMetadata({
+  path: "/clips",
   title: "Clips",
   description: "Auto-captured highlights of the agent's finest disasters, newest first.",
-};
+});
 
 function ClipCard({ clip }: { clip: ClipRow }) {
   const src = publicObjectUrl("clips", clip.storage_path);
   return (
-    <article className="panel flex flex-col">
-      {src ? (
-        <video
-          src={src}
-          controls
-          muted
-          playsInline
-          preload="metadata"
-          className="aspect-video w-full bg-void object-contain"
-        />
-      ) : (
-        <div className="flex aspect-video w-full items-center justify-center bg-void">
-          <span className="ticker text-[0.6rem] text-smoke">clip source unavailable</span>
-        </div>
-      )}
-      <div className="flex flex-col gap-2 p-3">
-        <p className="text-sm leading-snug text-bone">{clip.caption || "Untitled chaos"}</p>
-        <div className="flex items-center justify-between gap-2">
-          <span className="font-mono text-[0.6rem] text-smoke">
-            {formatDuration(clip.duration_s)} · {formatUtcStamp(clip.ts)}
-          </span>
+    <article className="panel group flex flex-col transition-colors hover:border-blood">
+      <div className="relative">
+        {src ? (
+          // preload="metadata" keeps a gallery of clips cheap on a bad connection: the browser
+          // fetches the header for a poster frame and duration, not the video body.
+          <video
+            src={src}
+            controls
+            muted
+            playsInline
+            preload="metadata"
+            className="aspect-video w-full bg-void object-contain"
+          />
+        ) : (
+          <div className="flex aspect-video w-full items-center justify-center bg-void">
+            <span className="ticker text-[0.6rem] text-smoke">clip source unavailable</span>
+          </div>
+        )}
+        <span className="ticker pointer-events-none absolute right-1.5 top-1.5 border border-ash bg-void/85 px-1.5 py-0.5 font-mono text-[0.55rem] text-bone">
+          {formatDuration(clip.duration_s)}
+        </span>
+      </div>
+      <div className="flex flex-1 flex-col gap-2 p-3">
+        <p className="flex-1 text-sm leading-snug text-bone [overflow-wrap:anywhere]">
+          {clip.caption || "Untitled chaos"}
+        </p>
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <span className="font-mono text-[0.6rem] text-smoke">{formatUtcStamp(clip.ts)}</span>
           <div className="flex items-center gap-2">
             <CopyLinkButton path={`/clips/${clip.id}`} />
             <Link

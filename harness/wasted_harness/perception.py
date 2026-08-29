@@ -4,6 +4,11 @@
 - Screenshots only exist on Windows (dxcam, ``[windows]`` extra) in the console
   session of the game server. On any other platform capture raises
   :class:`ScreenshotUnavailableError` — nothing is ever synthesized.
+- The server has no physical monitor: the console session's display comes from
+  an indirect display driver (IddCx virtual monitor). DXGI Desktop Duplication
+  works against it, but the duplication object is lost whenever the session
+  changes (RDP attach/detach, display mode change, driver restart), so the
+  grabber re-creates its camera instead of going dark for the rest of the run.
 - Encoded frames are 768-px-long-edge JPEG q=60 (CONTRACTS §3/D5: ~448 visual
   tokens; raw 1080p is never sent to a model).
 - Objective changes are detected cheaply with a perceptual hash (dHash) of the
@@ -15,7 +20,8 @@ from __future__ import annotations
 
 import io
 import sys
-from dataclasses import dataclass, field
+from dataclasses import dataclass
+from typing import Any
 
 from PIL import Image
 
@@ -37,12 +43,23 @@ class ScreenshotUnavailableError(RuntimeError):
     """Capture requested somewhere it cannot work; message explains why."""
 
 
+#: Consecutive empty grabs before the camera is rebuilt. dxcam returns None
+#: both for "no new frame since last grab" (normal, common at 3 Hz on a paused
+#: game) and for "duplication lost" (needs a rebuild); only the count separates
+#: them.
+GRAB_FAILURES_BEFORE_REINIT = 15
+
+
 class ScreenGrabber:
     """dxcam-backed frame grabber. Windows console session only.
 
     Construction fails loudly off-Windows or when dxcam is missing — callers
     (director vision, event screenshots) treat that as 'no screenshot', never
     as an invented frame.
+
+    ``grab()`` returns the last real frame when dxcam reports "unchanged"; it
+    never fabricates one, and after a run of empty grabs it rebuilds the
+    capture device and then raises if that fails too.
     """
 
     def __init__(self) -> None:
@@ -52,29 +69,68 @@ class ScreenGrabber:
                 f"{sys.platform!r}. Install with the [windows] extra on the game server."
             )
         try:
-            import dxcam  # noqa: PLC0415  (windows-only optional dependency)
+            import dxcam
         except ImportError as exc:
             raise ScreenshotUnavailableError(
                 "dxcam is not installed. Install the harness with "
                 "`pip install -e .[windows]` on the game server."
             ) from exc
-        self._camera = dxcam.create(output_color="RGB")
+        self._dxcam = dxcam
+        self._camera: Any = None
+        self._last: Image.Image | None = None
+        self._empty_grabs = 0
+        self._create_camera()
+
+    def _create_camera(self) -> None:
+        self._camera = self._dxcam.create(output_color="RGB")
         if self._camera is None:
             raise ScreenshotUnavailableError(
                 "dxcam.create() returned None — no capturable display. On the "
-                "server this means the HDMI emulator/console session is not up "
-                "(RDP-attached sessions break Desktop Duplication)."
+                "server this means the console session has no display target: "
+                "the virtual display driver (IddCx) is not installed/active, or "
+                "the harness is running in an RDP session instead of the "
+                "console session (RDP breaks Desktop Duplication)."
             )
 
+    def reset(self) -> None:
+        """Rebuild the capture device after a duplication loss."""
+        old, self._camera = self._camera, None
+        try:
+            if old is not None and hasattr(old, "release"):
+                old.release()
+        except Exception as exc:  # a dying camera must not block its replacement
+            log.warning("dxcam release failed", extra={"kv": {"error": str(exc)[:120]}})
+        self._create_camera()
+        self._empty_grabs = 0
+        log.info("dxcam camera re-created after capture loss")
+
     def grab(self) -> Image.Image:
-        frame = self._camera.grab()
-        if frame is None:
-            # dxcam returns None when the frame did not change or capture was lost.
+        frame = self._camera.grab() if self._camera is not None else None
+        if frame is not None:
+            self._empty_grabs = 0
+            self._last = Image.fromarray(frame)
+            return self._last
+        self._empty_grabs += 1
+        if self._empty_grabs >= GRAB_FAILURES_BEFORE_REINIT:
+            self.reset()
+            frame = self._camera.grab() if self._camera is not None else None
+            if frame is not None:
+                self._last = Image.fromarray(frame)
+                return self._last
             raise ScreenshotUnavailableError(
-                "dxcam returned no frame (duplication lost or unchanged frame); "
-                "re-init the grabber — this happens after RDP attach/detach."
+                f"dxcam returned no frame {GRAB_FAILURES_BEFORE_REINIT}x and "
+                f"again after a device rebuild — Desktop Duplication is gone. "
+                f"Check the virtual display and that this process is in the "
+                f"console session."
             )
-        return Image.fromarray(frame)
+        if self._last is not None:
+            # Unchanged frame: dxcam signals it with None. The last real frame
+            # is still an accurate picture of the screen.
+            return self._last
+        raise ScreenshotUnavailableError(
+            "dxcam has not produced a first frame yet (screen unchanged since "
+            "capture started, or duplication not ready)"
+        )
 
 
 def encode_jpeg(img: Image.Image, long_edge: int = JPEG_LONG_EDGE, quality: int = JPEG_QUALITY) -> bytes:
@@ -151,7 +207,6 @@ class Perceptor:
 
     prev: GameState | None = None
     prev_objective_hash: int | None = None
-    _last_task_id: str | None = field(default=None, repr=False)
 
     def observe(self, state: GameState, objective_hash: int | None = None) -> Delta:
         d = Delta()
@@ -170,7 +225,11 @@ class Perceptor:
             d.cutscene_ended = p.mission.cutscene_active and not state.mission.cutscene_active
             d.big_health_drop = (p.player.health - state.player.health) >= 25
             lt, plt = state.last_task, p.last_task
-            same_task = lt.id == plt.id
+            # v1.2: `id` is null until a task has ever been posted. Two nulls are
+            # "no task on either side", NOT the same task finishing — comparing
+            # them with a bare `==` would let an idle→idle pair look like a
+            # completed task the moment a status ever disagreed.
+            same_task = lt.id is not None and lt.id == plt.id
             if same_task and plt.status == "running" and lt.status in ("done", "failed"):
                 d.task_finished = True
                 d.task_failed = lt.status == "failed"

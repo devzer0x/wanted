@@ -15,6 +15,10 @@
 
 # next.js
 /.next/
+# Playwright build outputs: the live suite and the offline suite each bake their own
+# NEXT_PUBLIC_* values, so neither may share `.next` (see playwright.config.ts).
+/.next-e2e/
+/.next-offline/
 /out/
 
 # production

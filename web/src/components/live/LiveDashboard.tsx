@@ -10,6 +10,7 @@ import { Hud } from "@/components/live/Hud";
 import { OfflineBanner } from "@/components/live/OfflineBanner";
 import type { TokensToday } from "@/lib/data";
 import { buildFeed, mergeRows } from "@/lib/feed";
+import { isAgentOffline } from "@/lib/offline";
 import { getBrowserSupabase } from "@/lib/supabase/client";
 import {
   type DecisionRow,
@@ -37,6 +38,7 @@ export function LiveDashboard({
   initialTokens,
   stream,
   initialLinkDown,
+  serverNowMs,
 }: {
   initialDecisions: DecisionRow[];
   initialEvents: EventRow[];
@@ -44,13 +46,16 @@ export function LiveDashboard({
   initialTokens: TokensToday | null;
   stream: StreamConfig | null;
   initialLinkDown: boolean;
+  /** Server render clock. Seeding state with it (instead of Date.now() on both sides) keeps the
+   *  first client render byte-identical to the server's across the 60 s staleness boundary. */
+  serverNowMs: number;
 }) {
   const [decisions, setDecisions] = useState(initialDecisions);
   const [events, setEvents] = useState(initialEvents);
   const [stats, setStats] = useState(initialStats);
   const [tokens] = useState(initialTokens);
   const [linkDown, setLinkDown] = useState(initialLinkDown);
-  const [nowMs, setNowMs] = useState(() => Date.now());
+  const [nowMs, setNowMs] = useState(serverNowMs);
   const [mounted, setMounted] = useState(false);
 
   const lastDecisionId = useRef(initialDecisions.reduce((m, r) => Math.max(m, r.id), 0));
@@ -156,6 +161,7 @@ export function LiveDashboard({
   // the realtime socket is down while REST is reachable.
   useEffect(() => {
     setMounted(true);
+    setNowMs(Date.now());
     const clock = setInterval(() => setNowMs(Date.now()), CLOCK_TICK_MS);
     const poll = setInterval(() => void refetchStats(), STATS_POLL_MS);
     return () => {
@@ -166,23 +172,32 @@ export function LiveDashboard({
 
   const feedItems = useMemo(() => buildFeed(decisions, events), [decisions, events]);
   const hud = useMemo(() => parseHud(stats?.hud ?? null), [stats]);
+  const offline = isAgentOffline(stats, nowMs);
 
+  // Layout: the feed is the star. On mobile it sits directly under the stream and counters and
+  // above the secondary panels; on lg it becomes a sticky right-hand column that stays in view
+  // while the rest scrolls. The lg placement is explicit (col-start/row-start), so the `order-*`
+  // classes only take effect in the single-column stack.
   return (
     <div className="flex flex-col gap-3 pt-3">
       <OfflineBanner stats={stats} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_360px]">
-        <div className="flex min-w-0 flex-col gap-3">
-          <StreamEmbed config={stream} />
+      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
+        <div className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">
+          <StreamEmbed config={stream} offline={offline} />
+        </div>
+        <div className="order-2 min-w-0 lg:col-start-1 lg:row-start-2">
           <Counters stats={stats} />
-          <div className="grid gap-3 sm:grid-cols-2">
-            <Hud hud={hud} />
-            <div className="flex flex-col gap-3">
-              <GoalCard stats={stats} />
-              <BrainBill stats={stats} tokens={tokens} />
-            </div>
+        </div>
+        <div className="order-3 min-w-0 lg:sticky lg:top-16 lg:col-start-2 lg:row-start-1 lg:row-span-3 lg:self-start">
+          <Feed items={feedItems} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />
+        </div>
+        <div className="order-4 grid min-w-0 items-start gap-3 sm:grid-cols-2 lg:col-start-1 lg:row-start-3">
+          <Hud hud={hud} />
+          <div className="flex min-w-0 flex-col gap-3">
+            <GoalCard stats={stats} />
+            <BrainBill stats={stats} tokens={tokens} />
           </div>
         </div>
-        <Feed items={feedItems} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />
       </div>
     </div>
   );

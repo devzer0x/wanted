@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Negative fixture: the same stand-in assembly with one VehicleDrivingFlags member
+       deliberately renumbered (generated, see StubGenerator.cs). DrivingStyles.Verify() must
+       report drift when the bridge is loaded next to this — that is the proof the guard is a real
+       runtime check and not a compile-time tautology. Never deployed. -->
+  <PropertyGroup>
+    <TargetFramework>netstandard2.0</TargetFramework>
+    <AssemblyName>ScriptHookVDotNet3</AssemblyName>
+    <RootNamespace>GTA</RootNamespace>
+    <AssemblyVersion>3.7.0.189</AssemblyVersion>
+    <FileVersion>3.7.0.189</FileVersion>
+    <GenerateAssemblyInfo>true</GenerateAssemblyInfo>
+    <EnableDefaultCompileItems>true</EnableDefaultCompileItems>
+  </PropertyGroup>
+
+</Project>

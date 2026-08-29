@@ -1,9 +1,12 @@
 """Tactical tier: Haiku 4.5, structured decisions, cached static prefix, thinking off.
 
 Cadence (CONTRACTS §3 + WP-H): a tactical decision fires on task-finished,
-danger, objective-change, or a jittered 8-25 s timer. The static prefix carries
-cache_control (5-min TTL; the cadence keeps it warm — each read refreshes free).
-`tool_choice` is never set, so nothing can vary it between calls.
+danger, objective-change, or a jittered 8-25 s timer, and never sooner than
+MIN_TACTICAL_GAP_S after the previous one — that floor is what makes the 8 s end
+of the contracted band real and caps the tier at 450 calls/h (≈ $0.77/h at the
+measured warm price). The static prefix carries cache_control (5-min TTL; the
+cadence keeps it warm — each read refreshes free). `tool_choice` is never set,
+so nothing can vary it between calls.
 """
 
 from __future__ import annotations
@@ -15,6 +18,7 @@ from dataclasses import dataclass
 import anthropic
 import pydantic
 
+from ..behavior.humanizer import MOOD_TIMER_RANGE_S
 from ..budget import Pricing, cost_of_usage
 from ..logsetup import get_logger
 from ..perception import Delta
@@ -28,6 +32,38 @@ TACTICAL_TIMER_RANGE_S = (8.0, 25.0)
 # Governor L1: slower tactical timers (CONTRACTS §7).
 L1_TIMER_SCALE = 2.0
 MAX_DECISION_TOKENS = 500
+
+#: Hard floor between two tactical calls, applied to EVERY trigger — the event
+#: ones included, not just the timer. This is what actually bounds the bill:
+#: `delta.danger` is true on every poll while `wanted > 0`, so without a floor a
+#: police chase fires a decision per poll (3 Hz = 10,800 calls/h). CONTRACTS §3
+#: specifies an 8-25 s cadence; this makes the 8 s end real.
+MIN_TACTICAL_GAP_S = TACTICAL_TIMER_RANGE_S[0]
+
+#: The enforced ceiling: 3600 / 8 = 450 tactical calls per hour, reached only
+#: when something is triggering continuously. Measured warm tactical cost is
+#: $0.001714/call (docs/STATUS.md, 2026-08-25, real API), so the ceiling is
+#: ≈ $0.77/h. Timer-only cadence is much lower and mood-dependent — see
+#: `calls_per_hour_by_mood()`.
+MAX_TACTICAL_CALLS_PER_HOUR = 3600.0 / MIN_TACTICAL_GAP_S
+
+#: Real measured cost of one warm (prefix served from cache) tactical call.
+#: Source: docs/STATUS.md 2026-08-25 brain verification against the live API
+#: ($0.011331 cold / $0.001714 warm). Used for honest projections only; the
+#: books are kept from per-call `usage` (budget.cost_of_usage), never from this.
+MEASURED_WARM_TACTICAL_CALL_USD = 0.001714
+
+
+def calls_per_hour_by_mood() -> dict[str, float]:
+    """Expected timer-only tactical calls/hour per mood (uniform draw ⇒ mean interval).
+
+    Mood genuinely changes this — narrowing the window to 8-15 s (hyped) raises
+    the expected rate to ~313/h against ~180/h for bored. What mood cannot
+    change is the ceiling, which :data:`MIN_TACTICAL_GAP_S` enforces.
+    """
+    return {
+        mood: 3600.0 / ((lo + hi) / 2.0) for mood, (lo, hi) in MOOD_TIMER_RANGE_S.items()
+    }
 
 
 class BrainUnavailableError(ConfigError):
@@ -122,23 +158,54 @@ class DecisionResult:
 
 
 class TacticalCadence:
-    """Decides *when* the tactical tier fires."""
+    """Decides *when* the tactical tier fires.
+
+    Two separate things, and an earlier version of this docstring conflated them:
+
+    * **Mood changes the rate.** Narrowing the timer window inside the global
+      8-25 s band (behavior.humanizer.MOOD_TIMER_RANGE_S) moves the expected
+      timer-only rate from ~180 calls/h (bored, 15-25 s) to ~313 calls/h (hyped,
+      8-15 s). At the measured warm cost of $0.001714/call that is ~$0.31/h to
+      ~$0.54/h. Mood is *supposed* to cost differently; a chase is worth more
+      words than a motorway.
+    * **The ceiling is enforced separately**, by :data:`MIN_TACTICAL_GAP_S`. The
+      event triggers (task_finished / danger / objective_change) do not consult
+      the timer at all, and `danger` is true on *every* poll while wanted > 0 —
+      so without a floor between calls the real ceiling was the poll rate
+      (3 Hz = 10,800 calls/h ≈ $18/h), not the timer band. The floor makes the
+      ceiling 3600/8 = 450 calls/h ≈ $0.77/h, and governor L1 doubles the floor
+      to 16 s (225 calls/h ≈ $0.39/h).
+    """
 
     def __init__(self, rng: random.Random | None = None) -> None:
         self._rng = rng or random.Random()
         self._last_fire = 0.0
-        self._next_timer = self._draw_timer(0)
+        self._next_timer = self._draw_timer(0, "chill")
 
-    def _draw_timer(self, governor_level: int) -> float:
-        lo, hi = TACTICAL_TIMER_RANGE_S
+    def _draw_timer(self, governor_level: int, mood: str) -> float:
+        lo, hi = MOOD_TIMER_RANGE_S.get(mood, TACTICAL_TIMER_RANGE_S)
+        lo = max(lo, TACTICAL_TIMER_RANGE_S[0])
+        hi = min(hi, TACTICAL_TIMER_RANGE_S[1])
         t = self._rng.uniform(lo, hi)
         if governor_level >= 1:
             t *= L1_TIMER_SCALE
         return t
 
+    @staticmethod
+    def min_gap_s(governor_level: int) -> float:
+        """The enforced floor between two tactical calls at this governor level."""
+        gap = MIN_TACTICAL_GAP_S
+        if governor_level >= 1:
+            gap *= L1_TIMER_SCALE
+        return gap
+
     def should_fire(self, now: float, delta: Delta, governor_level: int) -> str | None:
         """Returns the trigger name, or None. Governor L2+ silences this tier."""
         if governor_level >= 2:
+            return None
+        # The floor comes first, so an event trigger can shorten the wait but can
+        # never make the tier fire faster than the contracted 8 s cadence.
+        if now - self._last_fire < self.min_gap_s(governor_level):
             return None
         if delta.task_finished:
             return "task_finished"
@@ -150,9 +217,9 @@ class TacticalCadence:
             return "timer"
         return None
 
-    def fired(self, now: float, governor_level: int) -> None:
+    def fired(self, now: float, governor_level: int, mood: str = "chill") -> None:
         self._last_fire = now
-        self._next_timer = self._draw_timer(governor_level)
+        self._next_timer = self._draw_timer(governor_level, mood)
 
 
 class TacticalBrain:

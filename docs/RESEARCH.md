@@ -165,7 +165,46 @@ live embedding may be gated on channel settings/monetization — Twitch first).
 - Playwright vs preview protection: header `x-vercel-protection-bypass:
   $VERCEL_AUTOMATION_BYPASS_SECRET` + `x-vercel-set-bypass-cookie: samesitenone` (iframes).
 
-## 7. Windows GPU server (`brief-winserver.json`)
+## 7b. ⚠ SUPERSEDED BY THE MACHINE WE ACTUALLY BOUGHT (2026-08-29)
+
+D9 below describes the *originally planned* Hetzner GEX44 (NVIDIA RTX 4000 + HDMI-emulator
+dongle). That machine sold out; we bought a **Hetzner Server Auction i5-12500 with Intel UHD 770
+integrated graphics, no discrete GPU and no dummy plug**. A second recon pass (2026-08-29, raw
+briefs in the workflow transcript; delivery-day sequence in docs/RUNBOOK.md §0) established:
+
+- **D11 — the Intel driver does install on Windows Server 2025.** Intel's *installer* OS-gates;
+  the *INF does not* (its `Manufacturer` TargetOSVersion leaves ProductType blank ⇒ applies to
+  server SKUs; Server 2025 is build 26100 ≥ the 16225 gate). Install with
+  `pnputil /add-driver … /install` from `C:\wasted\drivers` (never a Windows system folder —
+  Intel KB 000088280); **never edit the INF** (breaks WHQL signing ⇒ permanent test-signing ⇒
+  breaks game DRM). Fallback: Device Manager "Have Disk" (ranking beats pnputil).
+- **D12 — a virtual display is mandatory and sufficient.** With no monitor there is no display
+  target, so D3D11 has nowhere to present. An **IddCx indirect display driver** solves it: the
+  game still renders on the Intel adapter; the IDD only receives finished frames. Chosen:
+  **VirtualDrivers/Virtual-Display-Driver** (SignPath-signed, silent installer, confirmed working
+  on Server 2025 — only its *audio* driver is rejected, Code 52, so never install that).
+  Put `1280x720` first in `vdd_settings.xml` (Server reverts to the first entry after restart) and
+  pin the render adapter by name. Fallbacks: usbmmidd_v2 (does not survive reboot), then
+  parsec-vdd (Server 2025 fix is CI-only + needs a keepalive), never IddSampleDriver (self-signed).
+  Game must run **windowed-borderless** (`Windowed=2`), never exclusive fullscreen.
+- **D13 — Media Foundation must be installed BEFORE Steam/the game.** It is absent on Server SKUs
+  and its absence produces the classic "media feature" launcher failures. Also verify
+  `InstallationType = Server` (Desktop Experience) on first login — Server Core cannot be
+  converted, only reinstalled.
+- **D14 — gamepad emulation is a dead end on Server, and unnecessary.** ViGEmBus is archived, its
+  installer explicitly blocks Server SKUs, and its successor is commercial. Analog input instead
+  comes from **inside the game** via SHVDN's control natives (`SET_CONTROL_VALUE_NEXT_FRAME` /
+  `Game.SetControlValueNormalized`) — no driver, and better analog steering than keyboard gives.
+  SendInput keyboard/mouse remains the fallback for launcher/menu UI.
+- **D15 — the iGPU is very likely present.** Hetzner's iGPU "disable" is an OS-level Linux module
+  blacklist, not a BIOS setting; lspci dumps from comparable Hetzner Alder/Raptor Lake boxes show
+  the iGPU as the only display device; and Hetzner's own KVM console is a physical device attached
+  to the board's video port. If it is nonetheless absent, the free 3-hour KVM console gives BIOS
+  access to enable IGD.
+- **Remaining top risk is no longer the driver — it is raw GTA V performance on a UHD 770.**
+  Budget a tuning session; fallback E is a discrete-GPU machine (auction billing is pro-rata).
+
+## 7. Windows GPU server (`brief-winserver.json`) — original GEX44 plan, kept for reference
 
 **D9 — Hetzner GEX44 (RTX 4000 SFF Ada 20 GB, i5-13500, 64 GB) + Windows Server 2025 Standard
 add-on (~€28/mo est.) + "HDMI emulator" add-on (€1.10/mo), ≈ €184/mo + €79 setup.**

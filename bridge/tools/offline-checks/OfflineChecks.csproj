@@ -1,0 +1,31 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- Off-server check harness for the bridge. Loads the compiled net48 WastedBridge.dll under
+       .NET 8 and drives its real routing, transport and serialization code. It is a test tool: it
+       is never deployed to the game server and is excluded from WastedBridge.csproj's compile
+       glob. What it cannot cover is anything that calls a native — see bridge/README.md. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <Nullable>disable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <AssemblyName>OfflineChecks</AssemblyName>
+    <RootNamespace>WastedBridge.OfflineChecks</RootNamespace>
+    <LangVersion>latest</LangVersion>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Same Newtonsoft the bridge is built against, so the assembly loaded by WastedBridge.dll
+         at check time is the version it ships with. -->
+    <PackageReference Include="Newtonsoft.Json" Version="13.0.4" />
+    <!-- Reads the real (x64) SHVDN PE's metadata on an arm64 host, where it cannot be executed. -->
+    <PackageReference Include="System.Reflection.MetadataLoadContext" Version="8.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- The SHVDN stubs are built separately by run.sh and loaded by path at run time. -->
+    <Compile Remove="shvdn-stub/**" />
+    <Compile Remove="shvdn-stub-drift/**" />
+  </ItemGroup>
+
+</Project>

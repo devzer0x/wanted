@@ -4,6 +4,10 @@ Vision is allowed ONLY on the contracted screenshot triggers — the §4 events
 whose screenshot column says yes: death, busted, mission_end, mission_fail,
 stunt, and wanted_change reaching >= 3. Everything else is text-only; a raw
 frame is never attached "for flavor" (D5: 768-px JPEG ≈ 448 visual tokens).
+
+`stunt` is in the contract's list but the harness cannot emit it yet
+(events.UNPRODUCED_EVENT_TYPES explains why), so it is subtracted from the live
+trigger sets rather than left sitting in them looking wired up.
 """
 
 from __future__ import annotations
@@ -16,6 +20,7 @@ import anthropic
 import pydantic
 
 from ..budget import Pricing, cost_of_usage
+from ..events import UNPRODUCED_EVENT_TYPES
 from ..logsetup import get_logger
 from .prompts import director_static_prefix
 from .schemas import DecisionModel
@@ -25,14 +30,15 @@ log = get_logger("wasted.brain.director")
 
 DIRECTOR_TIMER_RANGE_S = (60.0, 120.0)
 
-# §4 events with screenshot: yes. wanted_change qualifies only when `to` >= 3;
-# the caller enforces that before naming it as a trigger.
-VISION_TRIGGERS: frozenset[str] = frozenset(
+# §4 events with screenshot: yes — the contract's list, kept verbatim so the
+# copy can be checked against docs/CONTRACTS.md. wanted_change qualifies only
+# when `to` >= 3; the caller enforces that before naming it as a trigger.
+CONTRACT_VISION_EVENTS: frozenset[str] = frozenset(
     {"death", "busted", "mission_end", "mission_fail", "stunt", "wanted_change"}
 )
 
-# Events big enough to wake the director early.
-BIG_EVENTS: frozenset[str] = frozenset(
+# Events big enough to wake the director early (harness policy, not contract).
+CONTRACT_BIG_EVENTS: frozenset[str] = frozenset(
     {
         "death",
         "busted",
@@ -44,6 +50,12 @@ BIG_EVENTS: frozenset[str] = frozenset(
         "stunt",
     }
 )
+
+# What the harness actually arms: the contract lists minus the events nothing
+# emits yet. Subtracting keeps the trigger sets honest instead of listing a
+# trigger that can never fire.
+VISION_TRIGGERS: frozenset[str] = CONTRACT_VISION_EVENTS - UNPRODUCED_EVENT_TYPES
+BIG_EVENTS: frozenset[str] = CONTRACT_BIG_EVENTS - UNPRODUCED_EVENT_TYPES
 
 
 class DirectorCadence:

@@ -12,6 +12,7 @@ subscribers; publish() marshals into each subscriber's event loop.
 from __future__ import annotations
 
 import asyncio
+import contextlib
 import json
 import threading
 from typing import Any
@@ -52,10 +53,9 @@ class OverlayBus:
             targets = list(self._subscribers)
         item = (event_type, payload)
         for loop, queue in targets:
-            try:
+            # A closed subscriber loop is normal; unsubscribe() cleans it up.
+            with contextlib.suppress(RuntimeError):
                 loop.call_soon_threadsafe(queue.put_nowait, item)
-            except RuntimeError:
-                pass  # subscriber's loop already closed; unsubscribe cleans it up
 
     def subscribe(self) -> asyncio.Queue:
         queue: asyncio.Queue = asyncio.Queue(maxsize=256)
@@ -66,7 +66,9 @@ class OverlayBus:
 
     def unsubscribe(self, queue: asyncio.Queue) -> None:
         with self._lock:
-            self._subscribers = [(l, q) for (l, q) in self._subscribers if q is not queue]
+            self._subscribers = [
+                (sub_loop, q) for (sub_loop, q) in self._subscribers if q is not queue
+            ]
 
     def snapshot(self) -> list[tuple[str, dict[str, Any]]]:
         with self._lock:
@@ -113,7 +115,7 @@ def create_app(bus: OverlayBus) -> FastAPI:
                         sent += 1
                         if max_events is not None and sent >= max_events:
                             return
-                    except asyncio.TimeoutError:
+                    except TimeoutError:
                         yield ": keepalive\n\n"
             finally:
                 bus.unsubscribe(queue)

@@ -9,9 +9,9 @@ cache_read_input_tokens, cache_creation_input_tokens — never estimates
 from __future__ import annotations
 
 import time
+from collections.abc import Callable
 from dataclasses import dataclass, field
 from pathlib import Path
-from typing import Callable
 
 import yaml
 
@@ -41,7 +41,7 @@ class Pricing:
     director: ModelPricing
 
     @classmethod
-    def load(cls, path: Path) -> "Pricing":
+    def load(cls, path: Path) -> Pricing:
         if not path.exists():
             raise ConfigError(
                 f"pricing file not found at {path}. It is the runtime source of "

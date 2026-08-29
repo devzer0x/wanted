@@ -17,26 +17,62 @@ import {
 export const FEED_DECISION_LIMIT = 60;
 export const FEED_EVENT_LIMIT = 40;
 
-function failure<T>(scope: string, error: unknown): Fetched<T> {
-  const message = error instanceof Error ? error.message : String(error);
+interface QueryError {
+  message: string;
+  code?: string;
+}
+
+interface QueryResult {
+  data: unknown;
+  error: QueryError | null;
+}
+
+/**
+ * The PostgREST query builder, narrowed to what this module uses.
+ *
+ * `retry` matters: postgrest-js retries network failures three times with backoff and sleeps
+ * through that chain even when the caller's AbortSignal has already fired (the sleep listens to
+ * the builder's own signal, not ours) — measured at 7.0 s per query against a refused connection
+ * with @supabase/postgrest-js 2.109.0. On a server-rendered page that is seven seconds of
+ * nothing before an honest "data link down" appears, so the library retry is turned off and the
+ * single attempt is bounded by the client's 4 s deadline instead. Recovery is the client's job:
+ * the live page re-polls stats every 30 s and refetches rows on every Realtime resubscribe.
+ */
+interface RetryableQuery extends PromiseLike<QueryResult> {
+  retry(enabled: boolean): RetryableQuery;
+}
+
+function failure<T>(
+  scope: string,
+  message: string,
+  startedAt: number,
+  code?: string
+): Fetched<T> {
   console.error(
-    JSON.stringify({ level: "error", scope: `data.${scope}`, message })
+    JSON.stringify({
+      level: "error",
+      scope: `data.${scope}`,
+      message,
+      code,
+      duration_ms: Math.round(performance.now() - startedAt),
+    })
   );
-  return { ok: false, error: message };
+  return { ok: false, error: message, code };
 }
 
 async function selectRows<T>(
   scope: string,
-  run: (client: SupabaseClient) => PromiseLike<{ data: unknown; error: { message: string } | null }>
+  run: (client: SupabaseClient) => RetryableQuery
 ): Promise<Fetched<T>> {
   const client = createServerSupabase();
   if (!client) return { ok: false, error: "supabase_env_missing" };
+  const startedAt = performance.now();
   try {
-    const { data, error } = await run(client);
-    if (error) return failure<T>(scope, error.message);
+    const { data, error } = await run(client).retry(false);
+    if (error) return failure<T>(scope, error.message, startedAt, error.code);
     return { ok: true, rows: (data ?? []) as T[] };
   } catch (err) {
-    return failure<T>(scope, err);
+    return failure<T>(scope, err instanceof Error ? err.message : String(err), startedAt);
   }
 }
 
@@ -107,12 +143,20 @@ export interface TokensToday {
   cached: number;
 }
 
+// PostgREST rejects aggregate functions unless the project has `db-aggregates-enabled` turned on
+// (error PGRST123). That verdict cannot change within a request, so once seen it is remembered
+// for the life of the server process rather than paying a failed round trip on every render.
+// Enabling aggregates on the Supabase project turns the number on with no code change.
+const AGGREGATES_DISABLED_CODE = "PGRST123";
+let aggregatesDisabled = false;
+
 /**
  * Sum of decision tokens since UTC midnight via a PostgREST aggregate. Aggregates may be
  * disabled on a given Supabase project; in that case (or offline) this resolves null and the
  * UI shows an honest em dash instead of a number.
  */
 export async function fetchTokensToday(): Promise<TokensToday | null> {
+  if (aggregatesDisabled) return null;
   const midnightUtc = new Date();
   midnightUtc.setUTCHours(0, 0, 0, 0);
   const fetched = await selectRows<{
@@ -125,7 +169,11 @@ export async function fetchTokensToday(): Promise<TokensToday | null> {
       .select("input:input_tokens.sum(), output:output_tokens.sum(), cached:cached_tokens.sum()")
       .gte("ts", midnightUtc.toISOString())
   );
-  if (!fetched.ok || fetched.rows.length === 0) return null;
+  if (!fetched.ok) {
+    if (fetched.code === AGGREGATES_DISABLED_CODE) aggregatesDisabled = true;
+    return null;
+  }
+  if (fetched.rows.length === 0) return null;
   const row = fetched.rows[0];
   return {
     input: row.input ?? 0,

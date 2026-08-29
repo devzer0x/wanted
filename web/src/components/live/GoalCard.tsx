@@ -22,7 +22,7 @@ export function GoalCard({ stats }: { stats: StatsRow | null }) {
           </span>
         )}
       </div>
-      <p className="font-mono text-sm leading-snug text-bone">
+      <p className="font-mono text-sm leading-snug text-bone [overflow-wrap:anywhere]">
         {stats?.current_goal || "No goal on record."}
       </p>
     </section>
