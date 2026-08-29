@@ -3,6 +3,42 @@
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
 run log, or URL) noted next to it. Last updated: 2026-08-25 (evening).
 
+## Delivery-day readiness pass — 2026-08-29 (commit `71140c0`)
+
+Server ordered (Hetzner auction i5-12500, ref B20260829-3496963, awaiting delivery). While
+waiting, a full readiness pass ran: 2 recon agents + 4 hardening agents + 4 verifiers + 4 fixers
++ 1 confirmer. **Confirmer verdict: SAFE TO COMMIT, 15/15 checks PASS**, each falsification-tested.
+
+**The machine changed under us** — we bought an Intel-iGPU auction box, not the planned
+NVIDIA GEX44, so scripts/ were pointed at hardware we do not own. Retargeted; new findings in
+docs/RESEARCH.md §7b (D11–D15) and the delivery-day sequence in docs/RUNBOOK.md §0.
+
+**Defects caught before delivery day (all fixed + confirmed):**
+- 🔴 The harness would have **crashed on its first poll of every session** — the bridge legitimately
+  emits `last_task.id: null` before any task; the pydantic model required `str`. Nobody had ever
+  validated the bridge's real output against the harness's model. Fixed, contract clarified
+  (v1.2), and a **cross-package conformance test** now validates real bridge serializations
+  against the harness models (proven to reject renamed/dropped/retyped fields).
+- 🔴 `server-setup.ps1` would have downloaded the VDD **audio** driver instead of the display
+  driver (ambiguous asset pattern + `Select-Object -First 1`) — and that audio driver is rejected
+  on Server 2025 (Code 52). Ambiguous patterns now fail loudly.
+- 🟠 Operator-skipped bootstrap phases were recorded as complete; nefcon's reboot-required exit
+  code (3010) was treated as failure; the OBS profile was never selected by `run.ps1`.
+- 🟠 Governor L3 issued `stop` wherever the agent was (possibly mid-freeway) instead of parking
+  somewhere scenic; activity task-tracking raced against the 3 Hz poll; `stunt`/`mission_end`/
+  `mission_fail` were wired but never emitted (now honestly declared as Phase 3/4 gaps).
+- 🟠 web: per-route `og:title`/`og:url`/`canonical` were wrong (a regression introduced and fixed
+  within the same pass); test runs poisoned `.next` and `tsconfig.json`.
+
+**Verified locally after fixes:** harness **151 tests** green (was 42) + ruff clean; bridge Release
+build 0 warnings/0 errors + 185 offline checks; 10 PowerShell files 0 parse + 0 analyzer errors;
+web build/tsc/lint clean, 36 Playwright passed. Everything game-adjacent remains BLOCKED on the
+undelivered server — nothing about the game is claimed as working.
+
+⚠ **Anthropic key is at its configured spend limit** — verified today: `You have reached your
+specified API usage limits. You will regain access on 2026-09-01`. Raise the limit in the console
+before the live checks, or the agent cannot think.
+
 ## Current phase
 
 **Phase 0 done · wait-work build-out done · CLOUD LAYER LIVE (2026-08-25 evening).** With the
