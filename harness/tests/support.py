@@ -11,6 +11,7 @@ from __future__ import annotations
 import tempfile
 from pathlib import Path
 
+from wasted_harness.brain.mission_knowledge import LearnedScripts
 from wasted_harness.totals import TOTALS_FILENAME, LifetimeTotals
 
 
@@ -25,3 +26,9 @@ def throwaway_totals(**seed: float) -> LifetimeTotals:
     for key, value in seed.items():
         setattr(totals, key, value)
     return totals
+
+
+def throwaway_learned_scripts() -> LearnedScripts:
+    """A real LearnedScripts backed by a fresh throwaway temp dir."""
+    path = Path(tempfile.mkdtemp(prefix="wasted-learned-scripts-")) / "learned_mission_scripts.json"
+    return LearnedScripts(path)

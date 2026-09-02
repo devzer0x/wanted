@@ -284,6 +284,14 @@ class MissionState(BaseModel):
     #: now, so the agent was blind to the one piece of state that says "the game has
     #: already worked out where you are supposed to go".
     route_blips: list[RouteBlip] = []
+    #: v1.10: the active story-mission script name (e.g. "armenian1"), from the
+    #: pinned mission-script table in docs/RESEARCH.md; null when unknown. Only
+    #: ever non-null while `active`. Optional (default `None`) so a pre-v1.10
+    #: bridge still parses. There is no verified script-name -> English-title
+    #: table (docs/research/brief-mission-scripts.json), so this is an exact
+    #: identity key for `brain.mission_knowledge`'s LEARNED mapping, never a
+    #: display name on its own.
+    script: str | None = None
 
 
 class NearbyVehicle(BaseModel):
@@ -309,6 +317,11 @@ class NearbyPed(BaseModel):
     #: v1.6: world position of the ped - the minimap dot as data (red = hostile, blue = friendly).
     #: Optional so a pre-v1.6 bridge still parses.
     pos: Vec3 | None = None
+    #: v1.10: the vehicle this ped is seated in, or null on foot. Occupants of
+    #: nearby vehicles are now included in the ped scan (the raw native alone
+    #: omits them — the exact bug that made a followed friendly vanish the
+    #: moment he got into a car). Optional so a pre-v1.10 bridge still parses.
+    in_vehicle_handle: int | None = None
 
 
 #: Animal ped models. In this engine animals ARE peds, so `World.GetNearbyPeds` returns cats,

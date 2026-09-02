@@ -139,6 +139,11 @@ namespace WastedBridge.OfflineChecks
             object server = NewServer(shared);
             StartServer(server);
             string label = "[" + transportMode + "] ";
+            // Read live rather than hard-coded, so a BridgeVersion bump (e.g. CONTRACTS v1.10)
+            // cannot silently break this check the way a stale "1.0.0" literal did before.
+            string versionField = "\"version\":\""
+                + BridgeMetadata.ReadConstString("WastedBridge.WastedBridgeScript", "BridgeVersion")
+                + "\"";
             Checks.Report(Listening(server), label + "transport bound", Describe(server));
             if (!Listening(server))
             {
@@ -177,7 +182,7 @@ namespace WastedBridge.OfflineChecks
 
             // --- before any snapshot exists ---
             await Check("GET /state before first tick", () => Get("/state"), 503, "not_ready");
-            await Check("GET /health", () => Get("/health"), 200, "\"version\":\"1.0.0\"",
+            await Check("GET /health", () => Get("/health"), 200, versionField,
                 "\"edition\":\"unknown\"", "queue_depth", "tick_hz", "game_fps",
                 "\"online_blocked\":false");
 
@@ -217,8 +222,8 @@ namespace WastedBridge.OfflineChecks
             await Check("unknown path -> 404", () => Get("/teleport"), 404, "not_found");
             await Check("POST /state -> 405", () => Post("/state", "{}"), 405, "method_not_allowed");
             await Check("GET /task -> 405", () => Get("/task"), 405, "method_not_allowed");
-            await Check("trailing slash normalizes", () => Get("/health/"), 200, "\"version\":\"1.0.0\"");
-            await Check("query string ignored", () => Get("/health?probe=1"), 200, "\"version\":\"1.0.0\"");
+            await Check("trailing slash normalizes", () => Get("/health/"), 200, versionField);
+            await Check("query string ignored", () => Get("/health?probe=1"), 200, versionField);
 
             // --- published snapshot serving: the real fresh-load document, over HTTP ---
             string freshLoad = ContractSamples.FreshLoadJson;

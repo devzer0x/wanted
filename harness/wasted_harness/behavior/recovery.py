@@ -430,7 +430,16 @@ ATTACKER_CLOSE_RADIUS_M = 8.0
 #: in ones and twos (regeneration only adds, armor pickups only add), so this
 #: bar only has to clear the noise floor rather than identify a weapon: 10 is
 #: two or three punches, or one glancing hit.
-DAMAGE_ATTACK_HP = 10.0
+DAMAGE_ATTACK_HP = 4.0
+#: LOWERED 10.0 -> 4.0 after live feedback 2026-09-02 ("why can't he fight back
+#: quickly the moment he is punched"). At 10 HP he had to absorb two or three
+#: punches before the reflex would even look at retaliating, and a GTA melee
+#: exchange is decided in about that many. 4 HP is one clean punch: above the
+#: noise floor this bar exists to clear (nothing in ordinary play REMOVES
+#: effective HP at all - regeneration and pickups only add), and below the cost
+#: of the second hit. The radius gate (:data:`ATTACKER_CLOSE_RADIUS_M`, 8 m) is
+#: what keeps this from firing on scrapes: damage ALONE never triggers combat,
+#: damage plus somebody standing next to him does.
 
 #: How far back the loss is accumulated. Long enough that a slow melee
 #: exchange adds up at a 2-4 Hz poll (a punch lands roughly once a second),

@@ -1099,7 +1099,13 @@ def _friendly(distance: float, handle: int = 12) -> dict:
 
 def test_damage_tracker_sees_a_beating_the_per_tick_signal_misses() -> None:
     """The exact hole: `Delta.big_health_drop` needs >= 25 HP between two
-    snapshots. Fists arrive a few HP at a time, so it never fired once."""
+    snapshots. Fists arrive a few HP at a time, so it never fired once.
+
+    Policy change 2026-09-02, from live feedback ("why can't he fight back the
+    moment he is punched"): the bar is now ONE clean punch, not three. The
+    first reading is always False - it only establishes the baseline peak, and
+    no damage has been observed yet - but the very next punch must register.
+    """
     clock = FakeClock()
     tracker = DamageTracker(clock=clock)
     health = 200
@@ -1109,9 +1115,22 @@ def test_damage_tracker_sees_a_beating_the_per_tick_signal_misses() -> None:
         fired.append(tracker.feed(state))
         clock.t += 0.3
         health -= 5  # a punch, well under Delta's 25 HP per-tick bar
-    assert fired[0] is False and fired[1] is False
-    assert fired[-1] is True, "three punches inside the window must read as an attack"
+
+    assert fired[0] is False, "the first sample is the baseline; nothing lost yet"
+    assert fired[1] is True, "one punch must be enough to call it an attack"
+    assert fired[-1] is True
     assert tracker.lost_hp >= DAMAGE_ATTACK_HP
+
+
+def test_damage_below_the_bar_is_still_ignored() -> None:
+    """The bar came down to one punch, not to zero. Scrapes, a kerb, a shove
+    that costs a couple of HP must not start a fistfight in the street."""
+    clock = FakeClock()
+    tracker = DamageTracker(clock=clock)
+    assert tracker.feed(make_state(health=200)) is False
+    clock.t += 0.5
+    assert tracker.feed(make_state(health=198)) is False, "2 HP is noise, not an attack"
+    assert tracker.lost_hp < DAMAGE_ATTACK_HP
 
 
 def test_damage_tracker_counts_armor_as_effective_hp() -> None:

@@ -59,6 +59,63 @@ def test_unknown_model_refused(pricing: Pricing) -> None:
         pricing.for_model("claude-3-haiku-20240307")
 
 
+# --- WP-C: the OPTIONAL mission-time tactical model ---------------------------
+
+
+def test_the_real_pricing_yaml_configures_the_mission_tier(pricing: Pricing) -> None:
+    """config/pricing.yaml ships `tactical_mission` — same model, same prices
+    as `director` (a deliberate choice, not a second sourced number)."""
+    m = pricing.tactical_mission
+    assert m is not None
+    assert m.id == "claude-sonnet-5"
+    assert (m.input_per_mtok, m.output_per_mtok) == (2.00, 10.00)
+    assert (m.cache_read_per_mtok, m.cache_write_5m_per_mtok) == (0.20, 2.50)
+    assert m.min_cacheable_prefix_tokens == 1024
+
+
+_MINIMAL_MODEL = {
+    "id": "claude-sonnet-5",
+    "input_per_mtok": 2.00,
+    "output_per_mtok": 10.00,
+    "cache_read_per_mtok": 0.20,
+    "cache_write_5m_per_mtok": 2.50,
+    "min_cacheable_prefix_tokens": 1024,
+}
+_MINIMAL_TACTICAL = dict(_MINIMAL_MODEL, id="claude-haiku-4-5-20251001",
+                          input_per_mtok=1.00, output_per_mtok=5.00,
+                          cache_read_per_mtok=0.10, cache_write_5m_per_mtok=1.25,
+                          min_cacheable_prefix_tokens=4096)
+
+
+def _write_pricing_yaml(tmp_path: Path, *, with_mission_tier: bool) -> Path:
+    import yaml
+
+    models = {"tactical": _MINIMAL_TACTICAL, "director": _MINIMAL_MODEL}
+    if with_mission_tier:
+        models["tactical_mission"] = _MINIMAL_MODEL
+    doc = {
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "fetched": "2026-08-25",
+        "models": models,
+    }
+    path = tmp_path / "pricing.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return path
+
+
+def test_pricing_loads_without_the_mission_tier_configured(tmp_path: Path) -> None:
+    """Absent key = today's behaviour exactly: no mission tier at all."""
+    p = Pricing.load(_write_pricing_yaml(tmp_path, with_mission_tier=False))
+    assert p.tactical_mission is None
+
+
+def test_pricing_loads_with_the_mission_tier_configured(tmp_path: Path) -> None:
+    p = Pricing.load(_write_pricing_yaml(tmp_path, with_mission_tier=True))
+    assert p.tactical_mission is not None
+    assert p.tactical_mission.id == "claude-sonnet-5"
+    assert p.for_model("claude-sonnet-5") is not None
+
+
 class FakeClock:
     def __init__(self) -> None:
         self.t = 1000.0

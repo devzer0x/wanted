@@ -32,3 +32,16 @@ models:
     cache_read_per_mtok: 0.20
     cache_write_5m_per_mtok: 2.50
     min_cacheable_prefix_tokens: 1024
+  # OPTIONAL. Mission-time tactical model (WP-C): when present, TacticalBrain
+  # swaps in Sonnet 5 for tactical decisions made while mission.active is true
+  # in the state being decided on, instead of Haiku. Absent by default —
+  # matches today's behaviour exactly (Haiku always). Same model, same prices
+  # as `director` above (the $2/$10 intro price is permanent per the source
+  # doc; this is not a second, independently-sourced number).
+  tactical_mission:
+    id: "claude-sonnet-5"
+    input_per_mtok: 2.00
+    output_per_mtok: 10.00
+    cache_read_per_mtok: 0.20
+    cache_write_5m_per_mtok: 2.50
+    min_cacheable_prefix_tokens: 1024

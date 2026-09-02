@@ -195,6 +195,90 @@ try {
         Start-Sleep -Seconds $InterTaskDelayS
     }
 
+    # --- CONTRACTS v1.10 checks ----------------------------------------------------------------
+    # Re-read /state: the task loop above may have moved the player; these checks want fresh data.
+    $state110 = Invoke-Bridge -Method GET -Path '/state'
+    $mission110 = Get-JsonProp $state110.Json 'mission'
+    $nearby110 = Get-JsonProp $state110.Json 'nearby'
+
+    # 1. mission.script key exists (null is fine outside a mission; the field must be present).
+    if ($null -ne $mission110 -and ($mission110.PSObject.Properties.Name -contains 'script')) {
+        Add-Result -Check '/state mission.script present (v1.10)' -Expect 'key exists (null ok off-mission)' `
+            -Got "script=$(Get-JsonProp $mission110 'script')" -Outcome PASS
+    }
+    else {
+        Add-Result -Check '/state mission.script present (v1.10)' -Expect 'key exists (null ok off-mission)' `
+            -Got 'key missing from mission object' -Outcome FAIL
+    }
+
+    # 2. nearby.peds[].in_vehicle_handle key exists on every ped row (null = on foot).
+    $peds110 = @(Get-JsonProp $nearby110 'peds')
+    if ($peds110.Count -eq 0) {
+        Add-Result -Check '/state nearby.peds[].in_vehicle_handle (v1.10)' -Expect 'key on every ped row' `
+            -Got 'no nearby peds in /state right now' -Outcome SKIP
+    }
+    elseif (@($peds110 | Where-Object { -not ($_.PSObject.Properties.Name -contains 'in_vehicle_handle') }).Count -eq 0) {
+        $seated = @($peds110 | Where-Object { $null -ne (Get-JsonProp $_ 'in_vehicle_handle') }).Count
+        Add-Result -Check '/state nearby.peds[].in_vehicle_handle (v1.10)' -Expect 'key on every ped row' `
+            -Got "present on all $($peds110.Count) rows ($seated seated)" -Outcome PASS
+    }
+    else {
+        Add-Result -Check '/state nearby.peds[].in_vehicle_handle (v1.10)' -Expect 'key on every ped row' `
+            -Got 'at least one ped row lacks the key' -Outcome FAIL
+    }
+
+    # 3. Occupant attribution: an npc-driven nearby vehicle should have a ped seated in it.
+    #    Soft evidence (the driver may be beyond the ped cap of 8), so absence is SKIP, not FAIL.
+    $npcVehicle = @(Get-JsonProp $nearby110 'vehicles') | Where-Object { (Get-JsonProp $_ 'driver') -eq 'npc' } | Select-Object -First 1
+    if ($null -eq $npcVehicle) {
+        Add-Result -Check 'occupant attribution (v1.10)' -Expect 'a ped with in_vehicle_handle == an npc vehicle' `
+            -Got 'no npc-driven vehicle nearby right now' -Outcome SKIP
+    }
+    else {
+        $vh = [long](Get-JsonProp $npcVehicle 'handle')
+        $match = @($peds110 | Where-Object {
+            $ivh = Get-JsonProp $_ 'in_vehicle_handle'
+            ($null -ne $ivh) -and ([long]$ivh -eq $vh)
+        }).Count
+        if ($match -gt 0) {
+            Add-Result -Check 'occupant attribution (v1.10)' -Expect 'a ped with in_vehicle_handle == an npc vehicle' `
+                -Got "vehicle $vh has $match attributed occupant(s) in nearby.peds" -Outcome PASS
+        }
+        else {
+            Add-Result -Check 'occupant attribution (v1.10)' -Expect 'a ped with in_vehicle_handle == an npc vehicle' `
+                -Got "npc vehicle $vh nearby but no ped row attributes it (driver may be outside the 8-ped cap)" -Outcome SKIP
+        }
+    }
+
+    # 4. route_blips entity handles must be REAL entity handles: follow_entity on one must not
+    #    fail target_lost on arrival (the pre-v1.10 defect). Needs the game to have a route
+    #    plotted to an entity — usually only during a follow mission — so SKIP is the normal
+    #    free-roam outcome and the check earns PASS/FAIL evidence during the live mission run.
+    $routed110 = @(Get-JsonProp $mission110 'route_blips') | Where-Object { (Get-JsonProp $_ 'kind') -eq 'entity' } | Select-Object -First 1
+    if ($null -eq $routed110) {
+        Add-Result -Check 'route_blips entity handle resolves (v1.10)' -Expect 'follow_entity runs, not instant target_lost' `
+            -Got 'no kind=="entity" route blip right now (normal off-mission)' -Outcome SKIP
+    }
+    else {
+        $rh = [long](Get-JsonProp $routed110 'handle')
+        $fresp = Invoke-Bridge -Method POST -Path '/task' -Body @{ type = 'follow_entity'; params = @{ handle = $rh; in_vehicle = $false } }
+        Start-Sleep -Seconds 2
+        $after = Invoke-Bridge -Method GET -Path '/state'
+        $lt = Get-JsonProp $after.Json 'last_task'
+        $ltStatus = Get-JsonProp $lt 'status'
+        $ltDetail = Get-JsonProp $lt 'detail'
+        if ($fresp.Status -eq 202 -and -not ($ltStatus -eq 'failed' -and $ltDetail -eq 'target_lost')) {
+            Add-Result -Check 'route_blips entity handle resolves (v1.10)' -Expect 'follow_entity runs, not instant target_lost' `
+                -Got "handle=$rh status=$ltStatus detail=$ltDetail" -Outcome PASS -Excerpt (Format-Excerpt $after.Text)
+        }
+        else {
+            Add-Result -Check 'route_blips entity handle resolves (v1.10)' -Expect 'follow_entity runs, not instant target_lost' `
+                -Got "POST=$($fresp.Status) status=$ltStatus detail=$ltDetail (blip-handle defect symptom)" -Outcome FAIL -Excerpt (Format-Excerpt $after.Text)
+        }
+        # Leave no follow running behind the smoke test.
+        $null = Invoke-Bridge -Method POST -Path '/task' -Body @{ type = 'stop'; params = @{} }
+    }
+
     # --- negative check: unknown task type must 400 --------------------------------------------
     $bad = Invoke-Bridge -Method POST -Path '/task' -Body @{ type = 'fly_to_moon'; params = @{} }
     Add-HttpResult -Check 'POST /task <unknown type> (negative)' -Response $bad -ExpectStatus 400

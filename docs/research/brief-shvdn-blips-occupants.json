@@ -1,0 +1,25 @@
+{
+ "answer": "CONTRACTS v1.10 backing research (2026-09-02). (1) Blip->entity: SHVDN v3 `Blip.Entity` => `Entity.FromHandle(Function.Call<int>(Hash.GET_BLIP_INFO_ID_ENTITY_INDEX, Handle))`. Returns NULL for a coord blip (native returns 0; Entity.FromHandle(0) -> null) - the bridge must null-check and fall back to kind:\"coord\". Entity vs coord blips are told apart with the `Blip.BlipType` property (enum BlipType: Vehicle=1, Character=2, Object=3 are entity blips; Coords=4, Radius=7, Area=11 are not). `Blip.Entity` re-resolves per call (not cached) - never cache the Entity across ticks without Exists(). UNCONFIRMED: whether the native resolves entities outside streaming range; the null-check covers it either way. (2) `World.GetNearbyPeds` is NOT a native call: it scans the raw CPed pool via SHVDN.NativeMemory.GetPedHandles (FwScriptGuidPoolTask over s_pedPoolAddress) filtering only radius + model hash. There is NO seat/vehicle-occupancy exclusion in that path: peds seated in vehicles ARE returned while the vehicle is within radius (the ped's position is the vehicle's). The 2026-09-02 'crewmate vanished' event is therefore explained by the target leaving the scan radius (their car drove off) while the long-range source - the route blip on the car - was unusable due to the blip-handle defect fixed in v1.10 item 1. (3) Occupant attribution: `Vehicle.Driver` (null when empty), `Vehicle.GetPedOnSeat(VehicleSeat)` (returns null for empty seat: `handle != 0 ? new Ped(handle) : null`, native GET_PED_IN_VEHICLE_SEAT), `Vehicle.Occupants` (driver first, then passengers; empty array when none), `Vehicle.Passengers`, `Vehicle.PassengerCount` (GET_VEHICLE_NUMBER_OF_PASSENGERS). CAVEAT: no GitHub tag exists for the pinned v3.7.0-nightly.189 (nightlies are unlisted CI builds); all code was read from scripthookvdotnet/scripthookvdotnet `main`, the closest available source ahead of the v3.6.0 tag.",
+ "facts": [
+  {
+   "claim": "Blip.Entity => Entity.FromHandle(Function.Call<int>(Hash.GET_BLIP_INFO_ID_ENTITY_INDEX, Handle)); null for coord blips because Entity.FromHandle returns null when NativeMemory.GetEntityAddress(handle) is IntPtr.Zero",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Blip/Blip.cs and .../GTA/Entities/Entity.cs"
+  },
+  {
+   "claim": "Blip.BlipType wraps GET_BLIP_INFO_ID_TYPE; enum BlipType { Unused=0, Vehicle=1, Character=2, Object=3, Coords=4, Contact=5, Pickup=6, Radius=7, WeaponPickup=8, Cop=9, Stealth=10, Area=11, Custom=12, PickupObject=13 } (property is named BlipType, not Type, until SHVDN v4)",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Blip/Blip.cs and .../GTA/Blip/BlipType.cs"
+  },
+  {
+   "claim": "World.GetNearbyPeds calls SHVDN.NativeMemory.GetPedHandles(position, radius, modelHashes) = GetGuidsInFwBasePool(s_pedPoolAddress, ...) - a raw CPed pool scan whose FwScriptGuidPoolTask applies only _doPosCheck (radius) and _doModelCheck filters; no in-vehicle exclusion exists in this path, so seated peds are returned while in radius (engine-consensus that seated peds stay in the CPed pool: medium-high confidence, not doc-asserted)",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/World.cs and https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/core/NativeMemory.cs (FwScriptGuidPoolTask, ~lines 3508-3588)"
+  },
+  {
+   "claim": "Vehicle.GetPedOnSeat(VehicleSeat) uses GET_PED_IN_VEHICLE_SEAT and returns null for an empty seat; Vehicle.Driver = GetPedOnSeat(VehicleSeat.Driver); Vehicle.Occupants returns driver at index 0 then passengers by seat order (empty array when unoccupied); Vehicle.PassengerCount wraps GET_VEHICLE_NUMBER_OF_PASSENGERS",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Vehicles/Vehicle.cs"
+  },
+  {
+   "claim": "No GitHub tag exists for v3.7.0-nightly.189; nightlies are unlisted CI builds off main. Latest tag v3.6.0; `main` used as nearest source. crosire/scripthookvdotnet is a stale mirror - do not cite it",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet (tags list, checked 2026-09-02 via gh api)"
+  }
+ ]
+}

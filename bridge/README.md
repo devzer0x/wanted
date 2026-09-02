@@ -272,12 +272,60 @@ Implementation choices where the contract is silent (all in code comments too):
 
 ### ⚠ Objective-blip rule is empirical
 
-`mission.objective_blip` is identified as **sprite `Standard(1)` + colour `Yellow(66)` + route
-enabled** (`SnapshotBuilder.FindObjectiveBlip`). That is community convention, not documented by
-any primary source; some missions use character-sprite blips (M/F/T) instead, and
-`World.GetAllBlips` is an SHVDN **memory scan** — the fragile part on any edition change. The rule
-gets validated per mission in Phase 4; refinements land in `FindObjectiveBlip` without changing the
-field's shape.
+`mission.objective_blip` is identified as **any routed blip, preferring yellow** (`ShowRoute==true`,
+then the nearest yellow one among those; falling back to the legacy sprite `Standard(1)` + colour
+`Yellow(66)` rule only when nothing is routed — `SnapshotBuilder.FindObjectiveBlip`, CONTRACTS
+v1.8). `World.GetAllBlips` is an SHVDN **memory scan** — the fragile part on any edition change.
+The rule gets validated per mission in Phase 4; refinements land in `FindObjectiveBlip` without
+changing the field's shape.
+
+### CONTRACTS v1.10: blip→entity handles, `in_vehicle_handle`, `mission.script`, task liveness
+
+- **`objective_blip.handle` / `route_blips[].handle` are ENTITY handles when `kind=="entity"`.**
+  Before v1.10 the bridge emitted the BLIP's own handle under `kind:"entity"` — a different handle
+  space that `follow_entity` could never resolve (root cause of a live "drives and then stops"
+  follow-mission failure). The fix (`SnapshotBuilder.ResolveBlipKindAndHandle`) reads `Blip.Entity`
+  (wraps `GET_BLIP_INFO_ID_ENTITY_INDEX`, re-resolved fresh every snapshot, never cached across
+  ticks) and only reports `kind:"entity"` when that resolves to a live entity; otherwise it degrades
+  to `kind:"coord"` with the blip's own position and handle rather than emitting an entity handle
+  nothing can use.
+- **`nearby.peds[].in_vehicle_handle`** (int, nullable): the vehicle handle a nearby ped is
+  currently seated in, or null on foot (`SnapshotBuilder.InVehicleHandleOf`). `World.GetNearbyPeds`
+  already returns seated peds (it is a raw ped-pool scan with no seat exclusion) — this only adds
+  the attribution, so the harness can hand off from a crewmate ped to their car before the ped
+  scrolls out of the 50 m `nearby` radius.
+- **`mission.script`** (string, nullable, only while `mission.active`): the running story/side
+  mission's script name (e.g. `"armenian1"`), found by enumerating script threads —
+  `SCRIPT_THREAD_ITERATOR_RESET` / `SCRIPT_THREAD_ITERATOR_GET_NEXT_THREAD_ID` (0 = end) /
+  `GET_NAME_OF_SCRIPT_WITH_THIS_ID` — and matching against a pinned allowlist
+  (`SnapshotBuilder.MissionScriptNames`, vendored from `docs/research/brief-mission-scripts.json`).
+  None of the three natives has a typed SHVDN wrapper, so they are called raw via `Function.Call`
+  with the enum members from the pinned `Hash` type (same pattern `TaskEngine.StartSeekCover` uses
+  for `TASK_SEEK_COVER_FROM_POS`). Script↔English-title pairings are not sourced; the harness is
+  expected to learn them from observed (OCR title, script) co-occurrence rather than the bridge
+  guessing one.
+- **Task liveness (`last_task.detail == "cleared_by_game"`).** Mission scripts and cutscenes call
+  `CLEAR_PED_TASKS` on the player mid-task; without a liveness check the bridge reported `running`
+  forever. `TaskEngine` now records, per issued task, the `GTA.ScriptTaskNameHash` its own native
+  call should poll as (`TaskEngine.SetExpectedHash`), and fails the task with `"cleared_by_game"` if
+  the ped's *current* script-task hash (`Ped.GetCurrentScriptTaskNameHashAndStatus`) mismatches for
+  3 consecutive ticks after a 1 s settle window. Mapping used (all verified against the pinned
+  `lib/ScriptHookVDotNet3.dll`'s `ScriptTaskNameHash` enum, not the native's own hash):
+  `drive_to`→`VehicleDriveToCoordLongrange`, `walk_to`→`FollowNavMeshToCoord`,
+  `enter_nearest_vehicle`→`EnterVehicle`, `follow_entity` in-vehicle→`VehicleMission` (shared by
+  every `TASK_VEHICLE_*_MISSION`-family task — a different vehicle-mission task replacing ours would
+  also read as "still running"; the existing `target_lost`/`not_in_vehicle` checks are what actually
+  catch that), `follow_entity` on foot→`FollowToOffsetOfEntity`,
+  `combat_hated_targets_around`→`CombatHatedTargetsAroundPed` **or** `Combat` (`TaskEngine.Start`
+  picks the native, and therefore the hash, at issue time — it uses whichever of the two branches
+  actually ran), `wander_drive`→`VehicleDriveWander` (the enum's own dedicated member for
+  `TASK_VEHICLE_DRIVE_WANDER`, a closer match than the generic `VehicleMission` family the initial
+  research brief tentatively suggested), `flee_police`→`SmartFleePoint` (the bridge's
+  `IssueFlee` calls the `Vector3` overload of `TaskInvoker.FleeFrom`, which wraps
+  `TASK_SMART_FLEE_COORD`, not `TASK_SMART_FLEE_PED` — so the coord-flavoured `SmartFleePoint` hash
+  is the correct one, not `SmartFleePed` as the brief's first guess had it before this call site was
+  checked). `seek_cover`, `set_waypoint`, `stop`, and `exit_vehicle` get **no** liveness check —
+  no researched/verified hash, and CONTRACTS v1.10 explicitly says not to guess one.
 
 ## Build
 

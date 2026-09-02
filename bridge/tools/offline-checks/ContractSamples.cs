@@ -61,11 +61,11 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(snap, "Ts", "2026-08-29T09:14:03.221Z");
             BridgeAssembly.SetField(snap, "Tick", 1L);
             BridgeAssembly.SetField(snap, "Player", Player(
-                0f, 0f, 0f, 0f, 200, 200, 0, 0, 0, false, false, false, true));
+                0f, 0f, 0f, 0f, 200, 200, 0, 0, 0, false, false, false, true, "unknown"));
             BridgeAssembly.SetField(snap, "Vehicle", null);
             BridgeAssembly.SetField(snap, "Location", Location("Vinewood Blvd", "Downtown Vinewood"));
             BridgeAssembly.SetField(snap, "World", World("13:45", "CLEAR", 1f));
-            BridgeAssembly.SetField(snap, "Mission", Mission(false, false, false, null));
+            BridgeAssembly.SetField(snap, "Mission", Mission(false, false, false, null, null));
             BridgeAssembly.SetField(snap, "Nearby", BridgeAssembly.New("NearbyDto"));
 
             // The real thing: a TaskEngine that has never been given a task, asked for its DTO.
@@ -87,7 +87,8 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(snap, "Ts", "2026-08-29T09:41:57.008Z");
             BridgeAssembly.SetField(snap, "Tick", 123456L);
             BridgeAssembly.SetField(snap, "Player", Player(
-                -1037.42f, -2737.91f, 20.17f, 328.4f, 164, 200, 45, 2, 4871, false, false, true, true));
+                -1037.42f, -2737.91f, 20.17f, 328.4f, 164, 200, 45, 2, 4871, false, false, true, true,
+                "franklin"));
 
             object veh = BridgeAssembly.New("VehicleDto");
             BridgeAssembly.SetField(veh, "Handle", 197121);
@@ -108,7 +109,7 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(blip, "Pos", Vec3(-75.02f, -818.44f, 326.18f));
             BridgeAssembly.SetField(blip, "Kind", "coord");
             BridgeAssembly.SetField(blip, "Handle", 42);
-            BridgeAssembly.SetField(snap, "Mission", Mission(true, false, false, blip));
+            BridgeAssembly.SetField(snap, "Mission", Mission(true, false, false, blip, "armenian1"));
 
             object nearby = BridgeAssembly.New("NearbyDto");
             object nv = BridgeAssembly.New("NearbyVehicleDto");
@@ -118,6 +119,7 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(nv, "Class", "Emergency");
             BridgeAssembly.SetField(nv, "Distance", 18.44f);
             BridgeAssembly.SetField(nv, "Driver", "npc");
+            BridgeAssembly.SetField(nv, "Pos", Vec3(-1040.1f, -2735.6f, 20.2f));
             AddToList(nearby, "Vehicles", nv);
 
             object np = BridgeAssembly.New("NearbyPedDto");
@@ -125,6 +127,8 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(np, "Model", "s_m_y_cop_01");
             BridgeAssembly.SetField(np, "Distance", 19.02f);
             BridgeAssembly.SetField(np, "Relationship", "hostile");
+            BridgeAssembly.SetField(np, "Pos", Vec3(-1039.8f, -2734.9f, 20.2f));
+            // in_vehicle_handle left null (default): this cop is on foot in the sample.
             AddToList(nearby, "Peds", np);
             BridgeAssembly.SetField(snap, "Nearby", nearby);
 
@@ -261,7 +265,8 @@ namespace WastedBridge.OfflineChecks
 
         private static object Player(float x, float y, float z, float heading, int health,
                                      int maxHealth, int armor, int wanted, int cash, bool dead,
-                                     bool arrested, bool inVehicle, bool controlEnabled)
+                                     bool arrested, bool inVehicle, bool controlEnabled,
+                                     string protagonist)
         {
             object p = BridgeAssembly.New("PlayerDto");
             BridgeAssembly.SetField(p, "Pos", Vec3(x, y, z));
@@ -275,6 +280,7 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(p, "Arrested", arrested);
             BridgeAssembly.SetField(p, "InVehicle", inVehicle);
             BridgeAssembly.SetField(p, "ControlEnabled", controlEnabled);
+            BridgeAssembly.SetField(p, "Protagonist", protagonist);
             return p;
         }
 
@@ -295,13 +301,15 @@ namespace WastedBridge.OfflineChecks
             return w;
         }
 
-        private static object Mission(bool active, bool randomEvent, bool cutscene, object blip)
+        private static object Mission(bool active, bool randomEvent, bool cutscene, object blip,
+                                      string script)
         {
             object m = BridgeAssembly.New("MissionDto");
             BridgeAssembly.SetField(m, "Active", active);
             BridgeAssembly.SetField(m, "RandomEventActive", randomEvent);
             BridgeAssembly.SetField(m, "CutsceneActive", cutscene);
             BridgeAssembly.SetField(m, "ObjectiveBlip", blip);
+            BridgeAssembly.SetField(m, "Script", script);
             return m;
         }
 

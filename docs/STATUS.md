@@ -1,7 +1,71 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-02 (late).
+run log, or URL) noted next to it. Last updated: 2026-09-02 (evening).
+
+## 2026-09-02 (evening) — CONTRACTS v1.10 deployed to the real machine; six real bugs found BY the live run
+
+Bridge **v1.2.0** and a rebuilt harness went onto the server and the agent played on them. The run is
+what produced this section: every item below was found by watching him, not by reading code.
+
+**Deployed and confirmed live on the real game:**
+- `bridge /health` → `version 1.2.0`, `tick_hz` 47-54, edition legacy.
+- **`mission.script` works**: `/state` returned `script=Armenian1` during play. The agent now gets his
+  mission identity from the engine's own running script thread instead of guessing.
+- All three model tiers verified against the real API at startup, including the new
+  **`tactical_mission` (Sonnet 5)** tier: static prefix 23671 tok, cacheable.
+- The new **target-lost recovery ladder fired in a real mission** (`rung=reacquire`).
+- The **commentary similarity gate fired** ("repeated commentary line" suppressed).
+
+**BUGS THE LIVE RUN FOUND (all fixed, 599 tests green, ruff clean):**
+
+1. **Wrong mission card — the cause of every "random" thing he said.** The identification ladder
+   fell back to a ZONE guess even when the engine had named the script. Logged live:
+   `mission identified: title_read=None zone="Pacific Bluffs" script=Armenian1 source=zone
+   mission="The Wrap Up"`. He was in Franklin-and-Lamar and was handed The Wrap Up's walkthrough,
+   so he narrated Dave Norton, a sniping Trevor and an ambush that did not exist (operator
+   screenshots). Fix: a zone may only answer when the engine has NOT named the script; an
+   unlearned script name yields "unknown" rather than a contradicting guess. Learned-pair lookup
+   is now case-insensitive (`Armenian1` vs `armenian1`).
+2. **`drive_to` without `speed_mps` — every recovery drive was rejected.** Live:
+   `bridge rejected action type=drive_to status=400 invalid_params "drive_to requires numeric
+   speed_mps"`. Both hand-built bodies were missing it, so the mutual-stall deadlock breaker has
+   been **silently 400ing since it was written** — a hidden cause of the historical thrash loop.
+   Fixed both; a structural test now pins the whole class.
+3. **`dxcam` import could kill the harness.** `ScreenGrabber.__init__` guarded only `ImportError`,
+   but dxcam builds its DXGI factory AT IMPORT and raises `COMError` (seen twice:
+   `COMError(-2005270494)`). That escaped the constructor and bypassed `Harness.__init__`'s
+   existing "run without screenshots" path, killing the process before its first tick. Now it
+   degrades, loudly, as designed. (`dxcam.create()` had the same exposure; also closed.)
+   **Root cause of the COMError itself: session.** dxcam can only enumerate outputs from the
+   interactive console session; an SSH-launched harness has no desktop. Started from the
+   `WASTED-Harness` scheduled task (Interactive, session 1) capture works — no "screenshots
+   disabled" line, verified.
+4. **Director token cap too small for the grown prompt.** First call of the session:
+   `response hit max_tokens (1200) and the decision JSON is truncated`. The 1200 figure was
+   measured against the pre-v1.10 prompt; the dynamic context has since grown. Raised to 3000
+   (a ceiling, not a spend: billing is per token generated).
+5. **Retaliation was too slow to matter.** He had to lose 10 HP inside 4 s — two or three punches —
+   before the reflex would consider hitting back; a GTA melee is decided in about that many.
+   `DAMAGE_ATTACK_HP` 10 → 4 (one clean punch). The 8 m attacker-proximity gate still prevents
+   scrapes from starting fistfights, and a new test pins that.
+6. **He drove too slowly to keep up.** Cruise 18 m/s (65 km/h) against mission NPCs that do 30 m/s.
+   Cruise 18→24, rushed 26→34, rush-style distance 150→60 m; follow escalation now triggers on a
+   12 m gap over 2.5 s (was 25 m over 6 s). All still human-attainable speeds — no cheats.
+
+**New: commentary grounding (`brain/characters.py`).** A line naming a story character who is not
+in `nearby.peds` (and is not the protagonist) is not published. Keyed off the game's own ped model
+names, so streets, zones and car names are never touched. Tested against the exact lines he said on
+stream ("keep Dave alive", "Trevor's got the rifle").
+
+**Process note worth keeping:** the SHVDN research brief's tentative hashes for two tasks were
+WRONG, and the bridge executor caught both by disassembling the pinned DLL rather than trusting the
+brief — `flee_police` polls `SmartFleePoint` (it issues `TASK_SMART_FLEE_COORD`), and `wander_drive`
+has its own `VehicleDriveWander` hash. The verifier then re-derived both from the same bytecode.
+
+**Not verified (the operator disabled the API key at this point, deliberately):** whether these
+changes make him play WELL. Everything above is "deployed, started, and observed", plus a green
+599-test suite. The 20-minute unattended behavioural sample and measured $/hour still owe.
 
 ## 2026-09-02 — WANTED IS LIVE. First verified play session on the real game.
 

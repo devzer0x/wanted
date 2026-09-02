@@ -45,10 +45,17 @@ MAX_DECISION_TOKENS = 500
 #: which is exactly why the tactical tier never showed the bug.
 #:
 #: Measured completions at the same prompt: cap 1200 -> 443 tokens, `end_turn`, parses.
-#: cap 2000 -> 599 tokens (the model spends more thinking when offered more). 1200 leaves ~2.7x
-#: headroom over the observed need and bills only what is generated: 443 out-tokens at Sonnet 5's
-#: $10/MTok is $0.0044 per director call, ~$0.05/hour at the director's cadence.
-DIRECTOR_MAX_DECISION_TOKENS = 1200
+#: cap 2000 -> 599 tokens (the model spends more thinking when offered more).
+#:
+#: RAISED 1200 -> 3000 after the v1.10 deploy, 2026-09-02, from the live log: the FIRST director
+#: call of the session failed with `response hit max_tokens (1200) and the decision JSON is
+#: truncated`. The 1200 measurement was taken against the pre-v1.10 prompt; the dynamic context has
+#: since grown (retrieved knowledge, mission state hint, mission.script identity), and a bigger
+#: context is exactly what makes the model think longer. The old headroom was measured against a
+#: prompt that no longer exists, which is why it stopped holding. 3000 restores multiples of
+#: headroom over the largest completion ever observed (599) and costs nothing extra when unused:
+#: `max_tokens` is a ceiling, and billing is per token GENERATED, not per token allowed.
+DIRECTOR_MAX_DECISION_TOKENS = 3000
 
 #: Hard floor between two tactical calls, applied to EVERY trigger — the event
 #: ones included, not just the timer. This is what actually bounds the bill:
@@ -111,7 +118,10 @@ def verify_model_ids(
     real billed calls, so their usage goes into the books like any other —
     small, but the books are meant to be a measurement, not an estimate.
     """
-    for mp in (pricing.tactical, pricing.director):
+    tiers = [pricing.tactical, pricing.director]
+    if pricing.tactical_mission is not None:
+        tiers.append(pricing.tactical_mission)
+    for mp in tiers:
         try:
             response = client.messages.create(
                 model=mp.id,
@@ -136,10 +146,17 @@ def verify_prefix_cacheable(client: anthropic.Anthropic, pricing: Pricing) -> di
     caller skips this with a clear message when no key is configured.
     """
     counts: dict[str, int] = {}
-    for tier, mp, prefix in (
+    checks: list[tuple[str, Any, str]] = [
         ("tactical", pricing.tactical, tactical_static_prefix()),
         ("director", pricing.director, director_static_prefix()),
-    ):
+    ]
+    if pricing.tactical_mission is not None:
+        # The mission tier sends the SAME static prefix the tactical tier
+        # does (it is still a tactical decision, just on a smarter model
+        # mid-mission — see TacticalBrain._call) — verify it against ITS OWN
+        # cache minimum and model id, not assumed from the tactical result.
+        checks.append(("tactical_mission", pricing.tactical_mission, tactical_static_prefix()))
+    for tier, mp, prefix in checks:
         try:
             result = client.messages.count_tokens(
                 model=mp.id,
@@ -391,7 +408,7 @@ class TacticalBrain:
         self._prefix = tactical_static_prefix()
         self._call_api = BilledCall(client, pricing, on_cost)
 
-    def decide(self, dynamic_context: str) -> DecisionResult:
+    def decide(self, dynamic_context: str, mission_active: bool = False) -> DecisionResult:
         """One structured decision. Retries once on validation/API failure, then
         raises DecisionFailedError (reflex keeps control, per CONTRACTS §2).
 
@@ -399,12 +416,18 @@ class TacticalBrain:
         correct it. Observed live against the real game — the model returned a 56-word
         `thought` against the 40-word contract cap, the retry sent the identical prompt,
         it returned 57 words, and the whole decision was discarded. The agent stood still
-        mid-mission because nobody ever told him what was wrong."""
+        mid-mission because nobody ever told him what was wrong.
+
+        `mission_active` — the `mission.active` flag of the state THIS decision is
+        being made on — selects the mission-time tactical model (WP-C) when the
+        caller's pricing.yaml configures one. Absent config or `mission_active=False`
+        falls straight back through to the normal tactical tier: identical to
+        today's behaviour."""
         last_exc: Exception | None = None
         context = dynamic_context
         for attempt in (1, 2):
             try:
-                return self._call(context)
+                return self._call(context, mission_active)
             except (anthropic.APIError, pydantic.ValidationError, ValueError) as exc:
                 last_exc = exc
                 log.warning(
@@ -419,7 +442,22 @@ class TacticalBrain:
             f"(last error: {type(last_exc).__name__}: {last_exc})"
         ) from last_exc
 
-    def _call(self, dynamic_context: str) -> DecisionResult:
+    def _call(self, dynamic_context: str, mission_active: bool = False) -> DecisionResult:
+        mission_tier = self._pricing.tactical_mission
+        if mission_active and mission_tier is not None:
+            # Mid-mission: swap in the smarter (and pricier) model for the
+            # SAME tactical decision, on the SAME static prefix — only the
+            # model changes. `max_tokens` MUST be raised to the director's own
+            # floor: Sonnet 5 emits a thinking block billed against
+            # `max_tokens` before its text, and the tactical tier's normal cap
+            # (500) is exactly the value that truncated the director's JSON
+            # mid-`params` when this was first measured (see
+            # DIRECTOR_MAX_DECISION_TOKENS above) — the same failure mode
+            # would silently eat every mission-tier decision at the default.
+            return self._call_api.run(
+                mission_tier.id, self._prefix, dynamic_context,
+                max_tokens=DIRECTOR_MAX_DECISION_TOKENS,
+            )
         return self._call_api.run(
             self._pricing.tactical.id, self._prefix, dynamic_context
         )

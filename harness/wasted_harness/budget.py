@@ -41,6 +41,15 @@ class Pricing:
     fetched: str
     tactical: ModelPricing
     director: ModelPricing
+    #: OPTIONAL (WP-C): the mission-time tactical model. `None` when the
+    #: `models.tactical_mission` key is absent from pricing.yaml — which is
+    #: today's behaviour exactly (Haiku always, no mid-mission upgrade). Its
+    #: id is the SAME dateless `claude-sonnet-5` id `director` uses (a
+    #: deliberate choice — see pricing.yaml's own comment — not two
+    #: independently pinned models), so `for_model` checks it explicitly
+    #: rather than relying on an id match against `director` to keep working
+    #: if the two ever price apart.
+    tactical_mission: ModelPricing | None = None
 
     @classmethod
     def load(cls, path: Path) -> Pricing:
@@ -63,22 +72,37 @@ class Pricing:
                     cache_write_5m_per_mtok=float(m["cache_write_5m_per_mtok"]),
                     min_cacheable_prefix_tokens=int(m["min_cacheable_prefix_tokens"]),
                 )
+            tactical_mission = None
+            mission_raw = models.get("tactical_mission")
+            if mission_raw is not None:
+                tactical_mission = ModelPricing(
+                    id=str(mission_raw["id"]),
+                    input_per_mtok=float(mission_raw["input_per_mtok"]),
+                    output_per_mtok=float(mission_raw["output_per_mtok"]),
+                    cache_read_per_mtok=float(mission_raw["cache_read_per_mtok"]),
+                    cache_write_5m_per_mtok=float(mission_raw["cache_write_5m_per_mtok"]),
+                    min_cacheable_prefix_tokens=int(mission_raw["min_cacheable_prefix_tokens"]),
+                )
             return cls(
                 source_url=str(raw["source_url"]),
                 fetched=str(raw["fetched"]),
                 tactical=tiers["tactical"],
                 director=tiers["director"],
+                tactical_mission=tactical_mission,
             )
         except (KeyError, TypeError, ValueError) as exc:
             raise ConfigError(f"pricing file {path} is malformed: {exc!r}") from exc
 
     def for_model(self, model_id: str) -> ModelPricing:
-        for m in (self.tactical, self.director):
+        candidates = [self.tactical, self.director]
+        if self.tactical_mission is not None:
+            candidates.append(self.tactical_mission)
+        for m in candidates:
             if m.id == model_id:
                 return m
+        known = ", ".join(m.id for m in candidates)
         raise ConfigError(
-            f"model {model_id!r} is not in pricing.yaml "
-            f"(known: {self.tactical.id}, {self.director.id}); refusing to guess a price."
+            f"model {model_id!r} is not in pricing.yaml (known: {known}); refusing to guess a price."
         )
 
 

@@ -18,7 +18,7 @@ import random
 from types import SimpleNamespace
 from typing import Any
 
-from support import throwaway_totals
+from support import throwaway_learned_scripts, throwaway_totals
 
 from wasted_harness.behavior.activities import ActivityPicker, ActivityRunner
 from wasted_harness.behavior.humanizer import MoodModel
@@ -27,7 +27,10 @@ from wasted_harness.behavior.missions import (
     FOLLOW_CHASE_SPEED_MPS,
     FOLLOW_GAP_WIDEN_M,
     FOLLOW_GAP_WINDOW_S,
-    FOLLOW_TARGET_LOST_S,
+    FOLLOW_RECOVERY_EPISODE_RESET_S,
+    FOLLOW_RECOVERY_EXHAUSTED_S,
+    FOLLOW_RECOVERY_RUNG_GAP_S,
+    FOLLOW_RECOVERY_VEHICLE_RADIUS_M,
     MUTUAL_STALL_WINDOW_S,
     STUCK_WINDOW_S,
     WALK_ARRIVE_RADIUS_M,
@@ -138,7 +141,7 @@ def make_state(**over: Any) -> GameState:
             "id": over.pop("task_id", None),
             "type": over.pop("task_type", None),
             "status": over.pop("task_status", "idle"),
-            "detail": "",
+            "detail": over.pop("task_detail", ""),
         },
         "bridge": {"version": "1.0.0", "edition": "legacy"},
     }
@@ -263,6 +266,30 @@ def test_reissues_once_its_own_task_reaches_a_terminal_state() -> None:
         task_id="t-mission-1", task_status="done",
     )
     step = f.plan(done)
+    assert step is not None
+    assert step["type"] == "drive_to"
+
+
+def test_a_task_cleared_by_the_game_reissues_just_like_any_other_failed_task() -> None:
+    """CONTRACTS v1.10: when the game itself clears a task (mission scripted
+    beats, cutscenes), `last_task` reports `failed` + `detail:
+    "cleared_by_game"` instead of hanging in `running` forever. Nothing in
+    this package may special-case that detail string — a `failed` status
+    already re-plans regardless of WHY it failed, and this must keep being
+    true without any new code path."""
+    f = MissionFollower()
+    far = make_state(
+        mission_active=True, in_vehicle=True, pos=(0.0, 0.0, 0.0),
+        objective_blip={"pos": (300.0, 0.0, 0.0)},
+    )
+    f.plan(far)
+    f.bind_task("t-mission-1")
+    cleared = make_state(
+        mission_active=True, in_vehicle=True, pos=(50.0, 0.0, 0.0),
+        objective_blip={"pos": (300.0, 0.0, 0.0)},
+        task_id="t-mission-1", task_status="failed", task_detail="cleared_by_game",
+    )
+    step = f.plan(cleared)
     assert step is not None
     assert step["type"] == "drive_to"
 
@@ -587,6 +614,8 @@ class _ReflexStub:
         self.clips = None  # no OBS here, so events go down the batched path
         self._mission_started_iso = None
         self._mission_tokens = 0
+        self.current_mission = None
+        self.learned_scripts = throwaway_learned_scripts()
         self.writer = _Recorder()
         self.bus = _Recorder()
         self.memory = _Recorder()
@@ -988,6 +1017,7 @@ def _mission_end_harness(outcome: MissionOutcome) -> Harness:
     h.counters = h.totals.counters()
     h._mission_started_iso = None
     h._mission_tokens = 0
+    h.learned_scripts = throwaway_learned_scripts()
     return h
 
 
@@ -1484,11 +1514,14 @@ def _event_harness(events):
     h.counters = h.totals.counters()
     h._mission_started_iso = None
     h._mission_tokens = 0
+    h.learned_scripts = throwaway_learned_scripts()
     return h
 
 
 _STATE = SimpleNamespace(
-    mission=SimpleNamespace(active=True, cutscene_active=False, random_event_active=False),
+    mission=SimpleNamespace(
+        active=True, cutscene_active=False, random_event_active=False, script=None
+    ),
     player=SimpleNamespace(dead=False, arrested=False),
     location=SimpleNamespace(zone="Downtown Vinewood", street="Vinewood Blvd"),
 )
@@ -1541,26 +1574,33 @@ def test_a_threat_post_that_never_reached_the_game_does_not_start_the_hold() -> 
 # `nearby.peds[].pos`) by the explicit builder above — no invented recordings.
 
 
-def _friendly_ped(distance: float, handle: int = 501) -> dict[str, Any]:
+def _friendly_ped(
+    distance: float, handle: int = 501, in_vehicle_handle: int | None = None
+) -> dict[str, Any]:
     return {
         "handle": handle,
         "model": "ig_lamardavis",
         "distance": distance,
         "relationship": "friendly",
         "pos": {"x": distance, "y": 0.0, "z": 0.0},
+        "in_vehicle_handle": in_vehicle_handle,
     }
 
 
-def _vehicle(distance: float, handle: int = 900) -> dict[str, Any]:
+def _vehicle(
+    distance: float, handle: int = 900, driver: str = "empty",
+    pos: tuple[float, float, float] | None = None,
+) -> dict[str, Any]:
     """A nearby car, contract-shaped — enough for `enter_nearest_vehicle` to be plausible."""
+    x, y, z = pos if pos is not None else (distance, 0.0, 0.0)
     return {
         "handle": handle,
         "model": "buffalo",
         "display_name": "Buffalo",
         "class": "Sports",
         "distance": distance,
-        "driver": "empty",
-        "pos": {"x": distance, "y": 0.0, "z": 0.0},
+        "driver": driver,
+        "pos": {"x": x, "y": y, "z": z},
     }
 
 
@@ -1765,42 +1805,146 @@ def test_a_widening_gap_while_driving_asks_for_chase_speed_once() -> None:
     assert "PULLING AWAY" in f.note()
 
 
-def test_a_friendly_who_stays_gone_is_target_lost() -> None:
-    """"Franklin lost Lamar": tailing nobody for over a minute is what a
-    viewer sees. One `stop`, then quiet."""
+# --- MissionFollower: target-lost RECOVERY LADDER (v1.10 work package) ------
+#
+# Replaces the old single "wait 10s, say `stop` once" behaviour. See the
+# module docstring above FOLLOW_RECOVERY_VEHICLE_RADIUS_M for the ladder
+# itself; these tests exercise each rung and the episode bookkeeping.
+
+
+def test_vehicle_handoff_fires_immediately_with_no_wait_when_the_last_in_vehicle_handle_is_known() -> None:
+    """The exact live bug: the followed friendly gets into a vehicle and
+    disappears. Rung (a) fires on the FIRST missing tick — no 10s wait, no
+    `stop` — because the last-seen `in_vehicle_handle` names the car."""
+    clock = FakeClock()
+    f = MissionFollower(clock=clock)
+    f.plan(_tail_state(nearby_peds=[_friendly_ped(5.0, in_vehicle_handle=None)]))
+    f.bind_task("t-tail-1")
+    running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
+    # He gets in a car; v1.10 keeps him in nearby.peds with the handle set —
+    # the tail keeps following HIM (he is still directly visible), but the
+    # recovery ladder is now armed with a fact it did not have before.
+    clock.tick(0.3)
+    f.plan(_tail_state(nearby_peds=[_friendly_ped(5.0, in_vehicle_handle=4242)], **running))
+    assert f._follow_last_in_vehicle_handle == 4242
+    # Now he actually vanishes from nearby.peds entirely (an older bridge, a
+    # render-distance edge case — the last-seen handle is what saves this).
+    clock.tick(0.3)
+    step = f.plan(_tail_state(nearby_peds=[], **running))
+    assert step == {"type": "follow_entity", "params": {"handle": 4242, "in_vehicle": False}}
+    assert "vehicle" in f.note() and "4242" in f.note()
+
+
+def test_rungs_never_repeat_within_one_loss_episode() -> None:
+    """No known vehicle at all: rung (a) and (c) are inapplicable, so rung
+    (d) — reacquire — is the first (and, within the episode, ONLY) thing that
+    fires; it must not be posted a second time."""
+    clock = FakeClock()
+    f = MissionFollower(clock=clock)
+    f.plan(_tail_state())  # last-seen pos becomes (18, 0, 0)
+    f.bind_task("t-tail-1")
+    running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
+    clock.tick(1.0)
+    first = f.plan(_tail_state(nearby_peds=[], **running))
+    assert first == {"type": "walk_to", "params": {"x": 18.0, "y": 0.0, "z": 0.0, "run": True}}
+    assert f._recovery_tried == {"reacquire"}
+    for _ in range(4):
+        clock.tick(FOLLOW_RECOVERY_RUNG_GAP_S)
+        step = f.plan(_tail_state(nearby_peds=[], **running))
+        assert step is None, "reacquire already tried this episode; nothing else applies yet"
+
+
+def test_nearest_unclaimed_vehicle_within_range_is_tried_when_no_own_handle_is_known() -> None:
+    """Rung (c): a pre-v1.10 bridge (or any tick with no `in_vehicle_handle`)
+    still gets a real hypothesis — a nearby, unclaimed car close to where he
+    was last seen — before falling back to reacquiring on foot."""
+    clock = FakeClock()
+    f = MissionFollower(clock=clock)
+    f.plan(_tail_state(nearby_peds=[_friendly_ped(5.0)]))  # last-seen pos (5, 0, 0)
+    f.bind_task("t-tail-1")
+    running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
+    clock.tick(1.0)
+    nearby_vehicles = [
+        _vehicle(999.0, handle=1, driver="player", pos=(4.0, 0.0, 0.0)),  # his own car: excluded
+        _vehicle(
+            999.0, handle=2, driver="empty",
+            pos=(5.0 + FOLLOW_RECOVERY_VEHICLE_RADIUS_M + 1.0, 0.0, 0.0),
+        ),  # just outside the radius
+        _vehicle(999.0, handle=3, driver="empty", pos=(9.0, 0.0, 0.0)),  # within range: this one
+    ]
+    step = f.plan(_tail_state(nearby_peds=[], nearby_vehicles=nearby_vehicles, **running))
+    assert step == {"type": "follow_entity", "params": {"handle": 3, "in_vehicle": False}}
+    assert f._recovery_tried == {"nearest_vehicle"}
+
+
+def test_a_pre_v1_10_state_with_nothing_nearby_degrades_to_reacquire_then_exhausted() -> None:
+    """No `in_vehicle_handle`, no nearby vehicle at all: the ladder still
+    degrades gracefully through (c) skipped -> (d) reacquire -> (e) exhausted,
+    never crashing and never guessing."""
+    clock = FakeClock()
+    f = MissionFollower(clock=clock)
+    f.plan(_tail_state(in_vehicle=True, nearby_peds=[_friendly_ped(5.0)]))
+    f.bind_task("t-tail-1")
+    running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
+    clock.tick(1.0)
+    step = f.plan(_tail_state(in_vehicle=True, nearby_peds=[], **running))
+    assert step is not None and step["type"] == "drive_to", "in a car: reacquire drives, not walks"
+    assert step["params"]["style"] == "rushed"
+    assert step["params"]["arrive_radius_m"] == DRIVE_ARRIVE_RADIUS_M
+    clock.tick(FOLLOW_RECOVERY_EXHAUSTED_S + FOLLOW_RECOVERY_RUNG_GAP_S)
+    exhausted = f.plan(_tail_state(in_vehicle=True, nearby_peds=[], **running))
+    assert exhausted == {"type": "stop", "params": {}}, "the ladder ran out; one stop, exactly as before"
+    for _ in range(3):
+        clock.tick(5.0)
+        assert f.plan(_tail_state(in_vehicle=True, nearby_peds=[], **running)) is None, "said once"
+
+
+def test_a_brief_regain_then_loss_continues_the_ladder_rather_than_restarting_it() -> None:
+    """The brief's own rule: "if the SAME loss recurs immediately ... do not
+    restart the ladder from rung (a) blindly — continue where it left off"."""
     clock = FakeClock()
     f = MissionFollower(clock=clock)
     f.plan(_tail_state())
     f.bind_task("t-tail-1")
     running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
     clock.tick(1.0)
-    assert f.plan(_tail_state(nearby_peds=[], **running)) is None, "a brief gap is not gone"
-    clock.tick(FOLLOW_TARGET_LOST_S + 0.1)
-    assert f.plan(_tail_state(nearby_peds=[], **running)) == {"type": "stop", "params": {}}
-    for _ in range(5):
-        clock.tick(5.0)
-        assert f.plan(_tail_state(nearby_peds=[], **running)) is None, "said once"
+    first = f.plan(_tail_state(nearby_peds=[], **running))
+    assert first == {"type": "walk_to", "params": {"x": 18.0, "y": 0.0, "z": 0.0, "run": True}}
+    assert f._recovery_tried == {"reacquire"}
+
+    clock.tick(0.5)
+    # Regained briefly — well under FOLLOW_RECOVERY_EPISODE_RESET_S.
+    f.plan(_tail_state(nearby_peds=[_friendly_ped(20.0)], **running))
+    assert f._recovery_tried == {"reacquire"}, "a brief regain must not reset ladder progress"
+
+    clock.tick(FOLLOW_RECOVERY_RUNG_GAP_S + 0.1)
+    # Lost again: "reacquire" must not fire a second time, and nothing else
+    # is applicable (still no known vehicle), so nothing posts.
+    again = f.plan(_tail_state(nearby_peds=[], **running))
+    assert again is None
+    assert f._recovery_tried == {"reacquire"}
 
 
-def test_a_friendly_who_comes_back_within_the_window_is_not_lost() -> None:
+def test_holding_the_regained_target_long_enough_resets_the_ladder_for_next_time() -> None:
     clock = FakeClock()
     f = MissionFollower(clock=clock)
     f.plan(_tail_state())
     f.bind_task("t-tail-1")
     running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
-    clock.tick(FOLLOW_TARGET_LOST_S - 1.0)
-    assert f.plan(_tail_state(nearby_peds=[], **running)) is None
-    clock.tick(0.3)
-    # The friendly MOVES between checks. This test is about the target-lost clock, and a tail on a
-    # target that never moves while he never moves is a mutual stall — a different situation with
-    # its own answer (see the deadlock tests below). Keeping them apart keeps both honest.
-    assert f.plan(_tail_state(nearby_peds=[_friendly_ped(20.0)], **running)) is None, (
-        "still his own task; nothing to re-post"
-    )
-    clock.tick(FOLLOW_TARGET_LOST_S + 1.0)
-    assert f.plan(_tail_state(nearby_peds=[_friendly_ped(24.0)], **running)) is None, (
-        "the absence clock restarted"
-    )
+    clock.tick(1.0)
+    assert f.plan(_tail_state(nearby_peds=[], **running)) is not None
+    assert f._recovery_tried == {"reacquire"}
+
+    clock.tick(1.0)
+    f.plan(_tail_state(nearby_peds=[_friendly_ped(20.0)], **running))  # regained
+    assert f._recovery_regained_at is not None
+    clock.tick(FOLLOW_RECOVERY_EPISODE_RESET_S + 1.0)
+    f.plan(_tail_state(nearby_peds=[_friendly_ped(22.0)], **running))  # held continuously
+    assert f._recovery_tried == set(), "a genuinely fresh episode resets the ladder"
+
+    clock.tick(1.0)
+    again = f.plan(_tail_state(nearby_peds=[], **running))
+    assert again is not None and again["type"] == "walk_to", "rung (d) is available again"
 
 
 def test_a_different_companion_restarts_the_tail() -> None:
@@ -1825,12 +1969,16 @@ def test_the_follow_note_tells_the_brain_what_is_happening() -> None:
     assert "not pursuing" in f.note()
     f.plan(_tail_state())
     assert "tailing the friendly" in f.note()
-    # He is gone for good: the note must stop claiming a tail that is over.
+    # He vanishes: the note must stop claiming a tail that is over, AND must
+    # never fall back to a bare "no friendly in range" while a loss episode is
+    # being actively worked — the whole point of the recovery ladder (brief:
+    # "Never again a bare 'no friendly in range' during an active loss
+    # episode").
     f.plan(_tail_state(nearby_peds=[], task_status="running", task_type="follow_entity"))
-    assert "tailing the friendly" in f.note(), "a one-tick gap is not a lost target"
-    f._follow_missing_since = f.clock() - (FOLLOW_TARGET_LOST_S + 1.0)
-    f.plan(_tail_state(nearby_peds=[], task_status="running", task_type="follow_entity"))
-    assert "no friendly in range" in f.note()
+    note = f.note()
+    assert "tailing the friendly" not in note
+    assert "no friendly in range" not in note
+    assert "vanished" in note
 
 
 # --- `_reflex` wiring: the damage-driven threat path and the stall breaker ----
@@ -2035,7 +2183,17 @@ def test_two_men_standing_still_eventually_makes_him_act() -> None:
 
 
 def test_a_moving_crewmate_is_never_a_deadlock() -> None:
-    """The tail is working; leave it alone. Only both-still is the deadlock."""
+    """The tail is working; leave it alone. Only both-still is the deadlock.
+
+    "Working" means he is KEEPING UP: the crewmate's position keeps changing
+    while the gap between them stays put. Distance is what the escalation
+    watches, and a tail that holds its distance needs no help. (An earlier
+    version of this test walked the target 8 m -> 36 m away and asserted the
+    same thing, which stopped being true once the widening-gap thresholds were
+    tightened on 2026-09-02: a target steadily pulling away on foot SHOULD send
+    him after a car. That is the escalation working, not a deadlock
+    misfiring - so the case belongs in the escalation's own test, not here.)
+    """
     clock = FakeClock()
     f = MissionFollower(clock=clock)
     f.plan(_tail_state(nearby_peds=[_friendly_ped(8.0)]))
@@ -2043,10 +2201,20 @@ def test_a_moving_crewmate_is_never_a_deadlock() -> None:
     running = {"task_id": "t-tail-1", "task_status": "running", "task_type": "follow_entity"}
     for i in range(8):
         clock.tick(5.0)
-        moving = [_friendly_ped(8.0 + i * 4.0)]
-        step = f.plan(_tail_state(nearby_peds=moving, **running))
+        # Both of them moving down the street together: the pos changes every
+        # tick (so `_mutual_stall` re-anchors), the gap does not (so nothing
+        # escalates).
+        keeping_up = [_friendly_ped(8.0)]
+        keeping_up[0]["pos"] = {"x": 8.0 + i * 20.0, "y": 0.0, "z": 0.0}
+        step = f.plan(
+            _tail_state(
+                nearby_peds=keeping_up,
+                pos=(i * 20.0, 0.0, 0.0),
+                **running,
+            )
+        )
         assert step is None or step["type"] != "enter_nearest_vehicle", (
-            "a target that is moving is not a stall"
+            "a target that is moving, at a steady distance, is not a stall"
         )
 
 
@@ -2078,3 +2246,35 @@ def test_the_deadlock_breaker_does_not_fire_every_tick() -> None:
         if step is not None and step["type"] == "enter_nearest_vehicle":
             breaks += 1
     assert breaks <= 2, f"cooldown should hold it to at most a couple of attempts, got {breaks}"
+
+
+def test_every_drive_to_the_follower_emits_carries_a_numeric_speed() -> None:
+    """CONTRACTS §1: `drive_to` params are `{x,y,z, speed_mps, style, arrive_radius_m}`
+    and the bridge enforces it — a missing speed is a hard 400.
+
+    OBSERVED LIVE 2026-09-02, on the very first run of the recovery ladder:
+
+        mission follow: target-lost recovery ladder rung=reacquire task=drive_to
+        bridge rejected action type=drive_to status=400 error=invalid_params
+                              detail="drive_to requires numeric speed_mps"
+
+    Both of this module's hand-built `drive_to` bodies (the mutual-stall
+    deadlock breaker and the ladder's reacquire rung) omitted `speed_mps`, so
+    NEITHER recovery has ever reached the game — the deadlock breaker has been
+    silently 400ing since it was written, which is part of why he thrashed.
+    `navigation.navigate_to` always got this right; only the hand-rolled copies
+    did not. A structural check pins the whole class rather than the two
+    instances: any future hand-built drive_to has to carry a speed too.
+    """
+    import inspect
+
+    from wasted_harness.behavior import missions as missions_mod
+
+    blocks = inspect.getsource(missions_mod).split('"type": "drive_to"')[1:]
+    assert blocks, "expected at least one hand-built drive_to in this module"
+    for block in blocks:
+        head = block[:320]
+        assert "speed_mps" in head, (
+            "a drive_to task is built without speed_mps; the bridge rejects it with "
+            f"400 invalid_params. Offending block starts: {head[:160]!r}"
+        )

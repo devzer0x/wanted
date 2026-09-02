@@ -490,7 +490,7 @@ class _RaisingBrain:
     def _attempt(self) -> None:
         raise self._cause
 
-    def decide(self, _context: str):
+    def decide(self, _context: str, mission_active: bool = False):
         self.calls += 1
         try:
             self._attempt()
@@ -753,3 +753,37 @@ def test_a_ticking_game_is_never_reported_as_a_blocking_screen() -> None:
     assert h.run() == 0
     assert h._screen_blocked is False
     assert h.primitives.keys == []
+
+
+def test_a_dxcam_import_that_raises_a_com_error_degrades_instead_of_killing_the_harness(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """dxcam builds its DXGI factory at MODULE IMPORT time, so `import dxcam`
+    can raise `_ctypes.COMError` — not `ImportError`.
+
+    Observed on the server 2026-09-02, twice in a row: the box has two display
+    adapters (the virtual display driver plus the Intel iGPU) and one of them
+    reported no currently-available output, so the import blew up with
+    `COMError(-2005270494)`. `ScreenGrabber.__init__` only guarded `ImportError`,
+    so the COMError escaped `Harness.__init__`'s `except ScreenshotUnavailableError`
+    and killed the whole process on startup. The agent could not play at all because
+    a SCREENSHOT was unavailable — while every decision he actually needs comes
+    from the bridge. Capture is a nice-to-have; playing is not.
+    """
+    import builtins
+
+    from wasted_harness import perception
+
+    real_import = builtins.__import__
+
+    def _explode(name: str, *args: object, **kwargs: object):
+        if name == "dxcam":
+            raise OSError("[WinError -2005270494] a resource is not available")
+        return real_import(name, *args, **kwargs)  # type: ignore[arg-type]
+
+    monkeypatch.setattr(builtins, "__import__", _explode)
+    monkeypatch.setattr(perception.sys, "platform", "win32")
+
+    with pytest.raises(perception.ScreenshotUnavailableError) as caught:
+        perception.ScreenGrabber()
+    assert "-2005270494" in str(caught.value), "the real COM reason must survive into the message"

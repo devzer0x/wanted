@@ -1,9 +1,41 @@
 # WANTED — CONTRACTS
 
-**Version: 1.9 — FROZEN 2026-09-02.** Executors treat this file as read-only; changes go through
+**Version: 1.10 — FROZEN 2026-09-02.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
 Changelog:
+- v1.10 (root-caused from the 2026-09-02 live follow-mission failure — "drives and then stops").
+  Four changes, three additive and one a semantic DEFECT FIX:
+  1. **`objective_blip.handle` / `route_blips[].handle` now carry the ENTITY handle when
+     `kind == "entity"`** (the ped/vehicle the blip is attached to, resolved via the game's own
+     blip→entity lookup). Until now the bridge emitted the BLIP's handle — a different handle
+     space — so `follow_entity` on "the game's own route to Lamar's car" resolved no entity and
+     failed `target_lost` on arrival; the follower's re-post latch then held, nothing was driving,
+     and the car coasted to a stop. That was never usable and no consumer can have depended on it,
+     which is why this is a fix rather than a break. When the blip is an entity blip but the
+     entity cannot be resolved, the bridge emits `kind: "coord"` (the position is still honest).
+  2. **`nearby.peds[]` gains `in_vehicle_handle: int|null`** (null = on foot). Research
+     (docs/research: SHVDN `World.GetNearbyPeds` is a raw CPed-pool scan with only radius+model
+     filters — seated peds are NOT excluded) killed the first theory that occupants vanish from
+     the scan; what actually happens is the crewmate's car pulls beyond the scan radius within
+     seconds, and the long-range source (the route blip on their car) was unusable because of the
+     handle defect fixed in item 1. `in_vehicle_handle` exists so the harness can do the
+     ped→vehicle hand-off the instant the crewmate mounts up (follow the CAR, whose blip and
+     handle outlive the ped's presence in `nearby`), instead of only discovering the loss later.
+     Same 8-cap, same distance sort, same filters as v1.5/v1.6.
+  3. **`mission.script: string|null`** — the active story-mission script name (e.g.
+     `"armenian1"`), read from the game's own running script threads and filtered against the
+     pinned allowlist in docs/research/brief-mission-scripts.json, emitted only while
+     `mission.active`; null when unknown. Script→TITLE pairings are deliberately NOT shipped
+     (research found no verifiable table): the harness treats the name as a stable identity key
+     and learns script↔title pairs from the real game (OCR'd title card observed together with
+     `mission.script`), persisted in harness state.
+  4. **Task liveness:** when the game itself clears a task the bridge issued (mission scripted
+     beats and cutscenes do this), `last_task` reports `failed` with detail `"cleared_by_game"`
+     instead of `running` forever. Consumers already handle `failed` + re-plan; `running` must
+     mean the engine is actually still executing the task.
+  Harness types widen first (optional, defaulted), then the bridge emits — the v1.5/v1.6
+  sequencing. No new task type; the §1 verb set is unchanged.
 - v1.9 (behavioural, root-caused from a live stream failure): `follow_entity` gains `style` and
   `speed_mps`. Until now `StartFollowEntity` hard-coded `DrivingStyles.Normal` and a 15 m/s cruise
   cap (`TaskEngine.cs`), so a tail obeyed red lights and topped out at 54 km/h while the NPC being
@@ -157,11 +189,16 @@ Field notes:
 - `mission.active` ⇔ `GET_MISSION_FLAG`; `mission.random_event_active` ⇔ `GET_RANDOM_EVENT_FLAG`
   (Strangers & Freaks style content sets the latter, not the former — RESEARCH.md §2).
 - `mission.objective_blip` (when identifiable): `{"pos": {x,y,z}, "kind": "coord|entity",
-  "handle": <blip handle>}`. Starting identification rule (empirical convention, validated per
-  mission in Phase 4): sprite Standard(1) + colour Yellow(66) + route enabled; refinements are
-  documented in bridge/README without changing this field's shape.
-- `mission.route_blips[]` (v1.8, nearest first, at most 5): `{"pos": {x,y,z},
-  "kind": "coord|entity", "handle": <blip handle>, "color": "<BlipColor member name>"}` — every
+  "handle": <entity handle when kind=="entity", else the blip's own handle — see v1.10>}`.
+  Identification rule (since v1.8): the bridge picks its best candidate from the ROUTED blip set
+  (preferring yellow), falling back to the legacy sprite Standard(1) + colour Yellow(66) + route
+  convention only when nothing is routed; details in bridge/README without changing this field's
+  shape.
+- `mission.script` (v1.10): the active story-mission script name (e.g. `"armenian1"`) from the
+  pinned table in docs/RESEARCH.md, or null. Only ever non-null while `mission.active`.
+- `mission.route_blips[]` (v1.8, nearest first, at most 5; handle semantics fixed in v1.10):
+  `{"pos": {x,y,z},
+  "kind": "coord|entity", "handle": <entity handle>, "color": "<BlipColor member name>"}` — every
   blip the game has plotted a GPS route to, i.e. the yellow line on the minimap made readable as
   data. `objective_blip` is the bridge's single best pick out of this same set. Use the list when
   there is more than one route (a follow target plus a drop-off) or when the pick looks wrong.
@@ -171,14 +208,17 @@ Field notes:
 - `nearby.vehicles[]` (top 8 by distance): `{"handle": 5678, "model": "...", "display_name": "...",
   "class": "...", "distance": 12.3, "driver": "player|npc|empty"}`.
 - `nearby.peds[]` (top 8): `{"handle": 9012, "model": "...", "distance": 5.2,
-  "relationship": "neutral|hostile|friendly", "pos": {x,y,z}}`. `friendly` (v1.5) = the engine's
+  "relationship": "neutral|hostile|friendly", "pos": {x,y,z}, "in_vehicle_handle": null}`.
+  `friendly` (v1.5) = the engine's
   own Companion/Like/Respect relationship towards the player, i.e. mission crewmates. `pos` (v1.6)
-  = world position, same shape as `player.pos`; vehicles carry it too.
+  = world position, same shape as `player.pos`; vehicles carry it too. `in_vehicle_handle`
+  (v1.10) = the vehicle the ped is currently seated in, or null on foot.
 - `last_task.status` lifecycle: `idle` (no task ever / cleared) → `running` → `done` | `failed`.
   **v1.2:** when no task has ever been posted (fresh bridge load / script reload), `id` and `type`
   are `null`; every consumer must treat them as nullable. `status` and `detail` are always present.
-  `detail` carries failure reason (`"preempted"`, `"timeout"`, `"target_lost"`, ...).
-- Entity `handle`s are the game's entity/blip handles; valid only while the entity exists. The
+  `detail` carries failure reason (`"preempted"`, `"timeout"`, `"target_lost"`,
+  `"cleared_by_game"` (v1.10 — the game's own scripts wiped the task; re-plan, don't wait), ...).
+- Entity `handle`s are the game's entity handles; valid only while the entity exists. The
   harness must treat them as ephemeral and re-read them from `/state` before use.
 
 ### POST /task → 202 `{"task_id": "t-000124"}`

@@ -3,6 +3,7 @@ using System.Collections.Generic;
 using GTA;
 using GTA.Chrono;
 using GTA.Math;
+using GTA.Native;
 
 namespace WastedBridge
 {
@@ -26,6 +27,7 @@ namespace WastedBridge
         private int _stoppedSinceMs = -1;
         private int _lastBlipErrorAt = int.MinValue;
         private int _lastStartsErrorAt = int.MinValue;
+        private int _lastScriptErrorAt = int.MinValue;
 
         /// <summary>stopped_for_s of the current vehicle as of the last Build call.</summary>
         public float CurrentStoppedForS { get; private set; }
@@ -33,6 +35,15 @@ namespace WastedBridge
         public Snapshot Build(long tick, TaskEngine engine, string edition,
                               bool playerDead, bool playerArrested)
         {
+            // CONTRACTS v1.10 item 5 (protagonist read verification): Game.Player.Character is
+            // fetched FRESH here every Build() call, never cached across ticks or stashed on this
+            // (long-lived) SnapshotBuilder instance. The player ped's handle changes on a
+            // character switch (Michael/Franklin/Trevor) and on respawn, so caching it here would
+            // eventually serve a stale/wrong ped for player.pos, player.protagonist, etc. — this is
+            // the exact invariant that a live stream caught failing (protagonist read "franklin"
+            // during a Michael mission) before this comment existed. WastedBridgeScript.TickCore()
+            // does its own independent fresh Game.Player.Character fetch each tick for the task
+            // engine; the two are deliberately separate reads, not a shared cached reference.
             Player player = Game.Player;
             Ped ped = player.Character;
             if (ped == null || !ped.Exists())
@@ -48,6 +59,9 @@ namespace WastedBridge
             // One blip pass produces both mission.objective_blip and mission.route_blips: they are
             // the same scan, and running it twice would double the per-frame cost for nothing.
             ObjectiveScan objective = FindObjectiveBlipSafe(pos);
+            // Read once, reused for both mission.active and the mission.script gate below (v1.10
+            // item 3 only ever emits a script name while the mission flag is set).
+            bool missionActive = Game.IsMissionActive;
 
             var snapshot = new Snapshot
             {
@@ -84,12 +98,13 @@ namespace WastedBridge
                 },
                 Mission = new MissionDto
                 {
-                    Active = Game.IsMissionActive,                 // GET_MISSION_FLAG
+                    Active = missionActive,                        // GET_MISSION_FLAG
                     RandomEventActive = Game.IsRandomEventActive,  // GET_RANDOM_EVENT_FLAG
                     CutsceneActive = Game.IsCutsceneActive,        // IS_CUTSCENE_ACTIVE
                     ObjectiveBlip = objective.Objective,
                     Starts = FindMissionStartsSafe(ped),
-                    RouteBlips = objective.RouteBlips
+                    RouteBlips = objective.RouteBlips,
+                    Script = FindMissionScriptSafe(missionActive)
                 },
                 Nearby = BuildNearby(ped, veh),
                 LastTask = engine.ToDto(),
@@ -221,6 +236,141 @@ namespace WastedBridge
             return result;
         }
 
+        /// <summary>
+        /// CONTRACTS v1.10 item 3: the pinned story/side-mission script-name allowlist, vendored
+        /// verbatim from docs/research/brief-mission-scripts.json (source: YimMenu
+        /// GTA-V-Decompiled-Scripts all_script_names.txt, confirmed against the game's own running
+        /// script threads at SCRIPT_THREAD_ITERATOR time, not guessed). A running script thread's
+        /// name counts as "the mission" only if it is in this set; anything else (HUD/ambient/
+        /// network scripts, camera scripts, etc.) is not what mission.script means. Title pairings
+        /// (e.g. armenian1 = "Franklin and Lamar") are NOT sourced — the harness learns those from
+        /// observed (OCR title, script) co-occurrence rather than the bridge shipping a guess.
+        /// </summary>
+        private static readonly HashSet<string> MissionScriptNames = new HashSet<string>(
+            StringComparer.OrdinalIgnoreCase)
+        {
+            "prologue1",
+            "armenian1", "armenian2", "armenian3",
+            "family1", "family2", "family3", "family4", "family5", "family6",
+            "lamar1",
+            "franklin0", "franklin1", "franklin2",
+            "michael1", "michael2", "michael3", "michael4", "michael4leadout",
+            "trevor1", "trevor2", "trevor3", "trevor4",
+            "fbi1", "fbi2", "fbi3", "fbi4", "fbi4_intro",
+            "fbi4_prep1", "fbi4_prep2", "fbi4_prep3", "fbi4_prep4", "fbi4_prep5",
+            "fbi5a",
+            "jewelry_heist", "jewelry_prep1a", "jewelry_prep1b", "jewelry_prep2a", "jewelry_setup1",
+            "agency_heist1", "agency_heist2", "agency_heist3a", "agency_heist3b",
+            "agency_prep1", "agency_prep2amb",
+            "finale_heist1", "finale_heist2_intro", "finale_heist2a", "finale_heist2b",
+            "finale_heist_prepa", "finale_heist_prepb", "finale_heist_prepc", "finale_heist_prepd",
+            "finale_heist_prepeamb",
+            "finale_choice", "finalea", "finaleb", "finalec1", "finalec2",
+            "finale_endgame", "finale_intro", "finale_credits",
+            "solomon1", "solomon2", "solomon3",
+            "martin1",
+            "exile1", "exile2", "exile3",
+            "docks_heista", "docks_heistb", "docks_prep1", "docks_prep2b", "docks_setup",
+            "rural_bank_heist", "rural_bank_prep1", // The Paleto Score - no "paleto_score" name exists
+            "lester1",
+            "carsteals1", "carsteal2", "carsteal3", "carsteal4",
+            // Strangers and Freaks / side content families
+            "barry1", "barry2", "barry3", "barry3a", "barry3c", "barry4",
+            "epsilon1", "epsilon2", "epsilon3", "epsilon4", "epsilon5", "epsilon6", "epsilon7",
+            "epsilon8",
+            "nigel1", "nigel1a", "nigel1b", "nigel1c", "nigel1d", "nigel2", "nigel3",
+            "omega1", "omega2",
+            "fanatic1", "fanatic2", "fanatic3",
+            "abigail1", "abigail2",
+            "maude1",
+            "bailbond1", "bailbond2", "bailbond3", "bailbond4",
+            "josh1", "josh2", "josh3", "josh4",
+            "drf1", "drf2", "drf3", "drf4", "drf5",
+            "tonya1", "tonya2", "tonya3", "tonya4", "tonya5",
+            "chinese1", "chinese2",
+            "hao1",
+            "mrsphilips1", "mrsphilips2",
+            "paparazzo1", "paparazzo2", "paparazzo3", "paparazzo3a", "paparazzo3b", "paparazzo4",
+            "minute1", "minute2", "minute3",
+            "extreme1", "extreme2", "extreme3", "extreme4",
+            "rampage1", "rampage2", "rampage3", "rampage4", "rampage5",
+            "thelastone"
+        };
+
+        /// <summary>
+        /// CONTRACTS v1.10 item 3, guarded the same way FindMissionStartsSafe is: a scan failure
+        /// must leave mission.script null, never crash the tick. Only ever called (and only ever
+        /// non-null) while mission.active is true — the research brief could not confirm whether an
+        /// allowlisted thread can exist outside the actual mission window, so the bridge does not
+        /// take the risk of reporting one.
+        /// </summary>
+        private string FindMissionScriptSafe(bool missionActive)
+        {
+            if (!missionActive)
+            {
+                return null;
+            }
+            try
+            {
+                return FindMissionScript();
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastScriptErrorAt) > 5000)
+                {
+                    _lastScriptErrorAt = now;
+                    BridgeLog.Error("mission-script thread scan failed (SCRIPT_THREAD_ITERATOR_*); "
+                                    + "mission.script stays null", ex);
+                }
+                return null;
+            }
+        }
+
+        /// <summary>
+        /// Enumerates every running script thread (SCRIPT_THREAD_ITERATOR_RESET +
+        /// SCRIPT_THREAD_ITERATOR_GET_NEXT_THREAD_ID, 0 = end; GET_NAME_OF_SCRIPT_WITH_THIS_ID per
+        /// thread id) and returns the first name found in <see cref="MissionScriptNames"/>. All
+        /// three natives are present in the pinned SHVDN nightly's Hash enum (verified against
+        /// lib/ScriptHookVDotNet3.dll with MetadataLoadContext) but have no typed GTA.* wrapper, so
+        /// they are called raw via Function.Call - the same pattern TaskEngine.StartSeekCover uses
+        /// for TASK_SEEK_COVER_FROM_POS. If more than one allowlisted thread is running at once
+        /// (unconfirmed whether this happens; a mission and one of its prep/sub-scripts could both
+        /// match) the first one seen in iteration order wins and the collision is logged once - no
+        /// priority scheme is guessed.
+        /// </summary>
+        private static string FindMissionScript()
+        {
+            Function.Call(Hash.SCRIPT_THREAD_ITERATOR_RESET);
+            string found = null;
+            bool loggedCollision = false;
+            while (true)
+            {
+                int threadId = Function.Call<int>(Hash.SCRIPT_THREAD_ITERATOR_GET_NEXT_THREAD_ID);
+                if (threadId == 0)
+                {
+                    break;
+                }
+                string name = Function.Call<string>(Hash.GET_NAME_OF_SCRIPT_WITH_THIS_ID, threadId);
+                if (string.IsNullOrEmpty(name) || !MissionScriptNames.Contains(name))
+                {
+                    continue;
+                }
+                if (found == null)
+                {
+                    found = name;
+                }
+                else if (!loggedCollision)
+                {
+                    loggedCollision = true;
+                    BridgeLog.Info("mission.script: multiple allowlisted script threads running at "
+                                   + "once (\"" + found + "\" and \"" + name + "\"); reporting the "
+                                   + "first seen (\"" + found + "\") - no priority scheme is defined");
+                }
+            }
+            return found;
+        }
+
         /// <summary>What one blip pass found: the chosen objective, plus the routed set behind it.</summary>
         private sealed class ObjectiveScan
         {
@@ -328,12 +478,15 @@ namespace WastedBridge
                     continue; // the agent's own waypoint, not the game's objective — see above.
                 }
                 Vector3 blipPos = b.Position;
+                string kind;
+                int handle;
+                ResolveBlipKindAndHandle(b, out kind, out handle);
                 routed.Add(new RouteCandidate
                 {
                     Distance = origin.DistanceTo(blipPos),
                     Pos = ToDto(blipPos),
-                    Kind = IsEntityBlip(b.BlipType) ? "entity" : "coord",
-                    Handle = b.Handle,
+                    Kind = kind,
+                    Handle = handle,
                     Color = color
                 });
             }
@@ -416,11 +569,14 @@ namespace WastedBridge
                     continue;
                 }
                 bestDistance = distance;
+                string kind;
+                int handle;
+                ResolveBlipKindAndHandle(b, out kind, out handle);
                 best = new ObjectiveBlipDto
                 {
                     Pos = ToDto(blipPos),
-                    Kind = IsEntityBlip(b.BlipType) ? "entity" : "coord",
-                    Handle = b.Handle
+                    Kind = kind,
+                    Handle = handle
                 };
             }
             return best;
@@ -453,6 +609,35 @@ namespace WastedBridge
         {
             int byDistance = a.Distance.CompareTo(b.Distance);
             return byDistance != 0 ? byDistance : a.Handle.CompareTo(b.Handle);
+        }
+
+        /// <summary>
+        /// CONTRACTS v1.10 item 1 — the fix. Until this version the bridge emitted the BLIP's own
+        /// handle under kind:"entity", a different handle space than the entity handles
+        /// follow_entity/enter_nearest_vehicle etc. take; a caller could never resolve it
+        /// (root cause of the 2026-09-02 "drives and then stops" follow-mission failure). The
+        /// correct resolution is Blip.Entity, which wraps GET_BLIP_INFO_ID_ENTITY_INDEX and
+        /// re-resolves fresh on every call (docs/research/brief-shvdn-blips-occupants.json) - it is
+        /// deliberately read here, inside this same snapshot pass, and never cached across ticks.
+        /// It returns null for a coord blip and (per the brief, unconfirmed either way) possibly
+        /// for an entity outside streaming range; either way a null/gone result degrades to
+        /// kind:"coord" with the blip's own position and handle, which is still honest - never
+        /// "entity" with a handle nothing can resolve.
+        /// </summary>
+        private static void ResolveBlipKindAndHandle(Blip b, out string kind, out int handle)
+        {
+            if (IsEntityBlip(b.BlipType))
+            {
+                Entity ent = b.Entity;
+                if (ent != null && ent.Exists())
+                {
+                    kind = "entity";
+                    handle = ent.Handle;
+                    return;
+                }
+            }
+            kind = "coord";
+            handle = b.Handle;
         }
 
         private static bool IsEntityBlip(BlipType type)
@@ -533,7 +718,8 @@ namespace WastedBridge
                     Model = PedModelName(model),
                     Distance = origin.DistanceTo(p.Position),
                     Relationship = hostile ? "hostile" : (friendly ? "friendly" : "neutral"),
-                    Pos = ToDto(p.Position)
+                    Pos = ToDto(p.Position),
+                    InVehicleHandle = InVehicleHandleOf(p)
                 });
             }
             peds.Sort(ComparePedDistance);
@@ -565,6 +751,26 @@ namespace WastedBridge
         internal static bool IsAnimal(Ped p, Model model)
         {
             return p.PedType == PedType.Animal || model.IsAnimalPed;
+        }
+
+        /// <summary>
+        /// CONTRACTS v1.10 item 2: the vehicle handle a nearby ped is currently seated in, or null
+        /// on foot. World.GetNearbyPeds is a raw CPed-pool scan with no seat exclusion (research:
+        /// docs/research/brief-shvdn-blips-occupants.json) so seated peds are already IN
+        /// nearby.peds[] today - this only adds the attribution so the harness can hand off from a
+        /// ped to the car the instant a crewmate mounts up, instead of only discovering the loss
+        /// once the ped scrolls out of nearby's radius. Mirrors TaskEngine.CurrentVehicle's
+        /// null-guard: IsInVehicle() and CurrentVehicle can disagree for a frame while entering, so
+        /// CurrentVehicle is null-checked even when IsInVehicle() is true.
+        /// </summary>
+        private static int? InVehicleHandleOf(Ped p)
+        {
+            if (!p.IsInVehicle())
+            {
+                return null;
+            }
+            Vehicle veh = p.CurrentVehicle;
+            return veh != null && veh.Exists() ? (int?)veh.Handle : null;
         }
 
         private static string DescribeDriver(Vehicle v)

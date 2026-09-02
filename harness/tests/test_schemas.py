@@ -203,8 +203,8 @@ def test_wire_params_sends_only_what_the_action_takes() -> None:
 
 
 def test_word_limits_enforced() -> None:
-    with pytest.raises(ValidationError, match="40"):
-        DecisionModel.model_validate(_valid(thought=" ".join(["word"] * 41)))
+    # `say`/`goal` are still hard limits: a rejected decision means the agent does
+    # nothing at all this tick, which the caller's retry logic is built around.
     with pytest.raises(ValidationError, match="20"):
         DecisionModel.model_validate(_valid(say=" ".join(["word"] * 21)))
     with pytest.raises(ValidationError, match="12"):
@@ -217,6 +217,21 @@ def test_word_limits_enforced() -> None:
             goal=" ".join(["w"] * 12),
         )
     )
+
+
+def test_thought_over_the_limit_is_soft_truncated_not_rejected() -> None:
+    """A valid decision (real coordinates, a correct action) must never be
+    discarded in its entirety over narration length — see `_thought_words`."""
+    fifty_nine_words = " ".join(f"w{i}" for i in range(59))
+    decision = DecisionModel.model_validate(_valid(thought=fifty_nine_words))
+    assert decision.thought.endswith("…")
+    kept = decision.thought[:-1].split()
+    assert len(kept) == 40
+    assert kept == fifty_nine_words.split()[:40]
+
+    # At/under the limit is untouched.
+    at_limit = " ".join(["w"] * 40)
+    assert DecisionModel.model_validate(_valid(thought=at_limit)).thought == at_limit
 
 
 def test_confidence_bounds() -> None:
@@ -253,11 +268,14 @@ def test_retry_correction_coaches_the_error_it_actually_got() -> None:
     assert "40 words" not in note
     assert "the agent does nothing at all this tick" in note
 
+    # `thought` no longer raises (soft-truncated instead — see
+    # test_thought_over_the_limit_is_soft_truncated_not_rejected); `say` still
+    # does, so it is what exercises the word-limit coaching branch here.
     with pytest.raises(ValidationError) as too_long:
-        DecisionModel.model_validate(_valid(thought=" ".join(["word"] * 41)))
+        DecisionModel.model_validate(_valid(say=" ".join(["word"] * 21)))
     wordy = _retry_correction(too_long.value)
     assert WORD_LIMIT_MARKER in wordy
-    assert "thought <= 40 words" in wordy
+    assert "say <= 20 words" in wordy
 
     # An API error carries nothing the model can act on, so it still gets no note.
     import anthropic
@@ -339,3 +357,98 @@ def test_a_truncated_response_says_so_instead_of_no_parseable_object() -> None:
     call = BilledCall(_Client(), pricing, None)  # type: ignore[arg-type]
     with pytest.raises(ValueError, match="max_tokens"):
         call.run("claude-sonnet-5", "prefix", "content")
+
+
+# --- WP-C: TacticalBrain picks the mission-time model iff configured + active -
+
+
+def _recording_client(captured: list[dict]):
+    from types import SimpleNamespace
+
+    class _Client:
+        def __init__(self) -> None:
+            self.messages = SimpleNamespace(create=self._create)
+
+        @staticmethod
+        def _create(**kwargs: object) -> SimpleNamespace:
+            captured.append(kwargs)
+            decision_json = (
+                '{"thought": "steady", "say": "steady", "mood": "chill", '
+                '"action": {"type": "stop", "params": {}}, "goal": "hold position", '
+                '"confidence": 0.5}'
+            )
+            return SimpleNamespace(
+                content=[SimpleNamespace(type="text", text=decision_json)],
+                usage=SimpleNamespace(input_tokens=10, output_tokens=20,
+                                      cache_read_input_tokens=0, cache_creation_input_tokens=0),
+                stop_reason="end_turn",
+            )
+
+    return _Client()
+
+
+def _pricing_with_mission_tier(tmp_path):
+    import yaml
+
+    from wasted_harness.budget import Pricing
+
+    model = {
+        "id": "claude-sonnet-5", "input_per_mtok": 2.00, "output_per_mtok": 10.00,
+        "cache_read_per_mtok": 0.20, "cache_write_5m_per_mtok": 2.50,
+        "min_cacheable_prefix_tokens": 1024,
+    }
+    tactical = dict(model, id="claude-haiku-4-5-20251001", input_per_mtok=1.00,
+                     output_per_mtok=5.00, cache_read_per_mtok=0.10,
+                     cache_write_5m_per_mtok=1.25, min_cacheable_prefix_tokens=4096)
+    doc = {
+        "source_url": "https://platform.claude.com/docs/en/about-claude/pricing",
+        "fetched": "2026-08-25",
+        "models": {"tactical": tactical, "director": model, "tactical_mission": model},
+    }
+    path = tmp_path / "pricing.yaml"
+    path.write_text(yaml.safe_dump(doc), encoding="utf-8")
+    return Pricing.load(path)
+
+
+def test_mission_active_and_tier_configured_uses_the_mission_model(tmp_path) -> None:
+    from wasted_harness.brain.tactical import DIRECTOR_MAX_DECISION_TOKENS, TacticalBrain
+
+    pricing = _pricing_with_mission_tier(tmp_path)
+    captured: list[dict] = []
+    brain = TacticalBrain(_recording_client(captured), pricing, None)
+    brain.decide("dynamic context", mission_active=True)
+    assert len(captured) == 1
+    assert captured[0]["model"] == pricing.tactical_mission.id
+    assert captured[0]["max_tokens"] == DIRECTOR_MAX_DECISION_TOKENS
+
+
+def test_mission_inactive_uses_the_normal_tactical_model_even_when_the_tier_is_configured(
+    tmp_path,
+) -> None:
+    from wasted_harness.brain.tactical import MAX_DECISION_TOKENS, TacticalBrain
+
+    pricing = _pricing_with_mission_tier(tmp_path)
+    captured: list[dict] = []
+    brain = TacticalBrain(_recording_client(captured), pricing, None)
+    brain.decide("dynamic context", mission_active=False)
+    assert captured[0]["model"] == pricing.tactical.id
+    assert captured[0]["max_tokens"] == MAX_DECISION_TOKENS
+
+
+def test_mission_active_but_no_mission_tier_configured_falls_back_to_tactical() -> None:
+    """Absent config = today's behaviour exactly, even mid-mission."""
+    from wasted_harness.brain.tactical import TacticalBrain
+    from wasted_harness.budget import Pricing
+    from wasted_harness.settings import Settings
+
+    pricing = Pricing.load(Settings.load().pricing_file)
+    assert pricing.tactical_mission is not None, (
+        "the shipped pricing.yaml configures it; this test wants the ABSENT case"
+    )
+    from dataclasses import replace
+
+    pricing_without_mission_tier = replace(pricing, tactical_mission=None)
+    captured: list[dict] = []
+    brain = TacticalBrain(_recording_client(captured), pricing_without_mission_tier, None)
+    brain.decide("dynamic context", mission_active=True)
+    assert captured[0]["model"] == pricing.tactical.id

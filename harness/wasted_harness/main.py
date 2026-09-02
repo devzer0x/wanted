@@ -62,10 +62,11 @@ from .behavior.vehicle import (
     VehicleController,
     VehiclePhase,
 )
+from .brain.characters import absent_names_mentioned, present_names
 from .brain.director import VISION_TRIGGERS, DirectorBrain, DirectorCadence
 from .brain.knowledge_base import mission_state_hint, render, select
 from .brain.memory import Memory
-from .brain.mission_knowledge import identify_mission, mission_card
+from .brain.mission_knowledge import LearnedScripts, identify_mission_with_source, mission_card
 from .brain.prompts import director_static_prefix, tactical_static_prefix
 from .brain.schemas import ACTION_TYPES, BRIDGE_TASKS, DecisionModel
 from .brain.tactical import (
@@ -189,6 +190,8 @@ def _check_pricing(settings: Settings, rep: _Report) -> Pricing | None:
         return None
     rep.ok("pricing", str(settings.pricing_file))
     rep.note(f"tactical={pricing.tactical.id} director={pricing.director.id}")
+    if pricing.tactical_mission is not None:
+        rep.note(f"tactical_mission={pricing.tactical_mission.id} (mid-mission tactical model)")
     rep.note(f"source={pricing.source_url} (fetched {pricing.fetched})")
     return pricing
 
@@ -283,6 +286,11 @@ def _check_brain(settings: Settings, pricing: Pricing | None, rep: _Report) -> N
         f"director prefix {counts['director']} tok "
         f">= {pricing.director.min_cacheable_prefix_tokens} minimum"
     )
+    if pricing.tactical_mission is not None and "tactical_mission" in counts:
+        rep.note(
+            f"tactical_mission prefix {counts['tactical_mission']} tok "
+            f">= {pricing.tactical_mission.min_cacheable_prefix_tokens} minimum"
+        )
     warm = cost_usd(pricing.tactical, 400, 150, cache_read_tokens=counts["tactical"])
     rep.note(f"projected warm tactical call: ${warm:.6f} (prefix served from cache)")
 
@@ -551,7 +559,10 @@ def run_prompt_audit(settings: Settings) -> int:
             print(f"[FAIL]    token counts: {exc}")
             _print_offline_token_estimate(tactical, director)
         else:
-            for tier, mp in (("tactical", pricing.tactical), ("director", pricing.director)):
+            tiers = [("tactical", pricing.tactical), ("director", pricing.director)]
+            if pricing.tactical_mission is not None:
+                tiers.append(("tactical_mission", pricing.tactical_mission))
+            for tier, mp in tiers:
                 n = counts[tier]
                 warm = cost_usd(mp, 400, 150, cache_read_tokens=n)
                 cold = cost_usd(mp, 400, 150, cache_creation_tokens=n)
@@ -591,6 +602,9 @@ class Harness:
         self.memory = Memory(state_dir)
         self.commentary = Commentary(state_dir, self.rng)
         self.bus = OverlayBus()
+        #: CONTRACTS v1.10 `mission.script` -> mission name, learned live
+        #: (never shipped as guesses — see LearnedScripts' own docstring).
+        self.learned_scripts = LearnedScripts(state_dir / "learned_mission_scripts.json")
 
         #: Counters, played time and the budget ledger that must survive a
         #: restart (see totals.py for why they are lifetime, not per-session).
@@ -1418,10 +1432,20 @@ class Harness:
                 # prints on screen (one cheap vision call), fall back to the zone, and hand the
                 # brain that mission's walkthrough card via _dynamic_context. None = no card.
                 title = self._read_mission_title(jpeg) if jpeg else None
-                self.current_mission = identify_mission(title, state.location.zone)
+                self.current_mission, source = identify_mission_with_source(
+                    title, state.location.zone,
+                    script=state.mission.script, learned=self.learned_scripts.mapping,
+                )
+                if source == "title" and state.mission.script and self.current_mission:
+                    # Learn from the screen-read title ONLY — a zone fallback can
+                    # in general name more than one mission, and a "script" hit is
+                    # already-learned data, not new evidence (LearnedScripts.learn
+                    # itself refuses to overwrite an existing pairing either way).
+                    self.learned_scripts.learn(state.mission.script, self.current_mission["name"])
                 log.info(
                     "mission identified" if self.current_mission else "mission not identified",
                     extra={"kv": {"title_read": title, "zone": state.location.zone,
+                                  "script": state.mission.script, "source": source,
                                   "mission": (self.current_mission or {}).get("name")}},
                 )
             if ev.type == "mission_fail":
@@ -1611,7 +1635,7 @@ class Harness:
                     pass
             context = self._dynamic_context(state, delta, trigger, layer)
             if layer == "tactical":
-                result = self.tactical.decide(context)
+                result = self.tactical.decide(context, mission_active=state.mission.active)
             else:
                 shot, shot_trigger = None, None
                 if (
@@ -1657,7 +1681,7 @@ class Harness:
                 finally:
                     self._thinking_dip_active = False
 
-    def _apply_decision(self, layer: str, result: DecisionResult) -> None:
+    def _apply_decision(self, layer: str, result: DecisionResult, state: GameState) -> None:
         d: DecisionModel = result.decision
         if layer == "director":
             self.current_goal = d.goal
@@ -1683,8 +1707,23 @@ class Harness:
                 "cost_usd": round(result.cost_usd, 6),
             }
         )
-        self.bus.publish("say", {"text": d.say, "mood": d.mood})
-        # Feeds the no-repeat list the prompt promises him back into the prompt.
+        # GROUNDING (live 2026-09-02): he narrated "keep Dave alive" and
+        # "Trevor's got the rifle" through a whole mission in which neither man
+        # existed. Naming somebody who is not there is the most damaging thing
+        # he can say on a live stream, so a line that does it is not published.
+        # Only names the game's own ped models can produce are ever challenged,
+        # so streets, zones and car names pass untouched.
+        absent = absent_names_mentioned(d.say, present_names(state))
+        if absent:
+            log.warning(
+                "commentary names somebody who is not here; dropping the line",
+                extra={"kv": {"say": d.say[:120], "absent": ",".join(absent)}},
+            )
+        elif self.commentary.gate_say(d.say):
+            self.bus.publish("say", {"text": d.say, "mood": d.mood})
+        # Feeds the no-repeat list the prompt promises him back into the prompt
+        # — always, even a gated-out line, so the model's own memory of what it
+        # said stays accurate (see Commentary.gate_say's docstring).
         self.commentary.record_say(d.say)
         self.memory.log_day("decision", f"[{layer}] {d.say} -> {d.action.type}")
         # The brain outranks the activity runner: a bridge task from a decision
@@ -2459,14 +2498,14 @@ class Harness:
                         result = self._think("director", state, delta, director_trigger)
                         self.director_cadence.fired(now)
                         if result is not None:
-                            self._apply_decision("director", result)
+                            self._apply_decision("director", result, state)
                     else:
                         tactical_trigger = self.tactical_cadence.should_fire(now, delta, level)
                         if tactical_trigger is not None and not state.mission.cutscene_active:
                             result = self._think("tactical", state, delta, tactical_trigger)
                             self.tactical_cadence.fired(now, level, self.mood.mood)
                             if result is not None:
-                                self._apply_decision("tactical", result)
+                                self._apply_decision("tactical", result, state)
                         elif (
                             level < 3
                             and self.activity_runner.current is None

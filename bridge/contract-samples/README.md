@@ -59,14 +59,14 @@ response body, compact, with no trailing newline. `errors.json` is a catalog wra
 
 | | |
 |---|---|
-| generated (UTC) | 2026-08-29 09:05:32 |
+| generated (UTC) | 2026-09-02 14:32:13 |
 | tool | `bridge/tools/offline-checks` on .NET 8.0.30 (osx-arm64) |
 | bridge DLL | `bridge/bin/Release/net48/WastedBridge.dll` |
-| bridge DLL sha256 | `a10d1e4d95c48a03a0284481a90b61dec6389aa00430df99893eb0043273d263` |
-| bridge DLL built | 2026-08-29 09:05:13 UTC |
+| bridge DLL sha256 | `112dd171363b75157c0af5b99c01d68fe842297fd2ede095f8378f50d1ebb03b` |
+| bridge DLL built | 2026-09-02 14:31:55 UTC |
 | SHVDN reference | `bridge/lib/ScriptHookVDotNet3.dll` sha256 `0f2b8d30ebe79edd74cf364df3943afb7e6305d7453bc687503dcc7411ed5648` |
 
-- `state-fresh-load.json` — 620 bytes
-- `state-populated.json` — 1075 bytes
+- `state-fresh-load.json` — 687 bytes
+- `state-populated.json` — 1257 bytes
 - `health-fresh-load.json` — 107 bytes
 - `errors.json` — 2506 bytes

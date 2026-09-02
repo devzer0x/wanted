@@ -39,6 +39,19 @@ RECENT_LINES_SHOWN = 12
 #: How many are kept on disk (a little history beyond what is shown).
 RECENT_LINES_KEPT = 40
 
+#: How many of the most recently SHOWN (displayed on the overlay/feed) lines a
+#: new decision-derived line is checked against before it is allowed on
+#: screen. Deliberately smaller than RECENT_LINES_SHOWN (fed to the model as
+#: prose it is *asked* to honour) — this is the mechanical backstop for when
+#: the model's own effort at variety still lands a near-duplicate.
+SIMILARITY_WINDOW = 5
+#: Jaccard similarity (over lowercased, normalized word sets) above which a
+#: line counts as "basically the same line again" and is dropped rather than
+#: shown. Cheap, no model call: exact repeats are already caught elsewhere
+#: (RecentLines.add's no-repeat check); this catches "Still on his six" vs
+#: "Right on his six" — different strings, same line, back to back.
+SIMILARITY_THRESHOLD = 0.8
+
 _WRITE_RETRIES = 8
 _WRITE_DELAY_S = 0.12
 
@@ -231,12 +244,30 @@ def _normalize(line: str) -> str:
     return " ".join(kept.split())
 
 
+def _jaccard_similarity(a: str, b: str) -> float:
+    """Normalized-token-overlap similarity: |shared words| / |all words|.
+
+    Cheap, no model call, no new dependency — exactly what CLAUDE.md rule 1
+    and this feature's own brief ask for. Two empty (post-normalization)
+    lines are not similar to each other; there is nothing shared to measure.
+    """
+    wa = set(_normalize(a).split())
+    wb = set(_normalize(b).split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
 class Commentary:
     def __init__(self, state_dir: Path, rng: random.Random | None = None) -> None:
         path = state_dir / "commentary_rotation.json"
         self.death = LineRotation("death", DEATH_LINES, path, rng)
         self.busted = LineRotation("busted", BUSTED_LINES, path, rng)
         self.recent = RecentLines(path)
+        #: In-memory only, deliberately not persisted: this is a same-session
+        #: "did I just say something like this" filter, not a long-term
+        #: no-repeat memory (RecentLines already owns that, on disk).
+        self._shown: deque[str] = deque(maxlen=SIMILARITY_WINDOW)
 
     def death_line(self) -> str:
         line = self.death.next()
@@ -251,6 +282,41 @@ class Commentary:
     def record_say(self, line: str) -> bool:
         """Remember a model-authored line; True when it repeated a recent one."""
         return self.recent.add(line)
+
+    def gate_say(self, line: str) -> bool:
+        """Should `line` actually be shown (overlay/feed) right now?
+
+        Compares against the last SIMILARITY_WINDOW lines this method has
+        already approved, using cheap normalized-token-overlap (no model
+        call). Too similar to a recent one → drop it and return False; the
+        caller simply does not publish a new "say" event, so whatever line is
+        already on screen stays there rather than being replaced by a
+        near-duplicate. Banner-pool rotation (`death_line`/`busted_line`) is
+        untouched by this — it is a separate, deliberately-repeating pool with
+        its own no-repeat-in-10 rule, not decision-derived commentary.
+
+        This does NOT touch `record_say`/`RecentLines`: the brain's own
+        no-repeat memory must always see the real line the model actually
+        said, never this gate's opinion of it, or the "don't repeat yourself"
+        instruction in the prompt would be lying to the model about what it
+        said last.
+        """
+        for prior in self._shown:
+            similarity = _jaccard_similarity(line, prior)
+            if similarity > SIMILARITY_THRESHOLD:
+                log.debug(
+                    "commentary line suppressed: too similar to a recently shown one",
+                    extra={
+                        "kv": {
+                            "say": line[:120],
+                            "prior": prior[:120],
+                            "similarity": round(similarity, 3),
+                        }
+                    },
+                )
+                return False
+        self._shown.append(line)
+        return True
 
     @staticmethod
     def feed_line(decision: DecisionModel, layer: str) -> dict:

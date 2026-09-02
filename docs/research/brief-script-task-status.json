@@ -1,0 +1,25 @@
+{
+ "answer": "CONTRACTS v1.10 item 4 backing research (2026-09-02): detecting that the game cleared a bridge-issued task. GET_SCRIPT_TASK_STATUS(ped, taskHash) returns 0 WaitingToStart, 1 Performing, 2 Dormant, 3 Vacant, 7 Finished - and 7 ALSO means 'the hash you asked about is not the ped's current script task' (documented conflation in SHVDN's own ScriptTaskStatus.cs comments). The taskHash is NOT the issuing native's call hash: it is a separate ScriptTaskNameHash space (e.g. TASK_ENTER_VEHICLE is issued via 0xC20E50AA46D09CA8 but polled as EnterVehicle=0x950B6492). SHVDN v3 exposes everything needed: Ped.GetScriptTaskStatus(ScriptTaskNameHash), and - the better primitive - Ped.GetCurrentScriptTaskNameHashAndStatus(out hash, out status) / Ped.CurrentScriptTaskNameHash (direct memory read, no native call). RECIPE (used by the bridge): once per tick read the CURRENT script-task hash+status; if the hash differs from the one expected for the issued task (including Invalid=0x811E343C), the game took the task away (mission beat, cutscene, CLEAR_PED_TASKS) -> report failed/'cleared_by_game'; only interpret status (Performing/Dormant/WaitingToStart) while the hash still matches. Poll hashes for our tasks: VehicleDriveToCoordLongrange=0x21D33957 (drive_to), VehicleMission=0xB41F1A34 (VehicleFollow - SHARED by all TASK_VEHICLE_*_MISSION-family tasks, so hash match does not prove it is still OUR follow), FollowToOffsetOfEntity=0x3EF867F4 (on-foot follow), FollowNavMeshToCoord=0x2A89B8A7 (walk_to; SHVDN recommends Ped.GetNavMeshRouteResult() as the primary liveness check for this one), EnterVehicle=0x950B6492, CombatHatedTargetsAroundPed=0xAA05B492, SmartFleePed=0x6BA30179, WanderStandard=0xBBA3B7CA (which native Wander() calls was NOT verified - confirm before relying on it). Any=0x55966344 polls whatever is current. UNCONFIRMED (verify live in bridge-smoke per CLAUDE.md rule 6): identical behavior on the PLAYER ped for tasks issued from an external SHVDN script; CLEAR_PED_TASKS transition timing; byte-identity of main-branch source with the deployed v3.7.0-nightly.189 DLL (no tag exists for nightlies).",
+ "facts": [
+  {
+   "claim": "ScriptTaskStatus enum: WaitingToStart=0, Performing=1, Dormant=2, Vacant=3, Finished=7; SHVDN doc comment: GetScriptTaskStatus returns Finished if the specified hash does not match the current one and the specified hash is not Any",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/ScriptTaskStatus.cs"
+  },
+  {
+   "claim": "ScriptTaskNameHash enum (the poll-hash space, distinct from issuing-native call hashes): EnterVehicle=0x950B6492, VehicleMission=0xB41F1A34, SmartFleePed=0x6BA30179, CombatHatedTargetsAroundPed=0xAA05B492, FollowToOffsetOfEntity=0x3EF867F4, FollowNavMeshToCoord=0x2A89B8A7, VehicleDriveToCoordLongrange=0x21D33957, WanderStandard=0xBBA3B7CA, Any=0x55966344, Invalid=0x811E343C",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/ScriptTaskNameHash.cs (cross-checked against https://pastebin.com/R9iK6M9W, unlabeled community list, agreeing on every compared value)"
+  },
+  {
+   "claim": "Ped.GetScriptTaskStatus(ScriptTaskNameHash) wraps Hash.GET_SCRIPT_TASK_STATUS (0x77F1BEB8863288D5); Ped.GetCurrentScriptTaskNameHashAndStatus / CurrentScriptTaskNameHash / CurrentScriptTaskStatus read via SHVDN.NativeMemory.Ped.GetScriptTaskHashAndStatus (direct memory read)",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/Ped.cs and .../GTA.Native/NativeHashes.cs"
+  },
+  {
+   "claim": "TASK_VEHICLE_FOLLOW, TASK_VEHICLE_ESCORT, TASK_VEHICLE_MISSION, TASK_HELI/PLANE/BOAT_MISSION all report the same script-task type VehicleMission=0xB41F1A34 when polled - a bare status poll cannot distinguish which vehicle-mission task is running",
+   "source": "https://pastebin.com/R9iK6M9W (community list, unlabeled provenance) corroborating SHVDN ScriptTaskNameHash comments"
+  },
+  {
+   "claim": "SHVDN recommends Ped.GetNavMeshRouteResult() (GET_NAVMESH_ROUTE_RESULT) as the purpose-built liveness/progress check for FollowNavMeshTo rather than generic status polling",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/Ped.cs doc comments"
+  }
+ ]
+}

@@ -80,6 +80,25 @@ class ScreenGrabber:
                 "dxcam is not installed. Install the harness with "
                 "`pip install -e .[windows]` on the game server."
             ) from exc
+        except Exception as exc:
+            # dxcam builds its DXGI factory at MODULE IMPORT time, enumerating
+            # every adapter's outputs, so importing it can fail with anything
+            # ctypes raises — `_ctypes.COMError` in particular, which is not an
+            # ImportError and used to escape this constructor entirely.
+            # Observed on the server 2026-09-02: two adapters (virtual display
+            # driver + Intel iGPU), one reporting no currently-available output,
+            # COMError(-2005270494) on startup, harness dead before its first
+            # tick. Every decision the agent actually needs comes off the bridge;
+            # capture feeds screenshots and the objective OCR. Losing it must
+            # degrade the show, not end it — `Harness.__init__` already runs
+            # with `grabber = None`, it just never got the chance.
+            raise ScreenshotUnavailableError(
+                f"dxcam failed while building its DXGI factory at import: {exc!r}. "
+                f"Usually an adapter with no currently-available output (a second "
+                f"GPU with nothing attached), or the console session not owning a "
+                f"display target. Screenshots and objective OCR are unavailable; "
+                f"bridge-driven play continues."
+            ) from exc
         self._dxcam = dxcam
         self._camera: Any = None
         self._last: Image.Image | None = None
@@ -89,7 +108,19 @@ class ScreenGrabber:
         self._create_camera()
 
     def _create_camera(self) -> None:
-        self._camera = self._dxcam.create(output_color="RGB")
+        try:
+            self._camera = self._dxcam.create(output_color="RGB")
+        except ScreenshotUnavailableError:
+            raise
+        except Exception as exc:
+            # Same COM exposure as the import above: `create()` talks to DXGI and
+            # can raise rather than return None. Callers (construction AND
+            # `reset()` after a duplication loss) only ever handle
+            # ScreenshotUnavailableError.
+            raise ScreenshotUnavailableError(
+                f"dxcam.create() failed: {exc!r}. The console session's display "
+                f"target is not currently capturable."
+            ) from exc
         if self._camera is None:
             raise ScreenshotUnavailableError(
                 "dxcam.create() returned None — no capturable display. On the "

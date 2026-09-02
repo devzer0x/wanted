@@ -57,6 +57,7 @@ from ..logsetup import get_logger
 from ..perception import Delta
 from .navigation import (
     DRIVE_ARRIVE_RADIUS_M,
+    RUSHED_SPEED_MPS,
     RUSHED_STYLE_DISTANCE_M,
     VEHICLE_SEARCH_RADIUS_M,
     WALK_ARRIVE_RADIUS_M,
@@ -76,7 +77,10 @@ __all__ = [
     "DRIVE_ARRIVE_RADIUS_M",
     "FOLLOW_GAP_WIDEN_M",
     "FOLLOW_GAP_WINDOW_S",
-    "FOLLOW_TARGET_LOST_S",
+    "FOLLOW_RECOVERY_EPISODE_RESET_S",
+    "FOLLOW_RECOVERY_EXHAUSTED_S",
+    "FOLLOW_RECOVERY_RUNG_GAP_S",
+    "FOLLOW_RECOVERY_VEHICLE_RADIUS_M",
     "PROGRESS_MARGIN_M",
     "RUSHED_STYLE_DISTANCE_M",
     "STUCK_WINDOW_S",
@@ -355,21 +359,68 @@ STUCK_WINDOW_S = 60.0
 #: closest this tail has managed is pulling away, not taking a corner wide.
 #: 25 m is between one and two seconds of a car at city speed, and city
 #: traffic, junctions and lane changes routinely produce everything below it.
-FOLLOW_GAP_WIDEN_M = 25.0
+#: TIGHTENED 25.0 -> 12.0 (2026-09-02): 25 m of lost ground is most of the way
+#: to losing the target on a road, and the escalation that follows is the only
+#: lever we have. Half that is still well clear of the metre-or-two of jitter a
+#: tail shows at a junction.
+FOLLOW_GAP_WIDEN_M = 12.0
 
 #: ...and it has to stay that way for this long before anything escalates. One
 #: snapshot at 2-4 Hz catches every overtake; six seconds of continuously
 #: losing ground is the mission failing in real time.
-FOLLOW_GAP_WINDOW_S = 6.0
+#: TIGHTENED 6.0 -> 2.5 (2026-09-02): six seconds of falling behind at
+#: mission-NPC speed is ~180 m gone before he asks for more speed.
+FOLLOW_GAP_WINDOW_S = 2.5
 
-#: Continuous absence from `nearby.peds` that counts as target-lost. `nearby`
-#: is the top 8 BY DISTANCE (CONTRACTS §1), so a companion can drop off the
-#: list for a moment simply by being the ninth-closest body in a crowd, or
-#: while the engine streams him back in — that is not "gone". Ten seconds of
-#: it is. The cost of erring the other way was measured on the broadcast: over
-#: a minute of "Alpha's right there. Staying on his six." with the failure
-#: banner already on screen.
-FOLLOW_TARGET_LOST_S = 10.0
+#: THE TARGET-LOST RECOVERY LADDER, replacing the old single "wait 10s, say
+#: `stop` once" behaviour (root-caused from the 2026-09-02 live follow-mission
+#: failure: the followed friendly got into a vehicle, `_friendly_missing`
+#: posted one `stop` after 10s and went quiet, and the car coasted to a halt
+#: mid-mission). `nearby` is the top 8 BY DISTANCE (CONTRACTS §1), so a
+#: companion can drop off the list for a moment simply by being the
+#: ninth-closest body in a crowd, or while the engine streams him back in —
+#: that is not "gone". A bounded, non-repeating ladder of real hypotheses,
+#: cheapest and most likely first, now runs instead of a bare wait:
+#:   a. vehicle hand-off — the last `in_vehicle_handle` seen on him, fires
+#:      immediately (no wait at all: it is the single most likely explanation
+#:      for a friendly simply disappearing).
+#:   b. the game's own routed entity (`_routed_entity`, CONTRACTS v1.8) —
+#:      already outranks everything above `_friendly_missing` in
+#:      `_follow_friendly`, so nothing further is needed here.
+#:   c. the nearest unclaimed vehicle to his last-seen position.
+#:   d. driving/walking to his last-seen position (re-acquire).
+#:   e. exhausted: the original single `stop`, now at the end of the ladder
+#:      rather than the whole of it.
+
+#: Distance from the friendly's last-seen position within which a nearby,
+#: unclaimed vehicle is worth guessing as "the car they just got into" (rung
+#: c). Wide enough to survive a few seconds of GPS/pathing jitter between
+#: samples, narrow enough that a car parked two blocks over is not mistaken
+#: for it.
+FOLLOW_RECOVERY_VEHICLE_RADIUS_M = 15.0
+
+#: Minimum gap between two rungs of the ladder actually firing. Same
+#: rationale as `vehicle.RECOVERY_RUNG_GAP_S`: a task posted this tick only
+#: shows up as evidence in the NEXT snapshot, so grading a rung sooner than
+#: this would judge it before the game had answered. Rung (a) is exempt from
+#: this on the FIRST missing tick of a fresh episode — nothing has fired yet
+#: to wait on.
+FOLLOW_RECOVERY_RUNG_GAP_S = 4.0
+
+#: How long, from the moment the friendly went missing, before the ladder
+#: gives up entirely and falls back to `stop` (rung e) — the same behaviour
+#: this file always had, just later, because rungs a/c/d now get a real shot
+#: first. Roughly the old 10s wait plus room for two or three rungs at
+#: `FOLLOW_RECOVERY_RUNG_GAP_S` apart plus their own evidence lag.
+FOLLOW_RECOVERY_EXHAUSTED_S = 30.0
+
+#: How long the friendly must be CONTINUOUSLY back in view before a loss
+#: episode is considered over and the ladder resets for next time. Short of
+#: this, a brief regain-then-lose-again (a corner, a lag spike) continues the
+#: SAME episode from wherever it left off rather than re-trying hypotheses
+#: that already failed — the brief's own rule: "do not restart the ladder
+#: from rung (a) blindly".
+FOLLOW_RECOVERY_EPISODE_RESET_S = 20.0
 
 #: Speed to ask for once the target is provably pulling away, in m/s. CONTRACTS
 #: v1.9 gives `follow_entity` a `speed_mps`; the bridge's own default is 30.0
@@ -503,6 +554,25 @@ class MissionFollower:
     _follow_missing_since: float | None = None
     _follow_signature: tuple[Any, ...] | None = None
     _follow_no_faster_logged: bool = False
+    #: Last-seen ground truth about the friendly currently being tailed,
+    #: updated every tick he is actually visible as a `NearbyPed` (never from
+    #: a `_RoutedTarget`, which carries neither field). This is exactly what
+    #: the target-lost recovery ladder below reasons from once he vanishes.
+    _follow_last_pos: tuple[float, float, float] | None = None
+    _follow_last_in_vehicle_handle: int | None = None
+    #: The recovery ladder's own state: which rungs have already been tried
+    #: THIS loss episode (each fires at most once — brief requirement), the
+    #: clock of the last rung that actually fired (pacing), and — while he is
+    #: back in view after a loss — when that regain started, so a hold of
+    #: `FOLLOW_RECOVERY_EPISODE_RESET_S` can retire the episode instead of a
+    #: momentary regain silently wiping ladder progress.
+    _recovery_tried: set[str] = field(default_factory=set)
+    _recovery_last_rung_at: float = 0.0
+    _recovery_regained_at: float | None = None
+    #: One line for `note()` while a loss episode is running, set by whichever
+    #: rung last fired — see the class docstring's "never a bare 'no friendly
+    #: in range' during an active loss episode" requirement.
+    _recovery_note: str | None = None
     #: Deadlock detection: where both of us were when the stall window opened.
     _stall_anchor_self: tuple[float, float, float] | None = None
     _stall_anchor_target: tuple[float, float, float] | None = None
@@ -534,6 +604,19 @@ class MissionFollower:
         self._stall_anchor_self = None
         self._stall_anchor_target = None
         self._stall_since = None
+        self._follow_last_pos = None
+        self._follow_last_in_vehicle_handle = None
+        self._reset_recovery_ladder()
+
+    def _reset_recovery_ladder(self) -> None:
+        """A fresh episode: nothing tried yet, no pacing floor, no regain in
+        progress. Called both by `_end_follow` (a brand new tail) and once a
+        loss episode is judged OVER (the friendly held continuously for
+        `FOLLOW_RECOVERY_EPISODE_RESET_S`) — see `_follow_friendly`."""
+        self._recovery_tried = set()
+        self._recovery_last_rung_at = 0.0
+        self._recovery_regained_at = None
+        self._recovery_note = None
 
     def _set_mode(self, mode: str) -> None:
         if self._mode != mode:
@@ -648,12 +731,12 @@ class MissionFollower:
         # when it has not plotted one (on-foot follows, and any pre-v1.8 bridge).
         friendly = self._routed_entity(state) or self._nearest_friendly(state)
         if friendly is None:
-            return self._friendly_missing(now)
+            return self._friendly_missing(state, now)
 
-        self._follow_missing_since = None
         distance = friendly.distance
         if friendly.handle != self._follow_handle:
-            # A new companion (or the first one): fresh tail, fresh baseline.
+            # A new companion (or the first one): fresh tail, fresh baseline —
+            # `_end_follow` also resets the recovery ladder for the new episode.
             self._end_follow()
             self._follow_handle = friendly.handle
             self._follow_best_distance = distance
@@ -661,9 +744,33 @@ class MissionFollower:
                 "no objective marker; tailing the friendly blue dot instead",
                 extra={"kv": {"handle": friendly.handle, "distance_m": round(distance, 1)}},
             )
-        elif distance < (self._follow_best_distance or distance):
-            self._follow_best_distance = distance
+        else:
+            if distance < (self._follow_best_distance or distance):
+                self._follow_best_distance = distance
+            if self._follow_missing_since is not None:
+                # Regained the SAME target after a loss. Do not blindly wipe
+                # the ladder: only a continuous hold of
+                # FOLLOW_RECOVERY_EPISODE_RESET_S counts as the episode being
+                # over — a brief regain-then-lose-again (a corner, a lag
+                # spike) continues from wherever the ladder left off.
+                self._follow_missing_since = None
+                if self._recovery_regained_at is None:
+                    self._recovery_regained_at = now
+        if (
+            self._recovery_regained_at is not None
+            and now - self._recovery_regained_at >= FOLLOW_RECOVERY_EPISODE_RESET_S
+        ):
+            self._reset_recovery_ladder()
         self._follow_distance = distance
+
+        # Last-seen ground truth for the recovery ladder below, updated only
+        # from a real `NearbyPed` — `_RoutedTarget` (the routed-entity path)
+        # carries neither field and must not clobber what the ped path
+        # already learned about the SAME companion.
+        if hasattr(friendly, "pos") and friendly.pos is not None:
+            self._follow_last_pos = (friendly.pos.x, friendly.pos.y, friendly.pos.z)
+        if hasattr(friendly, "in_vehicle_handle"):
+            self._follow_last_in_vehicle_handle = friendly.in_vehicle_handle
 
         # A widening gap is the mission failing in real time, not a detail.
         baseline = self._follow_best_distance if self._follow_best_distance is not None else distance
@@ -783,7 +890,11 @@ class MissionFollower:
                 )
                 return {
                     "type": "drive_to",
+                    # speed_mps is REQUIRED by the bridge (CONTRACTS §1); without it
+                    # every one of these recoveries came back 400 invalid_params and
+                    # the car never moved. Observed live 2026-09-02.
                     "params": {"x": pos.x, "y": pos.y, "z": pos.z,
+                               "speed_mps": RUSHED_SPEED_MPS,
                                "style": "rushed", "arrive_radius_m": DRIVE_ARRIVE_RADIUS_M},
                 }
             log.info(
@@ -846,35 +957,154 @@ class MissionFollower:
                 )
         return {"type": "follow_entity", "params": params}
 
-    def _friendly_missing(self, now: float) -> dict[str, Any] | None:
-        """No friendly in `nearby.peds` this tick. Target-lost, or just a gap?
+    def _friendly_missing(self, state: GameState, now: float) -> dict[str, Any] | None:
+        """No friendly in `nearby.peds` (and no routed entity) this tick.
 
         This is the ONE place target-lost is decided (the bridge's own
         `follow_entity` -> `failed`/`target_lost` covers the entity handle
         going invalid; it did NOT cover the companion simply leaving, which is
-        what was measured). Returns `stop` exactly once, then goes quiet.
+        what was measured). Runs the bounded, non-repeating recovery ladder
+        (module docstring above `FOLLOW_RECOVERY_VEHICLE_RADIUS_M`) instead of
+        the old bare wait-then-stop.
         """
         if self._follow_handle is None:
             return None  # nothing was being followed; nothing to lose
         if self._follow_missing_since is None:
             self._follow_missing_since = now
+            self._recovery_regained_at = None
+        return self._try_recovery_rungs(state, now)
+
+    #: The ladder, in priority order. Rung (b) — the game's own routed entity
+    #: — already outranks this whole method from `_follow_friendly`, so it is
+    #: not repeated here.
+    _RECOVERY_RUNGS: tuple[str, ...] = (
+        "vehicle_handoff", "nearest_vehicle", "reacquire", "exhausted",
+    )
+
+    def _try_recovery_rungs(self, state: GameState, now: float) -> dict[str, Any] | None:
+        """Grade / advance the ladder. Each rung fires at most once per loss
+        episode; an INAPPLICABLE rung (missing data) is skipped on the same
+        tick rather than consuming the pacing gap — only an actual POST does
+        that."""
+        if now - self._recovery_last_rung_at < FOLLOW_RECOVERY_RUNG_GAP_S:
             return None
-        if now - self._follow_missing_since < FOLLOW_TARGET_LOST_S:
-            return None
-        log.warning(
-            "the friendly being followed has been gone for too long; stopping "
-            "rather than tailing nobody",
-            extra={
-                "kv": {
-                    "handle": self._follow_handle,
-                    "missing_for_s": round(now - self._follow_missing_since, 1),
-                    "last_distance_m": round(self._follow_distance or 0.0, 1),
-                }
-            },
+        for rung in self._RECOVERY_RUNGS:
+            if rung in self._recovery_tried:
+                continue
+            result = self._recovery_rung_action(rung, state, now)
+            if result is None:
+                continue  # not applicable (yet, or at all) — try the next one now
+            task, note = result
+            self._recovery_tried.add(rung)
+            self._recovery_last_rung_at = now
+            self._recovery_note = note
+            log.warning(
+                "mission follow: target-lost recovery ladder",
+                extra={
+                    "kv": {
+                        "rung": rung,
+                        "handle": self._follow_handle,
+                        "task": task["type"],
+                        "missing_for_s": round(now - (self._follow_missing_since or now), 1),
+                        "last_distance_m": round(self._follow_distance or 0.0, 1),
+                    }
+                },
+            )
+            if rung == "exhausted":
+                self._end_follow()
+                self._bound_task_id = None
+            return task
+        return None
+
+    def _recovery_rung_action(
+        self, rung: str, state: GameState, now: float
+    ) -> tuple[dict[str, Any], str] | None:
+        """One rung's `(task, note)`, or `None` when it does not apply right now."""
+        last_dist = (
+            f"{self._follow_distance:.0f}m" if self._follow_distance is not None else "an unknown range"
         )
-        self._end_follow()
-        self._bound_task_id = None
-        return {"type": "stop", "params": {}}
+        if rung == "vehicle_handoff":
+            handle = self._follow_last_in_vehicle_handle
+            if handle is None:
+                return None
+            task = {
+                "type": "follow_entity",
+                "params": {"handle": handle, "in_vehicle": state.player.in_vehicle},
+            }
+            note = (
+                f"MISSION NAV: the friendly I was tailing vanished at {last_dist} — almost "
+                f"certainly got into a vehicle; following their car (handle {handle})."
+            )
+            return task, note
+
+        if rung == "nearest_vehicle":
+            if self._follow_last_pos is None:
+                return None
+            candidates = [
+                v
+                for v in state.nearby.vehicles
+                if v.pos is not None
+                and v.driver != "player"
+                and planar_distance((v.pos.x, v.pos.y, v.pos.z), self._follow_last_pos)
+                <= FOLLOW_RECOVERY_VEHICLE_RADIUS_M
+            ]
+            if not candidates:
+                return None
+            best = min(
+                candidates,
+                key=lambda v: planar_distance((v.pos.x, v.pos.y, v.pos.z), self._follow_last_pos),
+            )
+            task = {
+                "type": "follow_entity",
+                "params": {"handle": best.handle, "in_vehicle": state.player.in_vehicle},
+            }
+            note = (
+                f"MISSION NAV: the friendly vanished at {last_dist} with no known vehicle of "
+                f"their own — a car was near where they were last seen (handle {best.handle}); "
+                f"trying that instead."
+            )
+            return task, note
+
+        if rung == "reacquire":
+            if self._follow_last_pos is None:
+                return None
+            x, y, z = self._follow_last_pos
+            if state.player.in_vehicle:
+                task = {
+                    "type": "drive_to",
+                    "params": {
+                        "x": x, "y": y, "z": z,
+                        # Required by the bridge — see the deadlock breaker above.
+                        "speed_mps": RUSHED_SPEED_MPS,
+                        "style": "rushed", "arrive_radius_m": DRIVE_ARRIVE_RADIUS_M,
+                    },
+                }
+                note = (
+                    f"MISSION NAV: the friendly vanished at {last_dist} with nothing to hand off "
+                    f"to — driving to where they last were."
+                )
+            else:
+                task = {"type": "walk_to", "params": {"x": x, "y": y, "z": z, "run": True}}
+                note = (
+                    f"MISSION NAV: the friendly vanished at {last_dist} with nothing to hand off "
+                    f"to — heading to where they last were."
+                )
+            return task, note
+
+        if rung == "exhausted":
+            if (
+                self._follow_missing_since is None
+                or now - self._follow_missing_since < FOLLOW_RECOVERY_EXHAUSTED_S
+            ):
+                return None
+            task = {"type": "stop", "params": {}}
+            note = (
+                f"MISSION NAV: lost the friendly at {last_dist} for good — the whole recovery "
+                f"ladder ran with nothing to show for it. Stopping rather than tailing nobody."
+            )
+            return task, note
+
+        raise AssertionError(f"unknown recovery rung {rung!r}")  # pragma: no cover
 
     # -- shared ------------------------------------------------------------------
 
@@ -906,6 +1136,14 @@ class MissionFollower:
                 return (
                     "MISSION NAV: mission active with no objective marker and no friendly "
                     "in range to follow."
+                )
+            if self._follow_missing_since is not None:
+                # An active loss episode: never fall back to a bare "no friendly in
+                # range" here — the ladder always has SOMETHING to say about what it
+                # is trying (or why it is still waiting to try the next thing).
+                return self._recovery_note or (
+                    "MISSION NAV: the friendly I was tailing just vanished — working "
+                    "out where they went."
                 )
             dist = f"{self._follow_distance:.0f}m" if self._follow_distance is not None else "?"
             if self._follow_no_faster_logged:

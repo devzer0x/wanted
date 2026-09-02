@@ -127,6 +127,9 @@ namespace WastedBridge.OfflineChecks
                 allowed: new[] { "coord", "entity" }),
             new FieldSpec("mission.route_blips[].handle", Kind.Integer),
             new FieldSpec("mission.route_blips[].color", Kind.String),
+            // CONTRACTS v1.10 item 3: the active story-mission script name, or null. Only ever
+            // non-null while mission.active.
+            new FieldSpec("mission.script", Kind.String, nullable: true),
 
             new FieldSpec("nearby", Kind.Object),
             new FieldSpec("nearby.vehicles", Kind.Array),
@@ -157,6 +160,8 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("nearby.peds[].pos.x", Kind.Number),
             new FieldSpec("nearby.peds[].pos.y", Kind.Number),
             new FieldSpec("nearby.peds[].pos.z", Kind.Number),
+            // CONTRACTS v1.10 item 2: the vehicle handle this ped is seated in, or null on foot.
+            new FieldSpec("nearby.peds[].in_vehicle_handle", Kind.Integer, nullable: true),
 
             new FieldSpec("last_task", Kind.Object),
             // CONTRACTS v1.2: present-and-null before the first task, never absent.

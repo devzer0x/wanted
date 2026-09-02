@@ -12,6 +12,10 @@ from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
+from ..logsetup import get_logger
+
+log = get_logger("wasted.brain.schemas")
+
 Mood = Literal["chill", "bored", "hyped", "scared", "smug"]
 MOODS: tuple[str, ...] = ("chill", "bored", "hyped", "scared", "smug")
 
@@ -345,7 +349,8 @@ class DecisionModel(BaseModel):
 
     thought: str = Field(
         description="<=40 words. The agent's private-ish reasoning, shown on site as "
-        "'what he was thinking'."
+        "'what he was thinking'. Over the limit is soft-truncated to 40 words plus "
+        "'…', never rejected — see `_thought_words`."
     )
     say: str = Field(
         description="<=20 words. The agent's out-loud line in his voice. This is the commentary."
@@ -360,8 +365,25 @@ class DecisionModel(BaseModel):
     @field_validator("thought")
     @classmethod
     def _thought_words(cls, v: str) -> str:
-        if _word_count(v) > 40:
-            raise ValueError(f"thought is {_word_count(v)} words; contract max is 40")
+        """Soft-truncate rather than reject.
+
+        Observed live: a valid, useful decision (real coordinates, a correct
+        action) was thrown away in its entirety because the narration
+        attached to it ran long — "thought is 59 words; contract max is 40"
+        discarded the whole decision, including the ACTION, on a tick where a
+        mission follower was mid-recovery and needed exactly that action to
+        post. Narration length is cosmetic; the action is not. Clip to the
+        first 40 words and mark the cut with "…" instead of raising, so a
+        decision is never discarded for how long its thought was.
+        """
+        words = v.split()
+        if len(words) > 40:
+            log.warning(
+                "thought exceeded the 40-word contract limit; soft-truncating "
+                "rather than discarding the decision",
+                extra={"kv": {"word_count": len(words)}},
+            )
+            return " ".join(words[:40]) + "…"
         return v
 
     @field_validator("say")

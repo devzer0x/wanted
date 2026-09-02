@@ -44,9 +44,16 @@ VEHICLE_SEARCH_RADIUS_M = 40.0
 
 #: Past this planar distance, drive with the `rushed` style instead of `normal`
 #: — a long haul across the map, not weaving through the block ahead.
-RUSHED_STYLE_DISTANCE_M = 150.0
-CRUISE_SPEED_MPS = 18.0
-RUSHED_SPEED_MPS = 26.0
+#: RAISED after live feedback 2026-09-02 ("he can't drive quickly"). The old
+#: numbers (150 m before rushing, 18/26 m/s) made every trip a sightseeing tour:
+#: 18 m/s is 65 km/h, which loses a mission NPC immediately - `follow_entity`
+#: alone defaults to 30 m/s (CONTRACTS v1.9) because that is what the game's own
+#: mission drivers do. These are still speeds a human reaches in an ordinary car
+#: on ordinary roads (24 m/s = 86 km/h, 34 m/s = 122 km/h), not a cheat: the
+#: engine still drives, still steers, and still crashes if he asks too much.
+RUSHED_STYLE_DISTANCE_M = 60.0
+CRUISE_SPEED_MPS = 24.0
+RUSHED_SPEED_MPS = 34.0
 
 #: On foot, break into a run past this distance. Under it, walking reads as a
 #: person arriving; over it, a jog is what a player would do.

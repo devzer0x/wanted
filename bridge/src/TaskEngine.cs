@@ -43,12 +43,42 @@ namespace WastedBridge
         private const int EnterVehicleTimeoutMs = 60000;
         private const int ExitVehicleTimeoutMs = 30000;
 
+        // CONTRACTS v1.10 item 4 (task liveness / "cleared_by_game"; recipe:
+        // docs/research/brief-script-task-status.json). WaitingToStart is a legal opening state for
+        // a just-issued task, so liveness is not judged until this much time has passed since the
+        // expected hash was (re)set.
+        private const int LivenessSettleMs = 1000;
+        // CLEAR_PED_TASKS transition timing is unverified; a single-frame hash mismatch must not
+        // kill a healthy task, so a mismatch has to hold for this many consecutive Update() ticks.
+        private const int LivenessDebounceTicks = 3;
+
         private TaskRequest _req;            // null = no task ever posted
         private string _status = "idle";
         private string _detail = "";
         private int _startedAt;              // Game.GameTime ms
         private int _lastFleeReissueAt;
         private int _targetVehicleHandle;
+
+        // CONTRACTS v1.10 item 4: the ScriptTaskNameHash this task's own native call should produce
+        // when polled, or null when the task type has no researched hash (seek_cover, set_waypoint,
+        // stop, exit_vehicle — brief-script-task-status.json explicitly excludes guessing these) and
+        // therefore gets no liveness check at all. Set via SetExpectedHash() at every native
+        // call site that issues a scripted task, not once per task TYPE, because some task types
+        // (combat_hated_targets_around, follow_entity) issue one of two different underlying
+        // natives depending on runtime state.
+        //
+        // Stored as the enum's raw uint, not GTA.ScriptTaskNameHash itself: bridge/tools/
+        // offline-checks loads WastedBridge.dll under .NET 8 against a generated SHVDN stub that
+        // only defines the one GTA type its checks actually touch (GTA.VehicleDrivingFlags — see
+        // StubGenerator.cs). A field of a SHVDN enum TYPE forces eager resolution of that type when
+        // the CLR loads TaskEngine (for field layout), which throws TypeLoadException against the
+        // stub before any test even runs; a plain uint field does not. GTA.ScriptTaskNameHash is
+        // still used at every call site below (SetExpectedHash's parameter, CheckLiveness's local
+        // variables) — those are method-body types, resolved lazily only when JITted, which never
+        // happens in the offline harness because it never calls these two methods.
+        private uint? _expectedTaskHash;
+        private int _expectedHashSetAt;      // Game.GameTime ms, reset on every (re)issue
+        private int _clearedStreak;          // consecutive Update() ticks the hash has mismatched
 
         public bool IsDriveTaskRunning
         {
@@ -89,6 +119,8 @@ namespace WastedBridge
             _startedAt = Game.GameTime;
             _lastFleeReissueAt = 0;
             _targetVehicleHandle = 0;
+            _expectedTaskHash = null;    // v1.10: no liveness check until a case below sets one
+            _clearedStreak = 0;
 
             Ped ped = Game.Player.Character;
             if (ped == null || !ped.Exists())
@@ -112,12 +144,17 @@ namespace WastedBridge
                     // — argument order differs from stable v3.6.0 (bridge/README).
                     ped.Task.DriveTo(veh, new Vector3(req.X, req.Y, req.Z),
                         req.SpeedMps, req.Style, req.ArriveRadiusM);
+                    // Wraps TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, which polls as this exact hash
+                    // (name match verified against the pinned ScriptTaskNameHash enum).
+                    SetExpectedHash(ScriptTaskNameHash.VehicleDriveToCoordLongrange);
                     break;
                 }
 
                 case "walk_to":
                     ped.Task.FollowNavMeshTo(new Vector3(req.X, req.Y, req.Z),
                         req.Run ? PedMoveBlendRatio.Run : PedMoveBlendRatio.Walk);
+                    // Wraps TASK_FOLLOW_NAV_MESH_TO_COORD -> FollowNavMeshToCoord.
+                    SetExpectedHash(ScriptTaskNameHash.FollowNavMeshToCoord);
                     break;
 
                 case "enter_nearest_vehicle":
@@ -140,6 +177,12 @@ namespace WastedBridge
                         return;
                     }
                     ped.Task.CruiseWithVehicle(veh, WanderCruiseSpeedMps, req.Style);
+                    // Wraps TASK_VEHICLE_DRIVE_WANDER. The pinned ScriptTaskNameHash enum has a
+                    // dedicated VehicleDriveWander member (not just the generic VehicleMission
+                    // family) whose name matches the native 1:1, verified directly against
+                    // lib/ScriptHookVDotNet3.dll — used here in preference to the research brief's
+                    // more tentative "VehicleMission family" guess.
+                    SetExpectedHash(ScriptTaskNameHash.VehicleDriveWander);
                     break;
                 }
 
@@ -166,6 +209,8 @@ namespace WastedBridge
                         if (CountHatedTargets(ped, req.RadiusM) > 0)
                         {
                             ped.Task.CombatHatedTargetsAroundPed(req.RadiusM);
+                            // Wraps TASK_COMBAT_HATED_TARGETS_AROUND_PED -> matching hash.
+                            SetExpectedHash(ScriptTaskNameHash.CombatHatedTargetsAroundPed);
                         }
                         else
                         {
@@ -173,7 +218,14 @@ namespace WastedBridge
                             if (target != null)
                             {
                                 ped.Task.Combat(target, (TaskCombatFlags)0, (TaskThreatResponseFlags)0);
+                                // Wraps TASK_COMBAT_PED -> the separate "Combat" script-task hash,
+                                // NOT CombatHatedTargetsAroundPed - this branch issues a different
+                                // native than the one above, so it needs its own expected hash.
+                                SetExpectedHash(ScriptTaskNameHash.Combat);
                             }
+                            // else: no hated target found at all - nothing was actually issued to
+                            // the engine, so no liveness check is set (matches "running" staying a
+                            // no-op state, unchanged pre-existing behavior).
                         }
                     }
                     break;
@@ -228,6 +280,14 @@ namespace WastedBridge
             if (playerArrested)
             {
                 Fail("player_arrested");
+                return;
+            }
+
+            CheckLiveness(ped);
+            if (_status != "running")
+            {
+                // CheckLiveness just failed the task (cleared_by_game) - the per-task-type grading
+                // below has nothing left to grade this tick.
                 return;
             }
 
@@ -321,6 +381,61 @@ namespace WastedBridge
             }
         }
 
+        /// <summary>Records which ScriptTaskNameHash the task just issued should poll as, and
+        /// (re)starts the settle window / debounce streak used by <see cref="CheckLiveness"/>.
+        /// Called from every native-issuing call site, including flee_police's periodic reissue -
+        /// a reissue is itself a fresh task, so it gets its own fresh 1 s settle grace.</summary>
+        private void SetExpectedHash(ScriptTaskNameHash hash)
+        {
+            _expectedTaskHash = (uint)hash;
+            _expectedHashSetAt = Game.GameTime;
+            _clearedStreak = 0;
+        }
+
+        /// <summary>
+        /// CONTRACTS v1.10 item 4: detects when the GAME (not the bridge) cleared the ped's
+        /// scripted task - mission scripted beats and cutscenes call CLEAR_PED_TASKS on the player,
+        /// and without this the bridge kept reporting "running" forever (observed live: a followed
+        /// mission car "drove and then stopped" with last_task stuck on running). Recipe from
+        /// docs/research/brief-script-task-status.json: read the ped's CURRENT script-task hash and
+        /// status every tick; if the hash no longer matches what THIS task's own native call should
+        /// have produced (including a mismatch against Invalid), something else took the task away.
+        /// Debounced <see cref="LivenessDebounceTicks"/> consecutive ticks (CLEAR_PED_TASKS
+        /// transition timing is unverified; a single-frame flicker must not kill a healthy task) and
+        /// skipped for <see cref="LivenessSettleMs"/> after (re)issue (WaitingToStart is a legal
+        /// opening state). Tasks with no researched hash (_expectedTaskHash stays null - seek_cover,
+        /// set_waypoint, stop, exit_vehicle) get no liveness check at all rather than a guessed one.
+        /// The existing per-task Update() grading (arrival checks, target_lost, preemption) is
+        /// unchanged and still applies on top of this - liveness is an additional failure path.
+        /// </summary>
+        private void CheckLiveness(Ped ped)
+        {
+            if (_expectedTaskHash == null)
+            {
+                return;
+            }
+            if (Game.GameTime - _expectedHashSetAt < LivenessSettleMs)
+            {
+                return;
+            }
+
+            ScriptTaskNameHash currentHash;
+            ScriptTaskStatus currentStatus;
+            ped.GetCurrentScriptTaskNameHashAndStatus(out currentHash, out currentStatus);
+
+            if ((uint)currentHash == _expectedTaskHash.Value)
+            {
+                _clearedStreak = 0;
+                return;
+            }
+
+            _clearedStreak++;
+            if (_clearedStreak >= LivenessDebounceTicks)
+            {
+                Fail("cleared_by_game");
+            }
+        }
+
         /// <summary>
         /// The vehicle the ped is actually in, or null. IsInVehicle() and CurrentVehicle can
         /// disagree for a frame while entering/exiting, and CurrentVehicle can hand back a handle
@@ -393,6 +508,8 @@ namespace WastedBridge
             }
             _targetVehicleHandle = chosen.Handle;
             ped.Task.EnterVehicle(chosen, VehicleSeat.Driver);
+            // Wraps TASK_ENTER_VEHICLE -> EnterVehicle.
+            SetExpectedHash(ScriptTaskNameHash.EnterVehicle);
         }
 
         private void UpdateEnterNearestVehicle(Ped ped, int elapsedMs)
@@ -447,11 +564,22 @@ namespace WastedBridge
                 float speed = System.Math.Min(FollowVehicleMaxSpeedMps,
                     System.Math.Max(FollowVehicleMinSpeedMps, req.SpeedMps));
                 ped.Task.VehicleFollow(veh, target, speed, req.Style, FollowVehicleDistanceM);
+                // Wraps TASK_VEHICLE_FOLLOW, which - per research - polls under the shared
+                // "VehicleMission" hash along with TASK_VEHICLE_ESCORT/TASK_VEHICLE_MISSION/heli/
+                // plane/boat mission tasks. KNOWN AMBIGUITY (accepted, not fixable from here): if
+                // something else issues another TASK_VEHICLE_*_MISSION-family task to this same ped
+                // while our follow is running, the hash still matches and liveness reads it as
+                // "still running" even though it is not our follow anymore - the existing
+                // UpdateFollowEntity target_lost / not_in_vehicle checks are what actually catch
+                // that case, not this liveness check.
+                SetExpectedHash(ScriptTaskNameHash.VehicleMission);
             }
             else
             {
                 // Trail three meters behind the target at a run.
                 ped.Task.FollowToOffsetFromEntity(target, new Vector3(0f, -3f, 0f), 2f);
+                // Wraps TASK_FOLLOW_TO_OFFSET_OF_ENTITY -> FollowToOffsetOfEntity.
+                SetExpectedHash(ScriptTaskNameHash.FollowToOffsetOfEntity);
             }
         }
 
@@ -473,7 +601,15 @@ namespace WastedBridge
         private void IssueFlee(Ped ped)
         {
             Vector3 threat = Game.Player.Wanted.LastPositionSpottedByPolice;
+            // A Vector3 target routes through the TaskInvoker.FleeFrom(Vector3, ...) overload,
+            // which wraps TASK_SMART_FLEE_COORD (verified against scripthookvdotnet source) - NOT
+            // TASK_SMART_FLEE_PED, which is what a Ped-target FleeFrom overload would use. The
+            // ScriptTaskNameHash enum has separate SmartFleePed and SmartFleePoint members for
+            // exactly this ped/coord split; SmartFleePoint is the one that matches what this call
+            // actually issues (correcting the research brief's tentative SmartFleePed guess, which
+            // was written before this call site was checked).
             ped.Task.FleeFrom(threat, FleeSafeDistanceM, -1, false);
+            SetExpectedHash(ScriptTaskNameHash.SmartFleePoint);
             _lastFleeReissueAt = Game.GameTime;
         }
 

@@ -92,10 +92,16 @@ namespace WastedBridge
         [JsonProperty("random_event_active")] public bool RandomEventActive;
         [JsonProperty("cutscene_active")] public bool CutsceneActive;
         [JsonProperty("objective_blip")] public ObjectiveBlipDto ObjectiveBlip;
-        [JsonProperty("starts")] public List<MissionStartDto> Starts;    // v1.7: M/F/T markers on the map
+        // v1.7: M/F/T markers on the map. Contract: "always present as an array, never null" —
+        // defaulted here the same way route_blips is, so a builder that forgets to set it (e.g. a
+        // synthetic/off-server sample) still serializes the documented shape rather than null.
+        [JsonProperty("starts")] public List<MissionStartDto> Starts = new List<MissionStartDto>();
         // v1.8: route-enabled blips, nearest first, at most 5. Initialized so the key is always an
         // array — never null — even if a caller forgets to set it.
         [JsonProperty("route_blips")] public List<RouteBlipDto> RouteBlips = new List<RouteBlipDto>();
+        // v1.10: the active story-mission script name (e.g. "armenian1"), or null. Only ever
+        // non-null while "active" is true.
+        [JsonProperty("script")] public string Script;
     }
 
     internal sealed class NearbyVehicleDto
@@ -116,6 +122,8 @@ namespace WastedBridge
         [JsonProperty("distance")] public float Distance;
         [JsonProperty("relationship")] public string Relationship; // "neutral" | "hostile" | "friendly"
         [JsonProperty("pos")] public Vec3Dto Pos;                 // v1.6: world position - the minimap dot, as data
+        // v1.10: the vehicle handle this ped is currently seated in, or null on foot.
+        [JsonProperty("in_vehicle_handle")] public int? InVehicleHandle;
     }
 
     internal sealed class NearbyDto
