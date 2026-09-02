@@ -13,10 +13,13 @@ from __future__ import annotations
 
 import random
 import time
+from collections.abc import Callable
 from dataclasses import dataclass
+from typing import Any
 
 import anthropic
 import pydantic
+from pydantic import TypeAdapter
 
 from ..behavior.humanizer import MOOD_TIMER_RANGE_S
 from ..budget import Pricing, cost_of_usage
@@ -32,6 +35,20 @@ TACTICAL_TIMER_RANGE_S = (8.0, 25.0)
 # Governor L1: slower tactical timers (CONTRACTS §7).
 L1_TIMER_SCALE = 2.0
 MAX_DECISION_TOKENS = 500
+
+#: The director needs far more room than the tactical tier, and the reason is not prompt length.
+#: MEASURED against the real API 2026-09-02: Sonnet 5 emits a **thinking block before the text
+#: block**, and that thinking is billed against the same `max_tokens` budget. At 500 the thinking
+#: consumed the whole allowance and the JSON was cut off mid-`params` — `stop_reason: max_tokens`,
+#: `output_tokens: 500`, text present but truncated. Every director call failed twice and the
+#: reflex layer kept control, so the agent played with no strategic layer at all. Haiku does not think,
+#: which is exactly why the tactical tier never showed the bug.
+#:
+#: Measured completions at the same prompt: cap 1200 -> 443 tokens, `end_turn`, parses.
+#: cap 2000 -> 599 tokens (the model spends more thinking when offered more). 1200 leaves ~2.7x
+#: headroom over the observed need and bills only what is generated: 443 out-tokens at Sonnet 5's
+#: $10/MTok is $0.0044 per director call, ~$0.05/hour at the director's cadence.
+DIRECTOR_MAX_DECISION_TOKENS = 1200
 
 #: Hard floor between two tactical calls, applied to EVERY trigger — the event
 #: ones included, not just the timer. This is what actually bounds the bill:
@@ -83,18 +100,26 @@ def make_client(settings: Settings) -> anthropic.Anthropic:
     return anthropic.Anthropic(api_key=settings.anthropic_api_key)
 
 
-def verify_model_ids(client: anthropic.Anthropic, pricing: Pricing) -> None:
+def verify_model_ids(
+    client: anthropic.Anthropic,
+    pricing: Pricing,
+    on_cost: Callable[[float], None] | None = None,
+) -> None:
     """Startup re-verification (CONTRACTS §3): a 1-token live call per model.
 
-    Fails loudly on a bad/renamed model ID or a dead key.
+    Fails loudly on a bad/renamed model ID or a dead key. The two probes are
+    real billed calls, so their usage goes into the books like any other —
+    small, but the books are meant to be a measurement, not an estimate.
     """
     for mp in (pricing.tactical, pricing.director):
         try:
-            client.messages.create(
+            response = client.messages.create(
                 model=mp.id,
                 max_tokens=1,
                 messages=[{"role": "user", "content": "ping"}],
             )
+            if on_cost is not None:
+                on_cost(cost_of_usage(pricing, mp.id, response.usage))
         except anthropic.APIError as exc:
             raise BrainUnavailableError(
                 f"startup model check failed for {mp.id!r}: {exc}. "
@@ -222,19 +247,164 @@ class TacticalCadence:
         self._next_timer = self._draw_timer(governor_level, mood)
 
 
+
+#: The substring every word-limit ValidationError carries (schemas.py builds the
+#: message as "... is N words; contract max is M"). It is the only reliable way to
+#: tell a word-limit rejection from any other schema rejection without re-deriving
+#: pydantic's error structure.
+WORD_LIMIT_MARKER = "contract max is"
+
+_WORD_LIMIT_COACHING = (
+    "Fix exactly that and return the decision again. Word limits are hard limits, "
+    "counted by a validator, not guidance: thought <= 40 words, say <= 20 words, "
+    "goal <= 12 words. Being under the limit matters more than being thorough — a "
+    "rejected decision means the agent does nothing at all this tick.\n"
+)
+_GENERIC_COACHING = (
+    "Fix exactly that and return the decision again. A rejected decision means the agent "
+    "does nothing at all this tick.\n"
+)
+
+
+def _retry_correction(exc: Exception) -> str:
+    """A short corrective note appended to the dynamic context on the single retry.
+
+    An API error carries nothing the model can act on, so it gets no note. A schema
+    violation does: the message names the offending field and the limit it broke, and
+    repeating that back is what turns a guaranteed second failure into a valid decision.
+
+    The coaching that follows the echoed error has to match the error. A missing
+    coordinate ("action 'drive_to' requires numeric 'x' in params") answered with a
+    lecture about word counts tells the model the wrong thing about the wrong field,
+    on the one attempt left before the reflex layer takes the tick; the word-limit
+    paragraph is therefore attached only to word-limit rejections.
+    """
+    if isinstance(exc, anthropic.APIError):
+        return ""
+    coaching = _WORD_LIMIT_COACHING if WORD_LIMIT_MARKER in str(exc) else _GENERIC_COACHING
+    return (
+        "\n\nRETRY — your previous response was REJECTED by the schema validator:\n"
+        f"  {type(exc).__name__}: {exc}\n" + coaching
+    )
+
+
+#: The decision schema in the wire form the API wants, built once. This is the
+#: exact transform `client.messages.parse()` applies internally
+#: (anthropic 1.0.0, resources/messages/messages.py); `transform_schema` is
+#: exported from the package root, so this is the SDK's own public helper and
+#: not a re-implementation of it.
+def decision_output_config() -> dict[str, Any]:
+    schema = anthropic.transform_schema(TypeAdapter(DecisionModel).json_schema())
+    return {"format": {"type": "json_schema", "schema": schema}}
+
+
+class BilledCall:
+    """One structured-decision call, with the bill observed before the verdict.
+
+    `client.messages.parse()` validates inside the SDK and raises before the
+    caller ever sees `response.usage` — so every schema-rejected decision was a
+    call Anthropic billed and the governor never heard about. The rejected first
+    attempt of a retried decision, and BOTH attempts of a decision that failed
+    outright, were free as far as the budget was concerned; the governor
+    throttles on that figure, so real spend could pass the hourly cap while the
+    site still published L0 and a cost that was a floor, not a measurement.
+
+    This does what `parse()` does — `messages.create` with the same
+    `output_config`, then validate the returned JSON — split at the one point
+    that matters: the usage is recorded the moment the response arrives,
+    whatever happens to the content afterwards.
+    """
+
+    def __init__(
+        self,
+        client: anthropic.Anthropic,
+        pricing: Pricing,
+        on_cost: Callable[[float], None] | None,
+    ) -> None:
+        self._client = client
+        self._pricing = pricing
+        self._on_cost = on_cost
+        self._output_config = decision_output_config()
+
+    def run(
+        self,
+        model_id: str,
+        prefix: str,
+        content: list[dict[str, Any]] | str,
+        max_tokens: int = MAX_DECISION_TOKENS,
+    ) -> DecisionResult:
+        response = self._client.messages.create(
+            model=model_id,
+            max_tokens=max_tokens,
+            system=[
+                {
+                    "type": "text",
+                    "text": prefix,
+                    "cache_control": {"type": "ephemeral"},
+                }
+            ],
+            messages=[{"role": "user", "content": content}],
+            output_config=self._output_config,
+        )
+        usage = response.usage
+        cost = cost_of_usage(self._pricing, model_id, usage)
+        # Before validation, on purpose: the call is billed either way.
+        if self._on_cost is not None:
+            self._on_cost(cost)
+        text = "".join(
+            block.text for block in response.content if getattr(block, "type", "") == "text"
+        ).strip()
+        if not text:
+            raise ValueError(
+                f"model returned no text block (stop_reason={response.stop_reason}, "
+                f"blocks={[getattr(b, 'type', '?') for b in response.content]})"
+            )
+        if response.stop_reason == "max_tokens":
+            # The text is present but cut off mid-JSON, so `model_validate_json` below would fail
+            # with an opaque parse error. Name the real cause instead: this cost a live debugging
+            # session when Sonnet 5's thinking block ate a 500-token budget.
+            raise ValueError(
+                f"response hit max_tokens ({max_tokens}) and the decision JSON is truncated "
+                f"after {usage.output_tokens} output tokens; raise the tier's token cap"
+            )
+        decision = DecisionModel.model_validate_json(text)
+        return DecisionResult(
+            decision=decision,
+            model=model_id,
+            input_tokens=usage.input_tokens or 0,
+            output_tokens=usage.output_tokens or 0,
+            cache_read_tokens=usage.cache_read_input_tokens or 0,
+            cache_creation_tokens=usage.cache_creation_input_tokens or 0,
+            cost_usd=cost,
+        )
+
+
 class TacticalBrain:
-    def __init__(self, client: anthropic.Anthropic, pricing: Pricing) -> None:
+    def __init__(
+        self,
+        client: anthropic.Anthropic,
+        pricing: Pricing,
+        on_cost: Callable[[float], None] | None = None,
+    ) -> None:
         self._client = client
         self._pricing = pricing
         self._prefix = tactical_static_prefix()
+        self._call_api = BilledCall(client, pricing, on_cost)
 
     def decide(self, dynamic_context: str) -> DecisionResult:
         """One structured decision. Retries once on validation/API failure, then
-        raises DecisionFailedError (reflex keeps control, per CONTRACTS §2)."""
+        raises DecisionFailedError (reflex keeps control, per CONTRACTS §2).
+
+        The retry is NOT blind: a schema violation is fed back to the model so it can
+        correct it. Observed live against the real game — the model returned a 56-word
+        `thought` against the 40-word contract cap, the retry sent the identical prompt,
+        it returned 57 words, and the whole decision was discarded. The agent stood still
+        mid-mission because nobody ever told him what was wrong."""
         last_exc: Exception | None = None
+        context = dynamic_context
         for attempt in (1, 2):
             try:
-                return self._call(dynamic_context)
+                return self._call(context)
             except (anthropic.APIError, pydantic.ValidationError, ValueError) as exc:
                 last_exc = exc
                 log.warning(
@@ -242,6 +412,7 @@ class TacticalBrain:
                     extra={"kv": {"attempt": attempt, "error": f"{type(exc).__name__}: {exc}"}},
                 )
                 if attempt == 1:
+                    context = dynamic_context + _retry_correction(exc)
                     time.sleep(0.5)
         raise DecisionFailedError(
             f"tactical decision failed twice; reflex layer keeps control "
@@ -249,30 +420,6 @@ class TacticalBrain:
         ) from last_exc
 
     def _call(self, dynamic_context: str) -> DecisionResult:
-        mp = self._pricing.tactical
-        response = self._client.messages.parse(
-            model=mp.id,
-            max_tokens=MAX_DECISION_TOKENS,
-            system=[
-                {
-                    "type": "text",
-                    "text": self._prefix,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{"role": "user", "content": dynamic_context}],
-            output_format=DecisionModel,
-        )
-        decision = response.parsed_output
-        if decision is None:
-            raise ValueError("model returned no parseable decision object")
-        usage = response.usage
-        return DecisionResult(
-            decision=decision,
-            model=mp.id,
-            input_tokens=usage.input_tokens or 0,
-            output_tokens=usage.output_tokens or 0,
-            cache_read_tokens=usage.cache_read_input_tokens or 0,
-            cache_creation_tokens=usage.cache_creation_input_tokens or 0,
-            cost_usd=cost_of_usage(self._pricing, mp.id, usage),
+        return self._call_api.run(
+            self._pricing.tactical.id, self._prefix, dynamic_context
         )

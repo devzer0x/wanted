@@ -1,0 +1,776 @@
+{
+  "domain": "failure_recovery",
+  "items": [
+    {
+      "id": "wasted_penalty_story_mode",
+      "category": "death_penalty",
+      "cue": "Screen desaturates to grey/red and the word WASTED appears; on the next frame the agent is standing outside a hospital with full health and his cash total has dropped.",
+      "context": "Free roam (not during a mission). GTA V Story Mode only.",
+      "meaning": "Death in free roam is cheap. The agent respawns at the nearest hospital, keeps every weapon he owned, and pays a medical bill of 5% of his money capped at $5,000. Armour is gone (it was consumed by the damage) and health is restored. No mission progress is lost because no mission was running.",
+      "suggested_action": "Do not treat a free-roam WASTED as an emergency. Re-orient: read the new position (a hospital), re-plan the current goal from there, and drive/walk back. It is often correct to accept a free-roam death rather than burn ten minutes fleeing a 4-star wanted level.",
+      "avoid": "Do not panic-restart, reload a save, or treat this as a softlock. Do not assume weapons were lost and go shopping at Ammu-Nation for guns the agent still has.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The 5% figure is from a single wiki family; the $5,000 cap is corroborated by a second page. Money below ~$100k means the fee is small enough to ignore entirely.",
+      "sources": [
+        "https://gta.wiki/wiki/Wasted",
+        "https://gta.wiki/wiki/Hospital"
+      ]
+    },
+    {
+      "id": "busted_penalty_story_mode",
+      "category": "arrest",
+      "cue": "A cop reaches melee range while the agent's wanted level is active and he is on foot and slow/stationary; screen fades and BUSTED appears; the agent then stands outside a police station.",
+      "context": "Free roam arrest in Story Mode.",
+      "meaning": "Arrest costs more than death in the things the agent actually needs to fight: he loses all ammunition and all body armour, and if a weapon was drawn at the moment of arrest he loses that weapon too. He keeps his other guns, pays bail, and is dropped outside the nearest police station with no wanted level.",
+      "suggested_action": "Rank arrest as worse than death for combat readiness. If capture is imminent and unavoidable and the agent has ammo/armour worth keeping, it is usually better to keep fighting or flee into traffic/a vehicle than to be taken — do not flee into water as an escape (see water_is_an_escape_route: police shoot swimmers from one star, and a swimmer has no cover). After a bust, budget a trip to Ammu-Nation for ammo and armour before any combat-heavy objective.",
+      "avoid": "Do not assume the agent is combat-ready after a bust just because the weapon wheel still lists weapons — the wheel can show guns with zero rounds.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Bail amount is not documented precisely in the sources checked. Whether the drawn weapon is truly confiscated is single-sourced.",
+      "sources": [
+        "https://gta.wiki/wiki/Busted"
+      ]
+    },
+    {
+      "id": "resist_arrest_is_lethal",
+      "category": "arrest",
+      "cue": "Officers are shouting an arrest prompt and closing in; the harness is considering issuing a run/flee task to break away.",
+      "context": "On foot, surrounded by police at close range, wanted level active.",
+      "meaning": "Trying to run during an arrest attempt does not cleanly escape — it makes officers open fire, converting a bust into a firefight the agent usually loses at point-blank range against multiple units.",
+      "suggested_action": "Only resist (issue enter_nearest_vehicle, walk_to/run toward a doorway or corner, or flee_police) if there is a genuine escape line within a couple of seconds. Otherwise accept the bust and rebuy ammo/armour.",
+      "avoid": "Do not reflexively spam sprint on every arrest prompt. A bust costs ammo; resisting badly costs a WASTED plus the ammo anyway.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Single-sourced. Outcome depends heavily on how many officers have line of sight.",
+      "sources": [
+        "https://gta.wiki/wiki/Busted"
+      ]
+    },
+    {
+      "id": "death_during_mission_is_mission_failed",
+      "category": "mission_failure",
+      "cue": "the agent dies or is arrested while a mission-active flag is set; instead of the WASTED/BUSTED card, a Mission Failed modal appears naming the failure reason.",
+      "context": "Any story mission, Strangers and Freaks mission, or heist in Story Mode.",
+      "meaning": "Inside a mission, death and arrest are routed into the mission-failure system rather than the hospital/police-station respawn. There is no cash penalty and no ammo confiscation — instead the mission ends and offers a checkpoint retry. The failure reason line is the single most informative piece of text the game gives the agent all session.",
+      "suggested_action": "Parse and log the failure reason verbatim (e.g. 'The car was destroyed', 'Ron died', 'Leaving the mission area'). Feed it into the next attempt's plan as a hard constraint. Announce it in commentary — it is naturally dramatic.",
+      "avoid": "Do not dismiss the modal before reading the reason. Do not model in-mission death using free-roam WASTED consequences (no hospital, no medical bill).",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "A few missions have bespoke failure handling; some fail states drop you straight back to free roam.",
+      "sources": [
+        "https://gta.wiki/wiki/Wasted",
+        "https://gta.wiki/wiki/Busted",
+        "https://gta.wiki/wiki/Missions"
+      ]
+    },
+    {
+      "id": "mission_failed_modal_retry",
+      "category": "mission_failure",
+      "cue": "Mission Failed modal is on screen with a short menu of options.",
+      "context": "Immediately after any mission failure. Cutscene/HUD-suppressed state; normal task issuing will not work.",
+      "meaning": "Retry resumes the mission from the last checkpoint the game recorded, not from the mission's opening. It reloads the scripted state, allies, and mission vehicles for that checkpoint. Restart (where offered) puts the agent at the very beginning of the mission. Declining/quitting ejects him into free roam and the mission must be re-entered from its start marker.",
+      "suggested_action": "Default to Retry. It is the cheapest recovery available and the only one that preserves the minutes already spent in the mission. Confirm the modal is actually gone and normal control has returned before issuing the next high-level task.",
+      "avoid": "Do not issue drive_to/walk_to tasks while the modal is up — inputs are consumed by the menu. Do not choose Restart when Retry is available unless the checkpoint state itself is what is broken.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Exact button labels and their order were not confirmable from a second source; the harness should read the on-screen options rather than assume a fixed index.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions",
+        "https://gta.wiki/wiki/Wasted"
+      ]
+    },
+    {
+      "id": "mission_failed_skip_option",
+      "category": "mission_failure",
+      "cue": "After several consecutive failures of the same mission section, an additional option appears on the Mission Failed modal offering to skip.",
+      "context": "GTA V only (not in GTA IV). Appears when the same portion of a mission has been failed at least three times.",
+      "meaning": "The skip option bypasses the specific failed portion of the mission — it is an accessibility aid, not a whole-mission skip. Taking it advances the story past the section the agent could not beat, and the skipped content is never played.",
+      "suggested_action": "Treat Skip as forbidden by default. For a 24/7 autonomous show, add one narrow anti-stall exception: allow Skip only after a hard cap of failed retries on the same checkpoint (e.g. 6+), and only after the recovery ladder has been exhausted — then announce in commentary that the agent is taking the skip and why. Log every skip.",
+      "avoid": "Never take Skip as a first or second choice. Never take it silently — an audience watching an AI play notices when it stops actually playing.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The 'at least three times' threshold and 'failed portion, not whole mission' framing come from one wiki family; not independently corroborated. Some players report the prompt requires more failures.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions"
+      ]
+    },
+    {
+      "id": "skip_does_not_destroy_100pct",
+      "category": "mission_failure",
+      "cue": "Deciding whether a Skip or a checkpoint retry has permanently damaged the playthrough.",
+      "context": "Long-running Story Mode playthrough where 100% completion or gold medals are a stated goal.",
+      "meaning": "Gold medals are NOT part of GTA V's 100% completion requirement — 100% needs the 69 story missions, 20 Strangers and Freaks, 14 random events, 42 hobbies/pastimes and 16 misc tasks. Gold medals feed a separate achievement (70 golds for 'Solid Gold, Baby!'). Any mission can be replayed later from Pause menu > Game > Replay Mission, and gold medal requirements can be accumulated across multiple replays rather than in one run.",
+      "suggested_action": "Do not let fear of losing a gold medal drive in-the-moment decisions. Optimise for finishing the mission and for entertaining play; note the mission for a later replay if a medal matters.",
+      "avoid": "Do not tell the audience a failure has 'ruined 100%' — it is factually wrong and it is a reason to make bad, cautious decisions.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Whether taking Skip specifically still allows a later Replay Mission for that mission is not documented in the sources checked; assume it does but verify in-session.",
+      "sources": [
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V",
+        "https://gtabase.com/grand-theft-auto-v/missions/",
+        "https://gta.wiki/wiki/Pause_Menu"
+      ]
+    },
+    {
+      "id": "declining_retry_means_walk_back",
+      "category": "mission_failure",
+      "cue": "Retry was declined (or the modal timed out); the agent is standing in free roam with no mission-active flag and a coloured letter blip (M/F/T) or mission marker has reappeared on the map.",
+      "context": "After refusing a mission retry.",
+      "meaning": "The mission is not gone, it is un-started. The mission's start marker returns to the map and the agent must physically travel to it and stand in it to begin again — from the beginning, losing all checkpoint progress.",
+      "suggested_action": "If the mission is still the goal, issue drive_to the mission blip and re-enter. Budget the travel time. Prefer Retry over decline-and-walk-back in almost every case.",
+      "avoid": "Do not decline the retry and then wander, assuming the mission will re-trigger on its own. Do not conclude the story is blocked because the mission-active flag went false.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Derived from how GTA V mission markers work plus the mission/replay documentation; the exact respawn point after declining was not confirmed from a source.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions",
+        "https://gtabase.com/grand-theft-auto-v/missions/franklin-and-lamar/"
+      ]
+    },
+    {
+      "id": "checkpoint_what_it_restores",
+      "category": "checkpoint",
+      "cue": "Retry from checkpoint has just completed; the world has reloaded and control returns.",
+      "context": "Any mission with internal checkpoints (most GTA V story missions have several).",
+      "meaning": "A checkpoint restores the scripted mission state at that moment: the agent's position, health, the presence and position of mission allies and mission vehicles, and the current objective. It does not undo real-world consequences accumulated outside the mission script, and it does not restore a gold-medal run.",
+      "suggested_action": "After a retry, treat the game state as fresh and re-read everything: position, health, nearby peds, objective blip, ally presence. Do not carry over stale beliefs (e.g. 'the enemy on the roof is already dead') from the failed attempt.",
+      "avoid": "Do not resume a cached action plan from before the failure. The world moved.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Precise per-checkpoint restoration rules (exact ammo counts, whether a modded personal vehicle returns) are not documented; verify empirically per mission.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions",
+        "https://gta.wiki/wiki/Wasted"
+      ]
+    },
+    {
+      "id": "checkpoint_does_not_refund_ammo_or_money",
+      "category": "checkpoint",
+      "cue": "Repeated retries of the same checkpoint; ammo counts steadily falling across attempts.",
+      "context": "A long firefight checkpoint being retried many times.",
+      "meaning": "Checkpoint retries reload mission script state but personal resources spent before the checkpoint — money, purchased armour, purchased ammunition — are generally not refunded. Ammo carried into the mission drains across attempts, so attempt five can be materially harder than attempt one.",
+      "suggested_action": "Track ammo across retries. If a third or fourth attempt starts with visibly less ammunition, that is a signal to change tactics (rely more on seek_cover and positioning, let combat_hated_targets_around's engine AI do the engaging from a stronger position, pick up dropped weapons by walking over them) rather than repeating the same loadout-hungry plan.",
+      "avoid": "Do not assume 'retry = clean slate'. Do not keep repeating an attrition plan that is running the agent dry.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Not directly documented in the sources checked — inferred from how GTA V separates persistent player inventory from mission script state. Verify in the harness by logging ammo across retries.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions",
+        "derived: not confirmed by an external source"
+      ]
+    },
+    {
+      "id": "gold_objectives_disabled_after_checkpoint_retry",
+      "category": "checkpoint",
+      "cue": "A retry-from-checkpoint has occurred during the current mission attempt.",
+      "context": "Any mission with time-based or accuracy-based gold medal objectives.",
+      "meaning": "After retrying from a checkpoint, some gold medal objectives (notably time and accuracy targets) are disabled for that run, so a gold medal is no longer obtainable in this attempt.",
+      "suggested_action": "Once a checkpoint retry has happened, stop optimising for medal criteria and optimise purely for finishing the mission safely and entertainingly. Note the mission for a future Replay Mission if the medal matters.",
+      "avoid": "Do not keep rushing for a time objective that the game has already disabled — that is pure added risk for zero reward.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Which specific objectives get disabled varies per mission.",
+      "sources": [
+        "https://gta.wiki/wiki/Wasted",
+        "https://gta.wiki/wiki/Busted"
+      ]
+    },
+    {
+      "id": "replay_mission_exists",
+      "category": "checkpoint",
+      "cue": "A mission was finished poorly, skipped, or the audience asks for a rerun of a famous mission. NOT ACTIONABLE by the harness today.",
+      "context": "Mission already completed once; free roam; not mid-mission. Reaching Replay Mission requires opening the pause menu and navigating Pause > Game > Replay Mission — multi-level menu browsing that the harness's action catalogue (11 bridge tasks + 8 primitives, no menu navigation) cannot perform.",
+      "meaning": "GTA V lets any completed mission be replayed from Pause menu > Game > Replay Mission, including the three endings, without affecting the original outcome or story progression. This is real and useful background knowledge for reasoning about 100% completion (see skip_does_not_destroy_100pct), but it is not something the agent can invoke himself with the current action set.",
+      "suggested_action": "Cite this fact only to explain why a botched or skipped mission is not permanently lost — never as a plan step the agent executes. If replaying a mission is ever wanted for the show, it requires a human operator using the pause menu directly, not the autonomous harness.",
+      "avoid": "Do not write a plan step like 'open pause menu and replay mission' — there is no primitive that does this.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Only available for missions already passed, and only via manual/operator pause-menu navigation, not via any harness action.",
+      "sources": [
+        "https://gtabase.com/grand-theft-auto-v/missions/",
+        "https://gta.wiki/wiki/Pause_Menu"
+      ]
+    },
+    {
+      "id": "health_regen_stops_at_half",
+      "category": "health",
+      "cue": "Health bar is climbing on its own but stalls at roughly the 50% mark and stops.",
+      "context": "Story Mode, out of combat damage, standing still.",
+      "meaning": "GTA V's passive regeneration only refills the health bar up to the halfway point. Anything above 50% must come from a consumable, armour, or a mission/script heal. The agent cannot 'wait his way' back to full health.",
+      "suggested_action": "Treat 50% as the ceiling of free healing. If the next objective is combat-heavy, plan an actual heal: a $1 vending machine drink (full heal), a convenience-store snack, plus body armour. Budget the detour before entering the mission, not during it.",
+      "avoid": "Do not stand still for a long time expecting to reach full health — the stream watches the agent do nothing and he still enters the fight at half health.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Mission scripts sometimes restore full health at checkpoints; special abilities and armour change effective survivability without changing the health bar.",
+      "sources": [
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "regen_requires_standing_still",
+      "category": "health",
+      "cue": "Health is below half and not recovering while the agent is walking, running, or issuing movement tasks.",
+      "context": "On foot, after taking damage, no longer being shot at.",
+      "meaning": "Passive regeneration only runs while the character is stationary — walking or running suppresses it entirely. Driving also regenerates health slowly, and being in cover regenerates slightly faster than standing in the open.",
+      "suggested_action": "Only hold a stationary stop (or seek_cover) to regen when no hostile or police unit has line of sight — check nearby-peds relationship and wanted level first. If any hostile/police could see the agent, prefer seek_cover over a bare stop, and never sit still in the open just to heal. If travel is required anyway, prefer driving over walking/running, since driving still regenerates.",
+      "avoid": "Do not issue a walk_to immediately after a firefight and then wonder why health stays low. Do not hold a stationary position — in the open or in cover — while any hostile or police unit still has line of sight; regen is slower than incoming damage and dead air on a stationary character reads badly on stream. Do not treat this as license to stop moving mid-pursuit.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The standing-still requirement and the 50% ceiling are both stated in gta.wiki's main mechanics text (re-verified directly), not just trivia. 'Slightly faster in cover' and 'driving regenerates' remain trivia-level, single-source claims.",
+      "sources": [
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "sprint_exhaustion_damages_health",
+      "category": "health",
+      "cue": "Health bar flashing red while the agent is sprinting on foot for a long stretch, with no enemies nearby.",
+      "context": "Extended sprinting on foot, low Stamina stat.",
+      "meaning": "Running out of stamina is itself harmful: the health bar flashes red as a warning and, if sprinting continues, health slowly drains. Long on-foot sprints are a self-inflicted damage source.",
+      "suggested_action": "Cap continuous sprint duration. For any distance beyond a short block, steal or commandeer a vehicle and drive instead — it is faster, safer, and regenerates health.",
+      "avoid": "Do not hold sprint indefinitely as the default long-distance movement policy. Do not misread a flashing health bar as incoming enemy fire and trigger a combat response.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Effect scales with the character's Stamina stat and is slow; it rarely kills on its own but it stacks badly with a firefight arriving at the end of the sprint.",
+      "sources": [
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "vending_machine_full_heal",
+      "category": "healing",
+      "cue": "Health below half, no active threat, and an eCola / Sprunk vending machine is within reach (common outside convenience stores, gas stations, police stations, hospitals and public buildings).",
+      "context": "Free roam or a mission that permits a short detour. Story Mode.",
+      "meaning": "A vending machine drink costs $1 and restores health fully — it is the cheapest and most complete heal in the game, and it bypasses the 50% regeneration ceiling. The same machine can be used up to about ten times in a row before it reports being out; walking away and returning resets that.",
+      "suggested_action": "Make 'walk to nearest vending machine and drink' the standard pre-mission and post-firefight heal. It is a two-second interaction and it fully solves the half-health problem.",
+      "avoid": "Do not skip this because $1 seems trivially small — the value is the full heal, not the price. Do not attempt it while a wanted level is active or hostiles are near.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "'Replenishes all health' is single-sourced; some accounts describe a large partial heal instead. Treat as 'large heal, verify magnitude in-session'.",
+      "sources": [
+        "https://gta.wiki/wiki/Vending_Machine"
+      ]
+    },
+    {
+      "id": "snacks_auto_consume_in_story_mode",
+      "category": "healing",
+      "cue": "the agent buys a snack at a 24/7, Rob's Liquor or LTD gas station.",
+      "context": "Story Mode specifically. This differs from GTA Online.",
+      "meaning": "In Story Mode there is no snack inventory — the item is consumed automatically at the moment of purchase and heals immediately. Cheap options: P's & Q's $1, EgoChaser Energy Bar $2, Meteorite Bar $4. The weapon-wheel snack inventory that lets you heal mid-firefight is a GTA Online feature and does not exist here.",
+      "suggested_action": "Plan healing as a location decision, not an inventory decision: the agent must physically be at a store or vending machine to heal. Heal BEFORE entering a mission, because there is no way to top up in the middle of a gunfight.",
+      "avoid": "Never plan around 'eat a snack when health gets low during combat' — that is an Online mechanic and it will silently fail in Story Mode.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The Online-vs-Story distinction is inferred from the source noting the inventory system applies to Online; worth one in-session verification.",
+      "sources": [
+        "https://gta.wiki/wiki/Snacks"
+      ]
+    },
+    {
+      "id": "armour_is_the_real_survivability_lever",
+      "category": "armour",
+      "cue": "About to start a mission flagged as combat-heavy, or the agent has just been busted (armour confiscated).",
+      "context": "Free roam with access to an Ammu-Nation and at least a few hundred dollars.",
+      "meaning": "Body armour is a separate bar that absorbs gunfire damage before health is touched. Ammu-Nation sells five tiers: Super Light $500 (20%), Light $1,000 (40%), Standard $1,500 (60%), Heavy $2,000 (80%), Super Heavy $2,500 (100%). Armour does not regenerate and gives no protection against melee attacks.",
+      "suggested_action": "Buy the heaviest affordable armour before any planned shootout. Because armour never regenerates, treat 'armour bar at zero' as a hard resupply trigger, not a soft one.",
+      "avoid": "Do not rely on armour against melee attackers or falls — it does nothing there. Do not assume the armour bar refills over time like health.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Percentage tiers are single-sourced. Armour can also be picked up from a Police Riot vehicle.",
+      "sources": [
+        "https://gta.wiki/wiki/Body_Armor"
+      ]
+    },
+    {
+      "id": "armour_lost_on_bust_not_on_death",
+      "category": "armour",
+      "cue": "the agent has just respawned outside a police station (BUSTED) rather than a hospital (WASTED).",
+      "context": "Post-arrest, Story Mode.",
+      "meaning": "Being busted strips body armour and all ammunition. Being wasted does not confiscate weapons, but the armour bar was already consumed by the damage that killed him. Either way, the agent comes back with no armour.",
+      "suggested_action": "After every WASTED or BUSTED, set an explicit resupply state: check ammo counts, check armour bar, and route to Ammu-Nation before any further combat objective.",
+      "avoid": "Do not walk straight from a police station into a mission start marker. That is the single most reliable way to fail the next mission immediately.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Whether armour is explicitly confiscated on a bust vs. simply already gone is a distinction without a practical difference.",
+      "sources": [
+        "https://gta.wiki/wiki/Busted",
+        "https://gta.wiki/wiki/Wasted"
+      ]
+    },
+    {
+      "id": "wanted_level_suspends_the_mission",
+      "category": "wanted",
+      "cue": "A wanted level appears during an active mission and the objective text changes to instruct losing the police.",
+      "context": "Any story mission where the agent commits a crime the police witness.",
+      "meaning": "Gaining a wanted level during a mission suspends the mission — the original objective is put on hold and will not advance until the wanted level is cleared. The apparent 'stuck' state is not a bug; the game is waiting.",
+      "suggested_action": "When the wanted level appears mid-mission, immediately switch the whole plan to flee_police. Do not keep trying to drive to the old objective — it will not progress. Once the stars clear, re-read the objective and resume.",
+      "avoid": "Do not classify this as a softlock and start the recovery ladder. Do not fight the police in place hoping the mission resumes.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "A handful of missions are scripted around a wanted level and do not suspend; the objective text is the tell.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "evasion_requires_breaking_line_of_sight",
+      "category": "wanted",
+      "cue": "Wanted stars are solid/steady and police are actively chasing — no search cones on the minimap yet.",
+      "context": "Active police pursuit, any wanted level.",
+      "meaning": "Escape has two phases. While police have line of sight the chase is in active mode and no escape timer runs at all. Only after breaking sight does the game enter search-cone mode and start a countdown whose length scales with the star level. Being spotted again resets that timer to zero.",
+      "suggested_action": "Prioritise breaking line of sight over raw speed: tunnels, underpasses, alleys, parking structures, dense traffic, going off-road, or into water. Only after the cones appear should the agent stop moving and hide; moving inside a cone is how the timer gets reset.",
+      "avoid": "Do not just drive fast in a straight line down the freeway — speed alone never clears stars. Do not keep driving once the cones appear and the agent is outside them.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "At 4-5 stars, police helicopters maintain line of sight from the air, so ground cover alone is often insufficient — indoor/covered spaces or water are needed.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "search_cone_is_the_escape_signal",
+      "category": "wanted",
+      "cue": "Blue/red cones appear on the minimap and the wanted stars begin flashing; the flash rate slows over time.",
+      "context": "Police have lost direct sight of the agent.",
+      "meaning": "The cones show where each unit is searching. Flashing stars mean the escape timer is running; a slower flash means the agent is closer to escaping. This is the harness's most reliable machine-readable escape progress indicator.",
+      "suggested_action": "Once cones appear, move away from and stay outside every cone, then stop and wait. Treat the flashing-star state as 'do not re-engage, do not drive erratically, do not shoot'.",
+      "avoid": "Do not drive through a cone to get somewhere 'safer' — that re-acquires sight and resets everything.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Exact per-star escape durations are not documented in the sources checked.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "appearance_change_drops_a_star",
+      "category": "wanted",
+      "cue": "In search-cone mode, still one star above zero.",
+      "context": "GTA V Story Mode, search mode only — not during active pursuit. NOT CURRENTLY ACTIONABLE by the harness.",
+      "meaning": "Putting on or taking off a mask or sunglasses while the police are in search-cone mode is documented as removing one wanted star. It is a legitimate in-game mechanic, not a cheat — but the harness's action catalogue has no equip-clothing / appearance-change action, no interaction menu, and no way to select or wear an item, so the agent cannot currently trigger it under any circumstances.",
+      "suggested_action": "Do NOT include an appearance-swap step in the flee_police recovery sequence — there is no primitive that performs it. Rely on the standard search-cone play instead: stay outside every cone and wait (per search_cone_is_the_escape_signal). Revisit this item only if the harness ever exposes a wardrobe/appearance action.",
+      "avoid": "Do not have the agent 'decide' to change appearance as a plan step — it will produce a no-op or a hallucinated action, which is worse than doing nothing.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Single-sourced on the mechanic itself. Requires the item to be owned/equippable and is character-model dependent even if the harness ever gains the ability to perform it.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "water_is_an_escape_route",
+      "category": "wanted",
+      "cue": "Wanted level active, ocean/river within reach, ground escape routes blocked.",
+      "context": "Near water in Story Mode; all three protagonists can swim. Re-verified directly against gta.wiki's Wanted Level page.",
+      "meaning": "Water is NOT a safe place to wait out a wanted level. Police open fire on a swimmer from as low as one star, and the LSPD/LSSD will run a Predator boat with armed passengers into open water from one star during a pursuit — a swimmer is slow and has no cover. A short crossing can still break a purely ground-vehicle pursuit line, but it does not stop the star timer and it does nothing against a helicopter, which has a clear overhead sightline onto open water.",
+      "suggested_action": "Use water only as a brief crossing to reach cover on the far bank, under a bridge/pier, or into a tunnel/underpass — never as a place to stop and wait out the escape timer, and never at all once a helicopter or boat is in play (roughly two stars and up). Prefer tunnels, alleys, parking structures and dense traffic for actually breaking line of sight.",
+      "avoid": "Do not treat 'nearest water body' as a first-class flee destination. Do not drive a car into deep water expecting the car to save him — the vehicle will flood and must be exited, leaving the agent swimming and exposed. Do not stay submerged or swimming in the open at 2+ stars; extended diving without gear also risks drowning.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "GTA V drowning/breath-limit specifics were not confirmable from the sources checked (the wiki's oxygen-bar detail describes San Andreas). Treat underwater endurance as short and unverified. The exact star level at which boats start patrolling is stated as one star on the Wanted Level page but as two stars in a cross-checked domain file; treat 'one star and up' as the conservative reading.",
+      "sources": [
+        "https://gta.wiki/wiki/Swimming",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "character_switch_blocked_when_it_matters",
+      "category": "softlock",
+      "cue": "N/A for the agent — this is background knowledge about a mechanic he cannot invoke at all.",
+      "context": "The harness's action catalogue has no character-switch primitive of any kind: it is not a bridge task and not one of the harness primitives, and CAPABILITIES explicitly lists 'no character switch' among the things the agent cannot do.",
+      "meaning": "In the underlying game, protagonist switching is additionally disabled during missions (except explicit multi-character missions), during side activities, and whenever a wanted level is active. This is moot for the agent specifically, since he has no way to open the character wheel or request a switch in the first place, blocked or not.",
+      "suggested_action": "Never include character switching in any recovery plan, mid-mission or in free roam — the harness cannot perform it under any condition. If a stuck state would traditionally be solved by switching character, use the ordinary stuck-detection/recovery ladder instead (small movement, vehicle toggle, wait, or — as an absolute last resort in free roam only — accepting a WASTED to force a respawn).",
+      "avoid": "Do not have the agent 'decide' to switch characters as a plan step. Do not diagnose a stall as 'the character wheel is frozen' — there is no character wheel input to test in the first place.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None — this is a hard capability boundary, not a game-state-dependent one.",
+      "sources": [
+        "https://gta.wiki/wiki/Character_Wheel"
+      ]
+    },
+    {
+      "id": "character_switch_as_freeroam_unstick",
+      "category": "softlock",
+      "cue": "In free roam, no wanted level, the agent is wedged in geometry, trapped in a broken animation, or stuck in an interior he cannot leave, and movement tasks produce no position change. NOT ACTIONABLE via character switch — see below.",
+      "context": "Free roam only. In the wider game, switching to another protagonist and back is documented as an escape from at least one animation/geometry trap (frozen in a barber shop with floating scissors). The harness has no character-switch primitive at all, so this specific fix is unavailable to the agent.",
+      "meaning": "Character switching is not in the harness's bridge-task or primitive list, so this real escape technique cannot be executed regardless of how well it would work in principle. When the agent is genuinely wedged, the only available levers are the ordinary movement/stuck primitives.",
+      "suggested_action": "Use reverse_out, swerve, small drive_to/walk_to nudges, exit_vehicle/enter_nearest_vehicle toggling, and look_around as the free-roam unstick sequence, per stuck_signal_definitions and recovery_ladder_graduated. If those are exhausted and the position is IMPLAUSIBLE (below ground plane, outside map bounds, health draining with no attacker), the acceptable last resort is to let a WASTED occur (or, if a human operator is available, flag for a manual unstick nudge per the project's narrow exception) — never a scripted teleport or character-switch workaround the harness cannot perform anyway.",
+      "avoid": "Do not write or follow a plan step that says 'switch character' — it is not an action the agent can take. Do not treat an unresponsive character-switch input as evidence of anything, since there is no such input to test.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None for the agent specifically — this is a hard capability boundary. The underlying game glitch/behavior this describes is itself only single-sourced and in tension with the wanted-level-disables-switching rule, but that tension is now moot for the harness.",
+      "sources": [
+        "https://gta.wiki/wiki/Glitches_in_GTA_V",
+        "https://gta.wiki/wiki/Character_Wheel"
+      ]
+    },
+    {
+      "id": "trevor_red_mist_survival",
+      "category": "ability",
+      "cue": "Playing as Trevor, health low, outnumbered in a firefight. NOT ACTIONABLE — the agent has no special-ability input.",
+      "context": "Trevor only, in the underlying game. The harness's primitive set (look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn) and bridge tasks have no special-ability action, and CAPABILITIES explicitly rules out Caps Lock / special abilities for the agent.",
+      "meaning": "Trevor's Red Mist reduces incoming damage by roughly half and roughly doubles outgoing damage for up to 30 seconds at max skill — it is NOT literal invincibility, despite that claim appearing on one source. This is real game knowledge, but it is not something the harness can ever trigger, so it must never appear as a step in a plan.",
+      "suggested_action": "Do not plan around activating Red Mist. When Trevor's health is low and he is outnumbered, the only available levers are the ones the agent actually has: seek_cover, combat_hated_targets_around to let the engine's own AI engage, or a fighting/driving retreat via flee_police or enter_nearest_vehicle. If those are insufficient and death follows, treat it per wasted_penalty_story_mode — a free-roam death is cheap and recoverable.",
+      "avoid": "Do not write or narrate 'the agent activates his special ability' — it did not happen and never can; narrating an action that never occurred is the single most damaging failure mode on a live stream. Do not assume invincibility of any kind even as background knowledge.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None regarding actionability — this is a hard capability boundary. The exact damage-reduction number for Red Mist remains single-sourced background trivia only.",
+      "sources": [
+        "https://gta.wiki/wiki/Special_Ability"
+      ]
+    },
+    {
+      "id": "michael_slowmo_to_break_a_losing_fight",
+      "category": "ability",
+      "cue": "Playing as Michael, pinned by multiple armed hostiles. NOT ACTIONABLE — the agent has no special-ability input.",
+      "context": "Michael only, on foot combat, in the underlying game. The harness has no special-ability action (no Caps Lock, no equivalent) — CAPABILITIES rules this out explicitly.",
+      "meaning": "Michael's ability enters bullet time in the underlying game, but this cannot be triggered by the harness under any condition, so it must never appear as a plan step. Aiming and firing are also entirely automatic engine-AI behavior (via combat_hated_targets_around), not something the agent selects manually, so 'improved accuracy' from the ability is doubly irrelevant to how he actually fights.",
+      "suggested_action": "When hostile count exceeds what a single combat_hated_targets_around radius call can clear, or health is critically low, use seek_cover and/or a driving/on-foot retreat (flee_police, enter_nearest_vehicle) instead of any ability. Re-issue combat_hated_targets_around once repositioned.",
+      "avoid": "Do not write or narrate 'Michael triggers his special ability' — it cannot happen and narrating it is a stream-credibility failure. Do not assume the agent gains any accuracy control at all; the engine's combat AI is doing the aiming regardless of ability state.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None regarding actionability — this is a hard capability boundary.",
+      "sources": [
+        "https://gta.wiki/wiki/Special_Ability"
+      ]
+    },
+    {
+      "id": "franklin_focus_for_failing_chases",
+      "category": "ability",
+      "cue": "Playing as Franklin, in a land vehicle, losing a chase / follow objective, or about to crash a mission-critical vehicle. NOT ACTIONABLE — the agent has no special-ability input.",
+      "context": "Franklin only, land vehicles only, in the underlying game. The harness has no special-ability action of any kind.",
+      "meaning": "Franklin's Driving Focus slows time while driving in the underlying game, but this cannot be triggered by the harness, so it must never appear as a plan step.",
+      "suggested_action": "When a chase/follow objective is at risk or a mission vehicle is taking collision damage, use the driving primitives the agent actually has: brake_tap, swerve, drive_to with a lower speed_mps or a different style, or flee_police, rather than any ability.",
+      "avoid": "Do not write or narrate 'Franklin activates Driving Focus' — it cannot happen. Do not treat this ability as a substitute for actually planning a safer route or speed.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None regarding actionability — this is a hard capability boundary.",
+      "sources": [
+        "https://gta.wiki/wiki/Special_Ability"
+      ]
+    },
+    {
+      "id": "failure_condition_catalog",
+      "category": "mission_failure",
+      "cue": "Planning a mission attempt, or parsing the reason line on a Mission Failed modal.",
+      "context": "GTA V story missions generally. Drawn from the documented failure lists of several missions (Prologue, Nervous Ron, Bury the Hatchet).",
+      "meaning": "GTA V mission failures cluster into a small number of recurring categories: (1) Wasted; (2) Busted; (3) an escort/ally NPC died; (4) an ally was abandoned or left behind; (5) a mission vehicle was destroyed; (6) a mission vehicle was abandoned; (7) a mission vehicle got stuck or damaged in a critical way; (8) the player left the mission area or abandoned the route; (9) a target escaped or was spooked/alerted prematurely; (10) out of ammo; (11) a timer expired.",
+      "suggested_action": "Encode these as explicit standing constraints for every mission: keep allies alive and within range, stay in the mission vehicle, stay inside the mission area, do not open fire before a stealth objective says to, and check ammo before starting. Most GTA V mission failures are avoidable constraint violations, not skill failures.",
+      "avoid": "Do not treat mission failure as random bad luck. Do not let a generic 'go to the objective' plan override an active escort or stealth constraint.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Each mission has its own bespoke list; these categories are the common shape, not a guarantee.",
+      "sources": [
+        "https://gta.wiki/wiki/Prologue_(GTA_V)",
+        "https://gta.wiki/wiki/Nervous_Ron",
+        "https://gta.wiki/wiki/Bury_the_Hatchet"
+      ]
+    },
+    {
+      "id": "leaving_mission_area_fail",
+      "category": "mission_failure",
+      "cue": "An on-screen warning about leaving the mission area, or a countdown to return, while a mission is active.",
+      "context": "Many GTA V missions define a soft boundary; some define it only for one specific protagonist.",
+      "meaning": "Straying outside the mission's defined area fails the mission after a short warning period. This is a common way an autonomous agent fails: a pathfinding detour or a police escape route carries the agent out of bounds.",
+      "suggested_action": "Treat the warning as the highest-priority interrupt: immediately reverse heading back toward the objective blip, even mid-combat or mid-pursuit. Cache the objective position at mission start so there is always a fallback bearing.",
+      "avoid": "Do not let a flee_police route or a long vehicle detour ignore the boundary warning. Do not assume the boundary is symmetric — Bury the Hatchet applies it only when playing as Michael.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Boundary size varies widely; some missions have none.",
+      "sources": [
+        "https://gta.wiki/wiki/Bury_the_Hatchet",
+        "https://gta.wiki/wiki/Prologue_(GTA_V)"
+      ]
+    },
+    {
+      "id": "ally_death_and_abandonment_fail",
+      "category": "mission_failure",
+      "cue": "A friendly NPC with a mission blip is present; the objective mentions a name; or an ally's health is visibly dropping.",
+      "context": "Escort, follow, and crew missions — a large fraction of GTA V's story.",
+      "meaning": "Missions fail both when the escorted ally dies and when the ally is simply abandoned (left too far behind). 'Ron died', 'Ron was abandoned', 'The crew were left behind' are all separate documented failure lines.",
+      "suggested_action": "When an ally blip exists, run two continuous checks: ally alive, and ally distance under threshold. If the ally is on foot and falling behind, stop and wait. If the ally is a passenger, do not exit the vehicle. The agent cannot select or target a specific attacker — combat_hated_targets_around hands the radius to the engine's own combat AI — so protect the ally by positioning: move toward the ally (which also centers them in the engaged radius) and issue combat_hated_targets_around from near their position, rather than trying to 'target whoever is shooting the ally'.",
+      "avoid": "Do not sprint or drive ahead to the objective and leave the ally behind — reaching the marker alone fails the mission. Do not ignore ally health because the agent's own health is fine.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some allies are scripted invincible; some missions genuinely want you to move ahead. The objective text is the arbiter.",
+      "sources": [
+        "https://gta.wiki/wiki/Nervous_Ron",
+        "https://gta.wiki/wiki/Prologue_(GTA_V)"
+      ]
+    },
+    {
+      "id": "mission_vehicle_is_a_fail_object",
+      "category": "mission_failure",
+      "cue": "A vehicle carries a mission blip, or the objective names a specific car/plane/boat.",
+      "context": "Any mission built around a specific vehicle (repos, heist getaways, deliveries).",
+      "meaning": "A mission vehicle can fail the mission three separate ways: destroyed, abandoned, or stuck/damaged in a critical component (e.g. the Cuban 800's landing gear in Nervous Ron; the car stuck in the snow in the Prologue). Some missions also grade delivery condition for gold ('Not a Scratch').",
+      "suggested_action": "Treat a blipped vehicle as a protected object. Drive it conservatively, never leave it to pursue a distraction, and if it becomes wedged, attempt reverse-then-forward before anything else. Prefer reversing out of a wedge over abandoning the vehicle.",
+      "avoid": "Do not exit a mission vehicle to fight on foot unless the objective says to. Do not ram through obstacles in a vehicle whose condition is graded.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some missions supply a replacement vehicle; some tolerate heavy damage.",
+      "sources": [
+        "https://gta.wiki/wiki/Nervous_Ron",
+        "https://gta.wiki/wiki/Prologue_(GTA_V)",
+        "https://gtabase.com/grand-theft-auto-v/missions/franklin-and-lamar/"
+      ]
+    },
+    {
+      "id": "stuck_vehicle_is_an_explicit_fail_state",
+      "category": "stuck_detection",
+      "cue": "Throttle input is being applied, the vehicle's engine is audible/running, but position delta over several seconds is near zero.",
+      "context": "Driving, especially off-road, in snow, in alleys, or against scenery.",
+      "meaning": "The game itself recognises stuck vehicles as a failure state ('The car was stuck in the snow', 'ATV stuck'). So a wedged vehicle is not merely inconvenient — in some missions it is a countdown to failure.",
+      "suggested_action": "Define a concrete stuck signal: commanded throttle for >3 seconds with total displacement under ~2 metres and no collision-clearing. On trigger, run: reverse for 1-2s, steer 30-45 degrees off the previous heading, forward again. Repeat at most twice. If still wedged and the vehicle is not mission-critical, exit and continue on foot or take another car.",
+      "avoid": "Do not hold forward throttle indefinitely against a wall — this is the most visible and most boring failure mode on a live stream. Do not abandon a mission-blipped vehicle to escape a wedge without first trying reverse.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The fail condition is mission-specific; in free roam a stuck vehicle costs only time. The numeric thresholds are harness design, not sourced from the game.",
+      "sources": [
+        "https://gta.wiki/wiki/Prologue_(GTA_V)",
+        "https://gta.wiki/wiki/Nervous_Ron",
+        "derived: harness thresholds not externally sourced"
+      ]
+    },
+    {
+      "id": "documented_softlocks_exist",
+      "category": "softlock",
+      "cue": "The world is loaded and responsive but the agent is somewhere impossible: falling through the map, inside 'Blue Hell' under an interior, frozen in an activity animation, or repeatedly dying instantly on spawn.",
+      "context": "Rare but real GTA V single-player glitches, more likely after unusual movement (fast character switches while driving, cover-plus-climb inputs, glitching into store interiors).",
+      "meaning": "GTA V has documented single-player softlocks: falling beneath the map after a fast character switch while driving at speed; warping through walls via a buffered ledge grab and becoming trapped in scenery; falling into Blue Hell after glitching into the Vangelico or Lifeinvader interiors; being frozen mid-haircut with floating scissors; and Trevor spawning inside a helicopter already heading into a skyscraper.",
+      "suggested_action": "Detect these as 'position is implausible' (below ground plane, outside map bounds, or health draining with no visible attacker) and escalate straight to the strong recovery steps — in a mission, Retry from checkpoint; in free roam, exhaust the movement primitives (reverse_out, swerve, drive_to/walk_to nudges) and, if still implausible, accept a WASTED to force a hospital respawn per accepting_failure_is_valid_play — rather than grinding the ordinary movement ladder. Character switching is not an available recovery option; the harness has no primitive for it.",
+      "avoid": "Do not spend minutes issuing walk_to commands from inside geometry. Do not avoid unusual inputs so heavily that the agent stops playing — but do avoid rapid character switching while driving fast.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "These are edge-case glitches, not everyday occurrences; several are version-dependent and may be patched in the Enhanced Edition.",
+      "sources": [
+        "https://gta.wiki/wiki/Glitches_in_GTA_V"
+      ]
+    },
+    {
+      "id": "mission_disrupted_message",
+      "category": "softlock",
+      "cue": "An on-screen message says the mission has been disrupted, and the mission blip disappears.",
+      "context": "Documented for Monkey Business; occurs when the game's mission trigger is confused by the player's position or state.",
+      "meaning": "This is not a permanent failure. The documented workaround is to drive away from the area until the mission icon reappears, then re-approach.",
+      "suggested_action": "On a 'disrupted' message, issue drive_to a point several hundred metres away, wait for the blip to return, then drive back and re-enter the marker. Announce it as the agent 'giving it a minute'.",
+      "avoid": "Do not conclude the mission is permanently broken and abandon the storyline. Do not stand on the vanished marker waiting.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Documented for one specific mission; generalising to all missions is an inference.",
+      "sources": [
+        "https://gta.wiki/wiki/Glitches_in_GTA_V"
+      ]
+    },
+    {
+      "id": "quit_beats_retry_on_a_broken_shop_state",
+      "category": "softlock",
+      "cue": "A mission's in-game shop or purchase step refuses the transaction despite the agent clearly having the money (documented in the Gauntlet heist prep).",
+      "context": "Heist preparation or setup missions involving buying mods or equipment.",
+      "meaning": "Some script-state corruption survives a checkpoint retry. For the Gauntlet insufficient-funds glitch specifically, the documented fix is to Quit the mission (via the pause menu) rather than Retry, then start it fresh. The harness has no pause-menu navigation primitive, so this specific fix is not currently something the agent can perform himself — the Mission Failed modal's Retry option (via mission_failed_modal_retry) is the only failure-recovery input actually available.",
+      "suggested_action": "If the SAME impossible condition reproduces across two consecutive Retries, stop repeating the identical attempt — the checkpoint state itself is likely corrupt — but keep using Retry (not a menu-based Quit, which the harness cannot perform) while changing the plan per repeated_identical_death_means_change_plan. Log the recurring, unresolvable condition clearly so a human operator can intervene with a manual Quit-and-restart if the show needs it.",
+      "avoid": "Do not write a plan step that 'Quits the mission' via the pause menu — there is no primitive for it. Do not retry a corrupt checkpoint unchanged a third time.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Documented for one mission; treat the general rule ('identical impossible failure twice → escalate/change plan and flag for a human') as harness policy rather than confirmed game behaviour.",
+      "sources": [
+        "https://gta.wiki/wiki/Glitches_in_GTA_V"
+      ]
+    },
+    {
+      "id": "stuck_signal_definitions",
+      "category": "stuck_detection",
+      "cue": "Continuous monitoring of the state stream, regardless of what task is running.",
+      "context": "Always on. This is the harness's own detector, not a game mechanic.",
+      "meaning": "Distinguish five genuinely different stuck states, because each has a different fix: (A) POSITIONAL — a movement task is running but displacement is near zero for >5s on foot or >3s driving; (B) OBJECTIVE — position and objective blip are both changing but the objective text has not changed for >90s; (C) SCRIPT — mission-active is true, no objective blip exists, and no cutscene flag is set; (D) CONTROL — a cutscene or modal flag has been set for longer than any plausible cutscene (>3 min); (E) IMPLAUSIBLE — position is below the ground plane, outside map bounds, or health is dropping with no hostile in range.",
+      "suggested_action": "Instrument all five separately, timestamp each, and route each to a different branch: A to the movement ladder, B to the objective re-read ladder, C to the wait-then-alternative-hypothesis ladder, D to a keypress nudge then the modal parser, E straight to the strong recovery steps.",
+      "avoid": "Do not use a single generic 'stuck' flag — it collapses five problems with five different fixes into one bad response. Do not fire a stuck signal during a legitimate wait (cutscene, phone call, ally walking, elevator, evasion timer).",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "These thresholds are engineering design for this harness, not documented game behaviour. Tune them against real recorded sessions.",
+      "sources": [
+        "derived: WANTED harness design, not externally sourced"
+      ]
+    },
+    {
+      "id": "recovery_ladder_graduated",
+      "category": "recovery_ladder",
+      "cue": "Any stuck signal has fired and been confirmed for its full debounce window.",
+      "context": "Applies during missions and in free roam. Ordered cheapest and least destructive first.",
+      "meaning": "Recovery must be graduated so that the cheap, in-character, on-stream-interesting moves are exhausted before anything that resembles a reset. Ladder: (1) re-read /state — objective_blip, route_blips, starts[], nearby peds/vehicles and mission-active/cutscene flags (the harness has no pause-menu Brief or on-screen-text access, so this machine-readable state is the only source of truth); (2) rotate the camera / look_around a full circle to refresh the visible-entity list; (3) small movement — 5-10m toward the objective bearing via drive_to/walk_to, or reverse_out then forward, to break a geometry wedge; (4) check for a nearby friendly NPC standing idle, which almost always means the game is waiting on the agent, not the reverse; (5) toggle vehicle state — exit_vehicle if on-foot progress is expected, or enter_nearest_vehicle if the objective is far; (6) seek_cover if hostiles exist, or follow_entity if an ally blip exists; (7) press_prompt_key at the objective position; (8) wait 15-30s doing nothing, because a real fraction of apparent stalls are scripted waits; (9) consult mission knowledge for what this mission expects next; (10) form an explicit ALTERNATIVE hypothesis about why progress stopped and act on it; (11) only then, restart the checkpoint via the Mission Failed modal's Retry — the only reset input the harness can actually perform.",
+      "suggested_action": "Implement as a state machine with one step per attempt, a timer between steps, and a log line naming the step. Never skip levels except for the IMPLAUSIBLE stuck signal. Narrate the escalation — an AI visibly reasoning its way out of a jam is good television.",
+      "avoid": "Do not jump straight to restarting the checkpoint. Do not loop the same ladder step repeatedly. Do not run the ladder at all while a cutscene flag is set.",
+      "urgency": "critical",
+      "confidence": "low",
+      "exceptions": "This is harness design synthesised from the verified game mechanics above, not documented game behaviour. Steps 1, 4, 5 and 8 are the ones most often sufficient in practice.",
+      "sources": [
+        "derived: WANTED harness design, not externally sourced",
+        "https://gta.wiki/wiki/Pause_Menu"
+      ]
+    },
+    {
+      "id": "ally_waiting_is_the_commonest_stall",
+      "category": "recovery_ladder",
+      "cue": "Mission active, objective text unchanged for a long time, and a friendly-marked NPC is standing still within ~20m, often with a blip.",
+      "context": "Escort, follow, and two-hander missions — very common in GTA V's story.",
+      "meaning": "GTA V missions frequently gate progress on the player being near an ally, in the ally's vehicle, or having triggered a conversation. An idle ally standing nearby is the game waiting on the agent, not a bug. Conversely, allies who fail to follow can mean the agent already moved out of the trigger radius.",
+      "suggested_action": "When step 4 of the ladder finds an idle nearby ally, try in order: walk_to within ~3m of the ally; follow_entity the ally for 10s; if the ally is beside a vehicle, enter that vehicle as passenger; press the interact key next to them.",
+      "avoid": "Do not keep driving toward the map objective while an idle ally waits behind — that is the classic autonomous-agent stall and it can also trip an 'ally abandoned' failure.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Derived from GTA V's documented ally-abandonment failure conditions plus general mission structure, rather than from a source describing this stall directly.",
+      "sources": [
+        "https://gta.wiki/wiki/Nervous_Ron",
+        "https://gta.wiki/wiki/Prologue_(GTA_V)",
+        "derived: harness design"
+      ]
+    },
+    {
+      "id": "alternative_hypothesis_step",
+      "category": "recovery_ladder",
+      "cue": "Ladder steps 1-9 have all run and the objective text still has not changed.",
+      "context": "Deep in a stall, before considering a checkpoint restart.",
+      "meaning": "At this point the working model of the situation is probably wrong, not the execution. The productive move is to enumerate other readings of the same state: the objective may be vertical (a roof, a basement, an interior) rather than horizontal; it may require a specific vehicle type (boat, helicopter) rather than any vehicle; it may be a stealth gate where approaching openly is being rejected; the blip may mark a trigger volume rather than the goal; or a wanted level may be silently suspending the mission.",
+      "suggested_action": "Generate 2-3 concrete alternative hypotheses, rank them by cheapness to test, and test the cheapest with a bounded 30-60s attempt. Say the hypothesis out loud in commentary — audiences engage strongly with an AI reasoning aloud about being lost.",
+      "avoid": "Do not retry the same failed interpretation with more force or more speed. Do not restart the checkpoint before at least one alternative hypothesis has been tested.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "Harness design, not sourced from the game.",
+      "sources": [
+        "derived: WANTED harness design, not externally sourced"
+      ]
+    },
+    {
+      "id": "checkpoint_restart_is_last_resort",
+      "category": "recovery_ladder",
+      "cue": "The full recovery ladder has been exhausted, at least one alternative hypothesis has been tested, and the objective has still not advanced.",
+      "context": "Mid-mission stall that cannot be resolved by play.",
+      "meaning": "Deliberately failing into the checkpoint restart (the Mission Failed modal's Retry option) is the sanctioned last-resort reset the agent can actually perform — it uses only the game's own failure-recovery flow, no memory editing, no teleporting, no trainer. A manual pause-menu Quit-and-restart is a further fallback available only to a human operator, since the harness has no menu-navigation primitive.",
+      "suggested_action": "Route it through the Mission Failed modal's Retry (see mission_failed_modal_retry). Log the full ladder trace that led here. Announce it in commentary. If the same checkpoint stalls identically twice with the same failure reason, change the plan per repeated_identical_death_means_change_plan rather than retrying unchanged a third time — do not attempt a menu-based Quit, which is not a harness action.",
+      "avoid": "Never resolve a stall with a cheat, a teleport, a save reload that rewinds real progress, or any tool outside the game's UI. The show's premise is that the agent plays under human constraints.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The narrow permitted exception is a logged, announced unstick nudge of a few metres when physically wedged in geometry, per the project rules.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions",
+        "derived: WANTED project constraints"
+      ]
+    },
+    {
+      "id": "repeated_identical_death_means_change_plan",
+      "category": "recovery_ladder",
+      "cue": "The same checkpoint has been failed two or more times with the same failure reason line.",
+      "context": "Iterating on a hard mission section.",
+      "meaning": "An identical failure reason across attempts means the plan, not the execution, is wrong. Repeating it burns ammo (which does not come back on retry), burns stream time, and marches toward the Skip prompt at three failures.",
+      "suggested_action": "On the second identical failure, force a plan change before retrying: heal to full and buy armour first if the reason was Wasted; use the special ability earlier; approach from a different side; use a vehicle as cover; prioritise a different target class. On the third, escalate the change further rather than accepting the Skip.",
+      "avoid": "Do not retry unchanged. Do not drift into the three-failure Skip prompt by inertia.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some sections genuinely need one more attempt with the same plan; the rule is about identical reasons, not merely repeated failure.",
+      "sources": [
+        "https://gta.wiki/wiki/Missions",
+        "derived: harness policy"
+      ]
+    },
+    {
+      "id": "cutscene_flag_means_do_nothing",
+      "category": "stuck_detection",
+      "cue": "The cutscene flag is set, or the HUD/minimap is hidden and player control is suppressed.",
+      "context": "GTA V story missions have frequent, sometimes long cutscenes and scripted phone calls.",
+      "meaning": "During a cutscene the harness's tasks do nothing useful and can queue up to fire unpredictably when control returns. This is a wait state, not a stall — but it is indistinguishable from a genuine freeze without a timeout. The harness has no cutscene-skip action and no pause-menu probe available; it can only wait and re-check state.",
+      "suggested_action": "Suspend all task issuing while the cutscene flag is set. Use the time for commentary. Only after a generous timeout (~3 minutes, longer than any GTA V cutscene) treat it as a CONTROL stuck signal: try a single press_prompt_key (in case a contextual skip prompt is showing), then keep waiting and re-reading /state at intervals, escalating to a logged operator flag if the flag never clears.",
+      "avoid": "Do not queue movement or combat tasks during a cutscene. Do not fire the stuck ladder the moment control is suppressed. Do not invent a 'skip cutscene' or 'open pause menu' action — neither exists in the harness.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Cutscenes can be skipped, and some gold medal time objectives assume you do; but skipping loses story content the stream is there for.",
+      "sources": [
+        "https://gta.wiki/wiki/Nervous_Ron",
+        "derived: harness design"
+      ]
+    },
+    {
+      "id": "no_blip_means_read_the_brief",
+      "category": "recovery_ladder",
+      "cue": "Mission active, no cutscene, but the state stream exposes no objective blip.",
+      "context": "Missions where the next step is a conversation, a wait, a stealth approach, or an interaction rather than a destination. The harness has no way to open the pause menu, read a Brief tab, or read any on-screen objective text/subtitle — /state gives no objective text, mission name, or on-screen prompts at all.",
+      "meaning": "A missing objective blip does not mean the mission is broken. Many GTA V objectives are non-positional (a conversation, a wait, an ally interaction). But since the harness cannot read the pause menu's Brief or any on-screen text, it must infer the objective entirely from machine-readable state: nearby peds and their relationship (hostile/friendly/neutral), whether a friendly ped is standing idle nearby, vehicle/mission-vehicle presence, route_blips/starts[], and mission-active/cutscene flags.",
+      "suggested_action": "When no objective blip exists, run the ladder's ally-check first (per ally_waiting_is_the_commonest_stall): look for an idle nearby friendly ped and walk_to/follow_entity them, or check for a nearby mission vehicle to enter. If nothing readable suggests a target, fall through to alternative_hypothesis_step and, ultimately, the checkpoint retry — do not invent objective text that the game never exposed.",
+      "avoid": "Do not fall back to wander_drive when the objective blip is missing — that actively risks a 'left the mission area' failure. Do not claim to have 'read the Brief' or 'read the objective text' in commentary — the harness never has that information, and saying otherwise misrepresents what the agent actually knows.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Whether a future harness version could expose Brief/objective text via OCR or a game-state mod is out of scope here; today it cannot.",
+      "sources": [
+        "https://gta.wiki/wiki/Bury_the_Hatchet",
+        "harness capability contract (CONTRACTS §1/§2) — no on-screen text or menu access"
+      ]
+    },
+    {
+      "id": "pc_keys_for_recovery",
+      "category": "controls",
+      "cue": "The recovery ladder is being designed and something in it implies a raw keypress.",
+      "context": "GTA V on PC. This item corrects a previous version of itself: the harness does NOT have raw keyboard access. It has 11 bridge tasks (drive_to, walk_to, enter_nearest_vehicle, exit_vehicle, wander_drive, flee_police, combat_hated_targets_around, seek_cover, follow_entity, set_waypoint, stop) and 8 primitives (look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn) — that is the complete action vocabulary, per the frozen capability contract.",
+      "meaning": "There is no F/Q/E/R/Space/Shift/Tab/Caps Lock/Alt/G/mouse binding available to the recovery ladder, because there is no raw-key-emit action at all — not even for a single named key. The one exception is press_prompt_key, which presses whatever contextual prompt the game is currently showing (an interact/enter-vehicle-style prompt) with NO choice of which key that maps to. Aim/fire (left/right mouse), reload (R), the weapon wheel (Tab or number keys), the special ability (Caps Lock), and the character wheel (Alt) are all unavailable regardless of what the underlying PC keybind is.",
+      "suggested_action": "Build every recovery step out of the 11 bridge tasks, the 8 primitives, and nothing else. Use press_prompt_key for 'interact with what's directly in front of the agent' (doors, mission triggers, vending machines, beds) — it is the closest equivalent to old-style 'press E'. Use enter_nearest_vehicle/exit_vehicle instead of a vehicle-toggle key, seek_cover instead of a cover key, horn instead of a horn key, reverse_out/swerve/brake_tap instead of manual steering-and-braking keys.",
+      "avoid": "Do not write or reference F, Q, E, R, Space, Shift, Tab, Caps Lock, Alt, G, or mouse buttons anywhere in a recovery plan — none of them are emittable, and a plan built on them will silently no-op or, worse, get hallucinated as having happened. Do not assume press_prompt_key can be aimed at a specific key.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None — this is the frozen capability contract, not a game-mechanics claim with edge cases.",
+      "sources": [
+        "harness capability contract (CONTRACTS §1/§2, brain/schemas.py) — authoritative over any PC-keybind wiki page"
+      ]
+    },
+    {
+      "id": "heal_and_rearm_before_entering_a_mission",
+      "category": "recovery_ladder",
+      "cue": "About to drive into a mission start marker.",
+      "context": "Free roam, immediately pre-mission. Especially after a recent WASTED or BUSTED.",
+      "meaning": "Everything above compounds into one checklist. Passive regen stops at 50%; snacks and drinks only work at a physical location; armour never regenerates and is stripped by arrest; ammo is stripped by arrest and is not refunded by checkpoint retries; and 'out of ammo' is itself a documented mission failure condition.",
+      "suggested_action": "Run a standing pre-mission gate: health at or near full (vending machine drink, $1), armour bought if the mission is combat-flagged, ammo checked, and a serviceable vehicle available. This single habit prevents more mission failures than any in-mission tactic.",
+      "avoid": "Do not enter a mission at half health because regen 'topped him up'. Do not enter a combat mission straight from a police station.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Some missions supply weapons and armour on entry, making the prep redundant; mission knowledge should mark those.",
+      "sources": [
+        "https://gta.wiki/wiki/Health",
+        "https://gta.wiki/wiki/Vending_Machine",
+        "https://gta.wiki/wiki/Body_Armor",
+        "https://gta.wiki/wiki/Busted",
+        "https://gta.wiki/wiki/Prologue_(GTA_V)"
+      ]
+    },
+    {
+      "id": "autosave_and_manual_save",
+      "category": "meta",
+      "cue": "A mission has just been passed, or the agent is at a safehouse in free roam.",
+      "context": "GTA V Story Mode save system.",
+      "meaning": "GTA V autosaves after passing certain missions and activities. Manual saving is done by sleeping in a safehouse bed, which advances the in-game clock — 6 hours as Michael, 8 as Franklin, 12 as Trevor.",
+      "suggested_action": "Rely on autosave for progression. If a manual save is wanted for a long unattended run, note that it will jump the clock and change lighting/traffic, which matters for a stream's visual continuity.",
+      "avoid": "Never reload an earlier save to undo a failure — that is save-scumming and it breaks the premise that the agent lives with his mistakes. Do not manual-save mid-story purely to hedge a risky mission.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Whether the game autosaves at individual mission checkpoints (as opposed to on mission pass) was not confirmed.",
+      "sources": [
+        "https://gta.wiki/wiki/Saving"
+      ]
+    },
+    {
+      "id": "accepting_failure_is_valid_play",
+      "category": "meta",
+      "cue": "A recovery is going to be long, ugly, and boring — e.g. a 5-star evasion with no cover, or a hopeless firefight at 10% health.",
+      "context": "Live 24/7 stream where dead air is the real cost.",
+      "meaning": "In free roam, WASTED costs at most $5,000 and no weapons; BUSTED costs ammo and armour. Both resolve in seconds and put the agent somewhere new with full health. Compared to ten minutes of failed evasion, dying is frequently the better decision both mechanically and as television.",
+      "suggested_action": "Give the decision layer an explicit 'accept the loss' option with a cost model: compare expected recovery time against the flat cost of a WASTED/BUSTED. Let the agent choose to go down fighting and say so in commentary.",
+      "avoid": "Do not treat survival as an absolute objective in free roam. Do not confuse this with mission context — inside a mission, dying costs the whole mission run and this reasoning does not apply.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Never applies mid-mission. Never applies if the agent is carrying a large amount of cash where the 5% fee is meaningful.",
+      "sources": [
+        "https://gta.wiki/wiki/Wasted",
+        "https://gta.wiki/wiki/Busted",
+        "derived: show-design judgement"
+      ]
+    }
+  ],
+  "notes": "SOURCES AND METHOD\nWeb search budget for this session was already exhausted (200/200) before I started, so all research was done with direct WebFetch against known URLs plus the gta.wiki MediaWiki search API (https://gta.wiki/api.php?action=query&list=search...), which worked well as a search substitute. gta.fandom.com was skipped as instructed. Two sites refused the fetcher: pcgamingwiki.com returned HTTP 403, ign.com is blocked outright, and gamefaqs.gamespot.com returned HTTP 403. That means PC-specific softlock/troubleshooting data and a second independent source for several claims were unavailable.\n\nCONFLICTS WITH THE TASK BRIEF (important)\n1. The brief says Skip \"forfeits the mission's gold medal / skips content\" and implies it damages 100% completion. Sources disagree with the 100% part: gta.wiki's 100% Completion page lists the requirement as 69 story missions + 20 Strangers and Freaks + 14 random events + 42 hobbies/pastimes + 16 misc tasks, and explicitly files gold medals under \"Non-Required Tasks\". Gold medals feed the separate \"Solid Gold, Baby!\" achievement (70 golds). Additionally, gtabase and gta.wiki both confirm missions are replayable from Pause > Game > Replay Mission and that gold medal requirements can be accumulated across multiple replays. So Skip does not permanently destroy 100%. I kept the recommendation not to take Skip, but grounded it in \"an autonomous agent that stops playing is bad television and bad faith\" rather than in a completion penalty that isn't real.\n2. The brief describes Skip as skipping \"the mission\". gta.wiki's Missions page says it skips \"the failed portion of the mission\" and appears after that portion has been failed \"at least three times\". I recorded it as a portion-skip with medium confidence — this is single-sourced and I could not corroborate the three-failure threshold.\n\nCOULD NOT VERIFY\n- Exact button labels, order, and count on the GTA V Mission Failed modal (Retry vs Restart vs Skip vs Quit). No source I could reach enumerates them. The harness should read the on-screen options rather than assume fixed menu indices. Marked medium confidence.\n- Exact bail amount when Busted in GTA V Story Mode. The $5,000 hospital cap for Wasted is corroborated twice (Wasted page and Hospital page); bail is not quantified anywhere I could reach.\n- The 5% figure for the medical bill is single-sourced (the cap is double-sourced).\n- Whether checkpoint retries refund ammunition or purchased armour. I marked the \"ammo drains across retries\" item low confidence and flagged it as an inference to verify empirically in the harness.\n- GTA V drowning / breath-limit mechanics. The gta.wiki Swimming page's oxygen-bar detail describes San Andreas, not V. I only claimed that swimming deep loses a wanted level (which the page does state for V) and flagged underwater endurance as unverified.\n- Whether health regenerates faster in cover: this appears only in a trivia line on the Health page, not the main mechanics text. The \"regen caps at 50%\" and \"requires standing still\" claims are in the main text and are solid.\n- Whether taking Skip still permits a later Replay Mission for that mission.\n- The pause menu key on PC (usually Esc) — the Controls for GTA V page I fetched did not list it.\n\nSOURCE DISAGREEMENT\n- Trevor's Red Mist: gta.wiki's Special Ability page describes him as outright \"invincible\" during the ability. The widely repeated community figure is half damage taken / double damage dealt. These are materially different for a survival decision, so I set that item to medium confidence and told the harness to treat it as heavy damage reduction and still use cover.\n- Character switching as a softlock escape: the Glitches page describes escaping the frozen-barber-shop glitch by switching characters, but that glitch is described as being triggered by gaining a wanted level, while the Character Wheel page states switching is disabled whenever a wanted level is active. These two claims are in direct tension. I recorded the escape technique but flagged that it will sometimes fail, and I explicitly removed character switching from the mid-mission and wanted-level recovery branches.\n\nITEMS THAT ARE DESIGN, NOT DOCUMENTED GAME BEHAVIOUR\nFive items are marked confidence \"low\" with sources listing \"derived\": stuck_signal_definitions, recovery_ladder_graduated, alternative_hypothesis_step, and parts of checkpoint_does_not_refund_ammo_or_money and stuck_vehicle_is_an_explicit_fail_state. The numeric thresholds in these (5s on foot, 3s driving, 2 metres, 90s objective staleness, 3-minute cutscene timeout) are engineering proposals for this harness, not measurements. They should be tuned against real recorded sessions per the project's no-invented-fixtures rule. The graduated ladder itself is synthesised from the verified mechanics above — particularly that mission progress is frequently gated on ally proximity, that a wanted level silently suspends missions, and that a missing objective blip is normal rather than broken.\n\nSCOPE DISCIPLINE\nEverything here is Story Mode. The one place I deliberately called out an Online/Story divergence is snacks: gta.wiki describes a weapon-wheel snack inventory that lets you heal mid-combat, but that is an Online system — in Story Mode snacks are consumed automatically on purchase, so the agent cannot heal on demand during a firefight and must plan healing as a location decision. That distinction is inferred from the source's own framing and is worth one in-session verification because a wrong belief there would cause repeated avoidable mission failures.\n\nREPAIR PASS (post-critic, against frozen CAPABILITIES.md)\nApplied against three critics' findings plus a full capability re-check. Rewrote (ids, all preserved, none deleted): trevor_red_mist_survival, michael_slowmo_to_break_a_losing_fight, franklin_focus_for_failing_chases (deleted the Caps Lock trigger and the Red Mist 'invincibility' wrong-fact — no special-ability action exists in the harness at all, so these are now framed as background knowledge only, redirected to seek_cover/combat_hated_targets_around/flee_police); pc_keys_for_recovery (the whole premise of 'raw PC keys the recovery ladder may use' was false — the harness has zero raw-keypress access, only press_prompt_key for the contextual prompt; this also removes the G-horn-vs-throwable collision a critic flagged, since G is gone entirely); character_switch_blocked_when_it_matters and character_switch_as_freeroam_unstick (no character-switch primitive exists under any condition, not just 'sometimes blocked'); appearance_change_drops_a_star (no equip/wardrobe action exists — downgraded confidence, pulled from the flee_police sequence per the critics' online-contamination finding, marked not-actionable rather than deleted since the underlying mechanic is real); no_blip_means_read_the_brief and replay_mission_exists (no pause-menu or on-screen-text access — 'Brief' and 'Replay Mission' are real GTA V features but unreachable by this harness; rewrote to lean on machine-readable /state instead of invented menu-reading); quit_beats_retry_on_a_broken_shop_state and checkpoint_restart_is_last_resort (no menu-based Quit exists — only the Mission Failed modal's Retry does; clarified the last-resort reset is Retry, with manual Quit reserved for a human operator); recovery_ladder_graduated step 1 and step 11, documented_softlocks_exist, and cutscene_flag_means_do_nothing (stripped remaining pause-menu/skip-cutscene/character-switch references); ally_death_and_abandonment_fail (removed 'shoot whoever is shooting the ally' — the agent cannot target a specific attacker, only reposition and re-issue combat_hated_targets_around); checkpoint_does_not_refund_ammo_or_money (removed the special-ability suggestion); resist_arrest_is_lethal and busted_penalty_story_mode (removed 'press sprint' framing and 'flee into water', the latter now contradicting the corrected water item). Fixed contradictions: water_is_an_escape_route rewritten from 'first-class flee destination' to 'brief crossing to cover only, never above ~1-2 stars' after re-verifying directly against gta.wiki's Wanted Level page (police shoot swimmers from one star; Predator boats operate from one star) — this also resolves the Hood Safari-style 'hide in water' contradiction other domains flagged. Re-verified regen_requires_standing_still directly against gta.wiki's Health page and confirmed the stationary-only mechanic IS explicitly stated in the main text (not just trivia) — kept the fact (rejecting the critic's suggestion to weaken it) but tightened the guidance so the agent never holds a stationary position while any hostile/police has line of sight, addressing the critics' real safety concern without falsifying a sourced mechanic. No items were deleted; every fix rewrote suggested_action/avoid to route around the missing capability rather than deleting the surrounding game knowledge, per the assignment's instruction to prefer honest reframing over deletion."
+}

@@ -1,26 +1,24 @@
-// Row shapes per docs/CONTRACTS.md §5 (v1.1, frozen). Rendering derives from these rows only.
+// Row shapes per docs/CONTRACTS.md §5 (frozen). Rendering derives from these rows only.
+//
+// DecisionRow / EventRow / StatsRow describe what the site SELECTS (src/lib/columns.ts), which is
+// a deliberate subset of the table. The spend columns the contract also defines —
+// `decisions.cost_usd`, `decisions.*_tokens`, `stats.cost_today_usd`, `stats.cost_per_hour_usd` —
+// are intentionally absent: the public site does not publish running costs, so it does not fetch
+// them, and typing them away here means a future component cannot render a value that was never
+// requested. The columns are untouched in the database and still drive the harness's budget
+// governor.
 
 export interface DecisionRow {
   id: number;
-  session_id: string;
   ts: string;
   layer: "tactical" | "director";
   thought: string | null;
   say: string | null;
   mood: string | null;
-  goal: string | null;
-  action: Record<string, unknown> | null;
-  confidence: number | null;
-  model: string | null;
-  input_tokens: number | null;
-  output_tokens: number | null;
-  cached_tokens: number | null;
-  cost_usd: number | string | null; // numeric arrives as string over PostgREST
 }
 
 export interface EventRow {
   id: number;
-  session_id: string;
   ts: string;
   type: string; // CONTRACTS §4 enum; render defensively for forward-compat
   payload: Record<string, unknown> | null;
@@ -64,13 +62,10 @@ export interface HudState {
 }
 
 export interface StatsRow {
-  session_id: string;
   deaths: number | null;
   busted: number | null;
   missions_passed: number | null;
   hours_alive: number | null;
-  cost_today_usd: number | string | null;
-  cost_per_hour_usd: number | string | null;
   governor_level: number | null;
   heartbeat_at: string | null;
   current_goal: string | null;

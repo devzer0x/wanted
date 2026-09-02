@@ -1,0 +1,733 @@
+{
+  "domain": "npc_entities",
+  "items": [
+    {
+      "id": "proximity_is_not_hostility",
+      "category": "hostility_evidence",
+      "cue": "Game state lists one or more peds within ~20m, some tagged neutral or with no tag at all.",
+      "context": "Free roam, no mission active, no shots fired at the agent.",
+      "meaning": "GTA V's world is dense with ambient pedestrians who exist purely as scenery and traffic. The engine sorts peds into relationship groups (CIVMALE, CIVFEMALE, COP, MEDIC, FIREMAN, SECURITY_GUARD, the AMBIENT_GANG_* set, DOMESTIC_ANIMAL, WILD_ANIMAL, DEER, SHARK, COUGAR, HATES_PLAYER). Only a group actually configured to hate the player, or a ped placed in combat by a script, is an enemy. Everyone else is background.",
+      "suggested_action": "Treat the default state of every nearby ped as non-combat. Keep doing whatever the current objective is (drive_to / walk_to / wander_drive) and only re-evaluate if a hostility signal fires.",
+      "avoid": "Calling combat_hated_targets_around because 'there are people nearby'. That converts a quiet street into a massacre and a 3-star chase within seconds.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Inside a mission the same street can be repopulated with scripted enemies; the mission-active flag plus a hostile tag is the thing that changes the answer, not the crowd density.",
+      "sources": [
+        "https://gist.github.com/ghermans/30b7e578fca2494b20616f8d4725d05c",
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "visible_weapon_is_not_hostility",
+      "category": "hostility_evidence",
+      "cue": "A ped is reported as armed, or a model reads as a cop, security guard, soldier or gang member.",
+      "context": "Any time the agent is deciding whether to open fire.",
+      "meaning": "Cops, security guards, Merryweather operatives, soldiers, gang members and even some Blaine County civilians carry weapons at all times as part of their loadout. Carrying is the normal resting state, not an intent signal. A cop with a holstered or even drawn pistol at 0 stars is not attacking; a Ballas member standing on a corner with a pistol is not attacking.",
+      "suggested_action": "Require a behavioural signal (aiming at the agent, firing, closing to melee, or an explicit hostile tag) before engaging. Otherwise route around them.",
+      "avoid": "Using 'armed' as the trigger for combat_hated_targets_around. Shooting first at an armed cop or guard is the single fastest route from 0 to 3+ stars.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Inside a mission where the briefing names the armed group as the enemy, the weapon plus the mission context is sufficient.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)",
+        "https://gta.wiki/w/Ballas_(HD_Universe)",
+        "https://gta.wiki/w/Merryweather_Security"
+      ]
+    },
+    {
+      "id": "real_evidence_of_hostility",
+      "category": "hostility_evidence",
+      "cue": "the agent needs to decide 'is this thing actually trying to hurt me'.",
+      "context": "Every combat decision, free roam or mission.",
+      "meaning": "Ordered strongest-to-weakest, the honest evidence is: (1) the agent's health is dropping and damage is attributed to that entity; (2) the harness tags the ped hostile, i.e. the engine has it in combat against the player or in a HATES_PLAYER-type relationship; (3) the ped is aiming a weapon at the agent or sprinting at him with a melee weapon; (4) the mission objective text names them as targets; (5) a red enemy blip on the radar. Ambient noise — shouting, gesturing, a ped running, a ped merely facing the agent — is not evidence.",
+      "suggested_action": "Engage only on signals 1-4. On signal 5 alone, verify with a second signal first. Log which signal fired so the commentary can explain the decision.",
+      "avoid": "Inventing hostility from flavour behaviour (peds shouting, fleeing, crowding). Fleeing peds are the OPPOSITE of hostile.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "A ped who has already fired once and then broke line of sight is still hostile even though no current signal is live; keep a short memory (a few seconds) rather than re-classifying them as neutral instantly.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians",
+        "https://gist.github.com/ghermans/30b7e578fca2494b20616f8d4725d05c"
+      ]
+    },
+    {
+      "id": "animals_never_consume_combat_decisions",
+      "category": "animals",
+      "cue": "A nearby entity resolves to an animal model (cat, dog, deer, boar, coyote, rabbit, bird, cow, pig, chicken).",
+      "context": "Free roam anywhere; especially Blaine County, Vinewood Hills, beaches and residential streets.",
+      "meaning": "The overwhelming majority of GTA V wildlife is ambient set dressing that flees the player. Deer 'will never attack the player under any circumstances'; coyotes 'are harmless and will not attack the player'; boars are passive and flee. Cats, rabbits, birds, cows, pigs and chickens are decorative. Killing them wastes ammo, wastes airtime, and shooting in public is itself a 1-star crime if witnessed.",
+      "suggested_action": "Filter animals out of the combat target set entirely by default. Let wander_drive / walk_to just route around them.",
+      "avoid": "Firing at animals, or letting an animal blip stall a drive_to. Never let a squirrel-tier entity outrank the mission objective.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Exactly three classes break this rule and are covered separately: cougars/mountain lions, tiger sharks, and dogs that have been provoked or are guard dogs. Trevor's hunting side-activity requires manually selecting a weapon and aiming at a specific animal — the agent has neither action, so hunting is not something he can perform; do not treat it as an available exception.",
+      "sources": [
+        "https://gta.wiki/w/Deer",
+        "https://gta.wiki/w/Coyotes",
+        "https://gta.wiki/w/Boars",
+        "https://www.gtabase.com/grand-theft-auto-v/animals/"
+      ]
+    },
+    {
+      "id": "cougar_is_lethal_and_unprovoked",
+      "category": "animals",
+      "cue": "On foot in wilderness — Chiliad Mountain State Wilderness, Mount Gordo, Vinewood Hills, Tongva/Banham Canyon, near the Kortz Center — and a large cat model appears, or nearby peds suddenly scatter and scream for no visible reason.",
+      "context": "Any on-foot traversal off-road in northern/hill terrain. Has its own COUGAR relationship group.",
+      "meaning": "Cougars attack the player without provocation and their pounce is effectively an instant kill via throat bite — it can end a session outright regardless of health. The loud growl and panicking peds are the earliest cue, often before the model is even visible.",
+      "suggested_action": "Treat a cougar as a top-priority threat: get on top of or inside a vehicle immediately — cougars will not attack a player standing on a vehicle — and let combat_hated_targets_around handle it at a tight radius once it registers hostile. The agent has no aim or melee action to use directly against it. If no vehicle is reachable, run toward a road or building.",
+      "avoid": "Walking long distances through Chiliad/Mount Gordo on foot with no vehicle nearby to climb onto.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "the agent has no special-ability action at all (no Caps Lock, for any protagonist) — Trevor's in-fiction resistance to cougar attacks is not something the agent can invoke, so treat the cougar threat as equally severe regardless of which protagonist is active.",
+      "sources": [
+        "https://gta.wiki/w/Cougars",
+        "https://www.gtabase.com/grand-theft-auto-v/animals/cougar-mountain-lion"
+      ]
+    },
+    {
+      "id": "tiger_shark_kills_swimmers",
+      "category": "animals",
+      "cue": "the agent is swimming in deep ocean, or was ejected from a boat/aircraft over water, and a fast red dot approaches on the minimap.",
+      "context": "Deep Pacific water around San Andreas, more frequent at night; SHARK relationship group.",
+      "meaning": "Tiger sharks kill on the first bite even at full health and armour — armour and health are irrelevant. They either strike on sight or circle and close. Hammerhead sharks (added in the PC/next-gen versions) never attack the player; dolphins, whales, orcas, stingrays and fish are harmless.",
+      "suggested_action": "Do not treat deep water as traversable terrain. There is no dedicated swim action — issue a walk_to toward shore or back to the boat immediately, which is the only movement available in water; being aboard a boat makes the agent safe since the shark cannot reach him there. The agent has no aim or melee action to fight a shark directly, so getting to a boat or shore is the only available response, not a fallback. Sunken wrecks can break pursuit.",
+      "avoid": "Setting a walk_to or drive_to route that crosses deep open water to 'explore' or as a shortcut over a boat/road route.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Sharks are also scripted to appear at the map's outer edge to discourage leaving the world; that is a boundary mechanism, not a fight to win.",
+      "sources": [
+        "https://gta.wiki/w/Sharks_(animal)",
+        "https://www.grandtheftwiki.com/Sharks_(animal)"
+      ]
+    },
+    {
+      "id": "dogs_are_conditionally_hostile",
+      "category": "animals",
+      "cue": "A dog model (Rottweiler, Shepherd, Husky, Retriever, Poodle, Pug, Westie) is nearby, possibly next to a ped.",
+      "context": "Residential streets, Sandy Shores/Grapeseed properties, Ballas turf, guarded premises. DOMESTIC_ANIMAL relationship group.",
+      "meaning": "Dogs are not baseline hostile, but they are the one domestic animal that can genuinely hurt the agent. They attack if the dog or its owner is physically provoked, if the player invades their property, and Ballas-owned dogs attack once the Ballas have been provoked. Gunfire near a dog can also flip it hostile.",
+      "suggested_action": "Leave dogs alone and do not enter fenced yards. If a dog is actively biting and the agent cannot climb onto a vehicle or flee, use combat_hated_targets_around at a tight radius once it registers hostile — the agent has no manual shoot or melee action, so this is the only way to make it stop, and it will not disengage on its own.",
+      "avoid": "Shooting a dog pre-emptively. In a residential area that is public gunfire (1 star if witnessed) and may aggro the owner and any guard on the property.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Reports of genuinely unprovoked dog attacks exist but are inconsistent across sources — treat 'dog approaching fast' as worth watching, not as automatic combat.",
+      "sources": [
+        "https://gta.wiki/w/Dogs",
+        "https://www.gtabase.com/grand-theft-auto-v/animals/rottweiler"
+      ]
+    },
+    {
+      "id": "guard_dogs_with_security",
+      "category": "animals",
+      "cue": "A security guard ped is patrolling with a dog at a business, depot, or fenced facility.",
+      "context": "Guarded commercial and industrial premises in free roam.",
+      "meaning": "Security guards can patrol with a guard dog. The dog engages the player if the player engages the guard or commits a crime inside that area. The dog is effectively an extension of the guard's aggro, not an independent animal.",
+      "suggested_action": "Treat guard-plus-dog as a single 'do not provoke' zone. If combat has already started with the guard, expect the dog to close distance faster than the guard and add to the danger — the agent cannot direct which hostile combat_hated_targets_around engages first, so plan for both arriving quickly rather than trying to pick one.",
+      "avoid": "Assuming the dog is ambient because it is an animal.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Unverified whether every guarded location spawns a dog; it appears to be occasional rather than guaranteed.",
+      "sources": [
+        "https://gta.wiki/w/Dogs"
+      ]
+    },
+    {
+      "id": "chop_is_a_companion",
+      "category": "companions",
+      "cue": "Playing as Franklin, after the mission 'Chop'; a Rottweiler is at Franklin's safehouse or tagged friendly and following.",
+      "context": "Story mode, Franklin only, post-'Chop'. Chop also appears in Hood Safari, Predator, and after Caida Libre.",
+      "meaning": "Chop is Lamar's Rottweiler who lives with Franklin. He is a friendly follower, not a threat: he attacks NPCs who injure or verbally threaten Franklin, and can be walked and played fetch with. In some missions the player can switch to Chop's viewpoint to track a target by scent.",
+      "suggested_action": "Classify Chop as friendly/companion, never as a combat target. If a follow/escort task involves Chop, use follow_entity rather than combat.",
+      "avoid": "Two failure modes: shooting Chop as an unclassified dog, and forgetting that Chop attacks pedestrians Franklin targets — which can hand the agent a wanted level he did not intend.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The iFruit companion app (collars, tricks) is dead — its servers shut down in December 2022 — so any knowledge that depends on the app is unusable.",
+      "sources": [
+        "https://gta.wiki/w/Chop",
+        "https://www.grandtheftwiki.com/Chop"
+      ]
+    },
+    {
+      "id": "police_are_neutral_at_zero_stars",
+      "category": "law_enforcement",
+      "cue": "Cop peds or police vehicles nearby, wanted level = 0.",
+      "context": "Free roam, no crime committed or none witnessed.",
+      "meaning": "At zero stars police are ambient traffic and patrol. They will not initiate. They can even assist the player if they see NPCs attacking him. The wanted level, not the presence of cops, is the state variable that matters.",
+      "suggested_action": "Route normally past police. Do not brake, do not detour dramatically, do not aim. Keep driving cleanly — the goal is to stay at 0 stars.",
+      "avoid": "Treating a police blip as a threat and fleeing. Fleeing at 0 stars accomplishes nothing except erratic driving, which risks a collision that does create a wanted level.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Cops still have a field of view for crime detection — driving on the pavement, brandishing a weapon, or hitting their car in front of them creates stars immediately.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wanted_level_escalation_ladder",
+      "category": "law_enforcement",
+      "cue": "Wanted level field reads 1-5 stars.",
+      "context": "Story mode police response. This ladder differs from GTA Online's.",
+      "meaning": "1 star: 1-2 units, officers try to arrest at gunpoint. 2 stars: at least three cars, police shoot to kill, but generally only fire from vehicles if the player shoots first. 3 stars: wider tactics — roadblocks, spike strips, and a Police Maverick helicopter appear, officers now shoot on sight — but NOOSE has not deployed yet. 4 stars: NOOSE TRU officers deploy in FIB Grangers/Sheriff SUVs, a second Police Maverick joins, and police now fire from inside vehicles unprompted. 5 stars: effectively unlimited LSPD/Sheriff plus a high proportion of NOOSE TRU and up to three Police Mavericks — outside Fort Zancudo's own footprint there is no army response and no Rhino tanks; the military only engages inside that base's restricted area, which is covered separately.",
+      "suggested_action": "Use the star count to pick the response: at 1-2 stars flee_police by driving and breaking line of sight is usually survivable; at 3+ prioritise escape over any objective; at 4-5 assume unavoidable lethal fire and treat survival as the only goal.",
+      "avoid": "Standing and fighting at 3+ stars in the open. Also avoid stopping the vehicle while surrounded — at 3 stars officers will drag a stationary player out and kill them.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Mission scripts can force or cap a wanted level regardless of behaviour.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "losing_cops_is_line_of_sight",
+      "category": "law_enforcement",
+      "cue": "Wanted stars begin flashing / radar stops flashing while being pursued.",
+      "context": "Any active wanted level in story mode.",
+      "meaning": "GTA V replaced the old fixed search radius with per-officer line of sight. Each officer has a field of view; entering it re-acquires the player. When out of sight, cone-shaped search areas render on the radar showing where officers are looking. Staying unseen for a level-dependent period (roughly 30 seconds at 1 star up to about 90 seconds at 5) clears the level.",
+      "suggested_action": "On flashing stars, stop driving away in a straight line and instead break sight: alleys, tunnels, underground car parks, dense cover. Then read the radar search cones and move away from them, not through them. Changing vehicle out of sight, or a Los Santos Customs respray, also clears pursuit.",
+      "avoid": "Outrunning in a straight line on a freeway with a helicopter overhead — the helicopter maintains line of sight and the timer never starts.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Reaching a safehouse only clears 1-2 stars. Lester's 'lose wanted level' bribe is a GTA Online mechanic, not a story-mode option — do not plan around it.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "witnesses_create_wanted_levels",
+      "category": "law_enforcement",
+      "cue": "the agent is about to commit a crime and civilians are within sight, even though no cop is visible.",
+      "context": "Free roam, anywhere populated.",
+      "meaning": "Civilians call police on their phones and film crimes, so police can respond to crimes committed out of their own sight. A single witness is enough to generate a wanted level. Stars are also cumulative — repeated one-star-grade crimes in view escalate to two and beyond.",
+      "suggested_action": "Before firing a weapon, carjacking, or brawling, check whether peds are present. If the goal is to stay clean, move to an empty area first, or pick a non-criminal alternative.",
+      "avoid": "Assuming 'no cop nearby means free action'. That is the most common way an autonomous agent accumulates an unplanned 3-star chase.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Sources agree witnesses matter but differ on how reliably minor assaults are reported; treat a witnessed punch as risky rather than certain.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "crime_to_star_mapping",
+      "category": "law_enforcement",
+      "cue": "the agent is choosing between actions with different legal cost.",
+      "context": "Story mode free roam.",
+      "meaning": "Approximate story-mode values: stealing a vehicle, firing a weapon in public, or attacking a civilian in view of police is 1 star. Resisting arrest, robbing a convenience store, or killing several civilians quickly is 2 stars. Damaging an occupied police vehicle is 2 stars. Attacking or killing a police officer is 3+ stars outright. Continued retaliation against law enforcement drives it to 5.",
+      "suggested_action": "Rank action options by their star cost and pick the cheapest that achieves the objective — e.g. take an unoccupied parked car rather than carjacking an occupied one in front of a cop.",
+      "avoid": "Shooting at police as a way of 'clearing the road'. It is the fastest possible escalation and ends the session.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Exact thresholds are not published by Rockstar and wiki sources describe them qualitatively; treat these as ordering, not precise rules.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "restricted_areas_instant_four_stars",
+      "category": "law_enforcement",
+      "cue": "A drive_to or flight route passes near Fort Zancudo, Humane Labs and Research, or Bolingbroke Penitentiary.",
+      "context": "Story mode only — some of these are unrestricted in GTA Online, which is a trap for imported knowledge.",
+      "meaning": "Entering Fort Zancudo by ground gives an instant 4 stars once spotted, and its airspace triggers an ATC warning then LAZER fighter jets. Humane Labs gives an instant 4 stars on entering the property in story mode (and has no guards during normal play). Bolingbroke Penitentiary is a 4-star trespass, with 3 stars just for firing a weapon near it and tower snipers who shoot on sight. Fort Zancudo responds with soldiers, Rhino tanks and Barracks trucks.",
+      "suggested_action": "Treat these three footprints as hard no-go geofences for routing. If a drive_to path would clip one, re-route around it before starting.",
+      "avoid": "Flying a low route over Fort Zancudo as a shortcut, or wandering into the prison perimeter. Both are unrecoverable at 4 stars for an agent without heavy weapons.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Story missions that deliberately take the agent into these places override the rule; the mission script handles the wanted level.",
+      "sources": [
+        "https://gta.wiki/w/Fort_Zancudo",
+        "https://gta.wiki/w/Humane_Labs_and_Research",
+        "https://gta.wiki/w/Bolingbroke_Penitentiary"
+      ]
+    },
+    {
+      "id": "security_guards_are_armed_and_touchy",
+      "category": "classification",
+      "cue": "A uniformed non-police guard at a store, bank, depot, or gated facility; SECURITY_GUARD or PRIVATE_SECURITY relationship group.",
+      "context": "Free roam around guarded commercial premises.",
+      "meaning": "Security guards are neutral until provoked, but they are armed and they shoot on sight once triggered, and they can be provoked simply by committing a crime within their sight — including fighting civilians nearby. Injuring or provoking a guard can itself generate a wanted level.",
+      "suggested_action": "Classify guards as neutral-but-armed. Keep any brawl, gunfire or vehicle theft away from guarded frontage.",
+      "avoid": "Starting a fistfight in a shop forecourt on the assumption that fists are 'harmless'. A guard converts that into gunfire and stars.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Guard aggression radius is not documented precisely; behave as if it is generous.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Dogs"
+      ]
+    },
+    {
+      "id": "merryweather_free_roam_vs_mission",
+      "category": "classification",
+      "cue": "Merryweather operatives near the Los Santos Naval Port / Elysian Island, or named in a mission.",
+      "context": "Story mode.",
+      "meaning": "Merryweather is a private paramilitary force with assault rifles, carbines, body armour and helicopters, and it is a major antagonist in missions such as the Merryweather Heist and Monkey Business. In ordinary free roam, however, they do not automatically attack the player merely for being near their base — hostility is mission-scoped.",
+      "suggested_action": "Only treat Merryweather as hostile when the mission-active flag is set and they are the named opposition, or when they have actually opened fire.",
+      "avoid": "Pre-emptively engaging Merryweather in free roam. They are far better armed than the agent usually is, and the fight is unwinnable and pointless.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources are thin on free-roam Merryweather behaviour at Elysian Island specifically; if they fire first, that resolves it.",
+      "sources": [
+        "https://gta.wiki/w/Merryweather_Security",
+        "https://www.gtabase.com/grand-theft-auto-v/gangs/merryweather-security"
+      ]
+    },
+    {
+      "id": "medics_and_firefighters_are_not_enemies",
+      "category": "classification",
+      "cue": "Paramedic or firefighter peds, ambulances, fire trucks; MEDIC and FIREMAN relationship groups.",
+      "context": "Accident scenes, fires, hospital frontage.",
+      "meaning": "Emergency services are neutral service NPCs. Firefighters dispatch to fires (roughly 20-30s in Los Santos, 45-60s in Blaine County), arrive four to a truck and use extinguishers; paramedics tend to injured NPCs. They are not configured to hunt the player. Firefighters are however abrasive: loitering near them draws insults and they may start a fistfight, and they will try to pull the player out of a stolen fire truck.",
+      "suggested_action": "Classify medics and firefighters as neutral. Do not engage; do not loiter in their work area; if a fire truck theft is the objective, expect a melee scuffle rather than gunfire.",
+      "avoid": "Reading a firefighter shove as 'enemy detected' and escalating to firearms — that turns a scuffle into a wanted level.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Whether paramedics actively revive downed NPCs is not clearly documented; do not build tactics on it.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Fire_Department"
+      ]
+    },
+    {
+      "id": "gang_turf_map",
+      "category": "gangs",
+      "cue": "drive_to or walk_to is about to route through South Los Santos, Rancho, Cypress Flats, El Burro Heights, Sandy Shores or Stab City.",
+      "context": "Story mode free roam.",
+      "meaning": "Ambient gang turf is geographically fixed. Ballas (purple): Davis, including Grove Street, Davis Avenue, Brouge Avenue, Covenant Avenue, plus parts of Rancho. Families (green): Chamberlain Hills, Strawberry, Forum Drive, Carson Avenue. Vagos (yellow): most of Rancho, Cypress Flats, Jamestown Street. Varrios Los Aztecas (teal/turquoise): northern Rancho, east of Central Los Santos Medical Center. Marabunta Grande (blue/white, heavy face tattoos): El Burro Heights, east LS, Vespucci Beach, mostly at night. The Lost MC: Stab City and Sandy Shores Airfield in Blaine County, plus an East Vinewood clubhouse and Grapeseed. Rednecks: Sandy Shores, Grapeseed, Harmony, Paleto Forest, Grand Senora Desert.",
+      "suggested_action": "Use turf as a routing prior: prefer main roads through these areas, stay in the vehicle, and do not stop, park or walk around. Colour is the fastest visual ID of which group a ped belongs to.",
+      "avoid": "Choosing a foot route through Davis or Rancho as a shortcut, or stopping to loiter in gang turf while idle.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Some gangs only spawn in a given area during missions — e.g. Ballas have only a temporary scripted presence in Chamberlain Hills and do not spawn there in normal play.",
+      "sources": [
+        "https://gta.wiki/w/Ballas_(HD_Universe)",
+        "https://gta.wiki/w/Los_Santos_Vagos_(HD_Universe)",
+        "https://gta.wiki/w/The_Families",
+        "https://gta.wiki/w/Varrios_Los_Aztecas_(HD_Universe)",
+        "https://gta.wiki/w/Marabunta_Grande",
+        "https://gta.wiki/w/The_Lost_MC",
+        "https://gta.wiki/w/Rednecks_(GTA_V)"
+      ]
+    },
+    {
+      "id": "gang_hostility_is_provocation_weighted",
+      "category": "gangs",
+      "cue": "Gang-model peds are nearby in their own turf and no shots have been fired.",
+      "context": "Free roam, story mode.",
+      "meaning": "Sources disagree on how automatic this is. The GTA Wiki describes ambient Ballas as hostile to the player in their territory during free roam; GTABase says they 'may attack on sight, albeit usually only when provoked'. The observable middle ground matches gameplay: gang members give a verbal warning phase — shouting, posturing, sometimes visibly drawing a weapon — before they actually escalate to violence, and proximity plus lingering is itself read as provocation.",
+      "suggested_action": "Treat the warning phase as the decision point: on gang shouting, leave the area (drive away or walk_to a waypoint outside the turf). Do not draw a weapon. Only fight if they actually fire or the harness flags them hostile.",
+      "avoid": "Two symmetric errors: opening fire during the warning phase because 'they are gang members', and ignoring the warning and continuing to loiter until three of them shoot.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The Lost MC are described as attacking Trevor on sight specifically, given his history with them — Trevor in Blaine County is the most aggressive case. Rednecks may ambush the player on a Sanchez after a crime in Sandy Shores.",
+      "sources": [
+        "https://gta.wiki/w/Ballas_(HD_Universe)",
+        "https://www.gtabase.com/grand-theft-auto-v/gangs/ballas",
+        "https://gta.wiki/w/Pedestrians",
+        "https://gta.wiki/w/The_Lost_MC",
+        "https://gta.wiki/w/Rednecks_(GTA_V)"
+      ]
+    },
+    {
+      "id": "families_are_friendly_to_franklin",
+      "category": "gangs",
+      "cue": "Playing as Franklin, in Chamberlain Hills / Strawberry / Forum Drive, green-clothed gang peds nearby.",
+      "context": "Story mode as Franklin. Also relevant when a wanted level starts in Families turf.",
+      "meaning": "Franklin is affiliated with the Families, so they do not attack him unless he directly attacks or provokes them. Better: if Franklin has a 2-star or lower wanted level inside Families territory, Families members may engage the police on his side. At 3 stars or higher they flee instead.",
+      "suggested_action": "When playing Franklin, treat Families turf as the safest place to take a low wanted level — drive into Chamberlain Hills at 1-2 stars and let the gang absorb some police attention while breaking line of sight.",
+      "avoid": "Firing on green-clad peds in South LS as Franklin. It converts an ally group into a second hostile force on top of the police.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "This is Franklin-specific. As Michael or Trevor, Families are just another ambient gang. And the assist stops entirely at 3+ stars.",
+      "sources": [
+        "https://gta.wiki/w/The_Families"
+      ]
+    },
+    {
+      "id": "altruist_camp_is_a_trap",
+      "category": "gangs",
+      "cue": "Route or wander leads into the Chiliad Mountain State Wilderness camp with distinctive painted buildings.",
+      "context": "Story mode, Blaine County; the delivery mechanic is Trevor-only.",
+      "meaning": "The Altruist Cult compound is a fortified village whose members carry machetes, hatchets, pistols, SNS pistols, SMGs, assault rifles, pump shotguns and sniper rifles. They read as neutral until the scripted turn: after Trevor delivers a fourth random-event victim, they take him at gunpoint and he must fight his way out against the whole camp.",
+      "suggested_action": "Keep the Altruist camp off the wander/idle route list. If the agent is already inside and combat starts, this is a seek_cover-and-fight-out situation, not a stand-in-the-open fight — they have snipers and shotguns.",
+      "avoid": "Treating the camp as an interesting place to explore during idle time.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Whether merely walking in unarmed triggers an attack before the four-victim script is not cleanly documented; sources describe them as initially neutral, but player reports of being attacked on entry are common. Assume danger.",
+      "sources": [
+        "https://gta.wiki/w/Altruist_Cult"
+      ]
+    },
+    {
+      "id": "gang_attacks_are_online_only",
+      "category": "gangs",
+      "cue": "Knowledge or a plan references 'Gang Attacks', gang bounties, or 'The Boss' sending threatening texts after five wins.",
+      "context": "Distinguishing GTA Online freemode content from story mode.",
+      "meaning": "The repeatable Gang Attack freemode activity, the associated retaliation messages, and the bounty-on-your-head consequence are GTA Online features. They do not exist in story mode. Wiki gang pages mix Online and story-mode behaviour in the same paragraph, which is a common contamination source.",
+      "suggested_action": "Discard any gang-related plan that depends on Gang Attacks, bounties, or freemode gang events. Story-mode gang combat happens through missions, random events, and ambient provocation only.",
+      "avoid": "Building a repeatable 'farm gang attacks' loop for stream content. It will simply not exist in the game the agent is playing.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None for story mode.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Vagos_(HD_Universe)",
+        "https://gta.wiki/w/Marabunta_Grande"
+      ]
+    },
+    {
+      "id": "punching_a_ped_triggers_retaliation",
+      "category": "retaliation",
+      "cue": "A civilian ped has engaged the agent in a fistfight, or reads as about to.",
+      "context": "Free roam, story mode. The agent has no melee verb of his own — this item is about what happens when a ped attacks the agent with fists, not about the agent throwing a punch.",
+      "meaning": "Attacked pedestrians frequently fight back rather than flee — there is a chance the ped dodges and counterattacks. Melee in GTA V is lethal: peds that go down from fists generally do not get back up, so what looks like a harmless scuffle can become a killing witnessed by civilians, which becomes a wanted level.",
+      "suggested_action": "the agent cannot initiate or land a manual punch — there is no melee action available to him. If a ped is already attacking with fists, disengage by walking or driving away, which usually works because unarmed peds do not pursue; only call combat_hated_targets_around if the harness has actually flagged the ped hostile.",
+      "avoid": "Assuming the agent can 'finish' a fistfight quickly — he has no melee action to do that with. Walking away is the reliable exit, not a fallback.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Female pedestrians rarely turn hostile after a carjacking; older women in rural Blaine County are the noted exception. This is a documented asymmetry, not a rule to exploit.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "bumping_is_not_an_attack",
+      "category": "retaliation",
+      "cue": "the agent walks or drives into a ped and the ped shouts, gestures, or shoves back.",
+      "context": "Crowded pavements, parking, tight navigation.",
+      "meaning": "Incidental contact produces a scripted annoyance reaction — insults, gestures, occasionally a shove. That is ambient behaviour, not a hostility state. It resolves on its own within seconds if the agent simply keeps moving.",
+      "suggested_action": "Ignore it and continue the current task. Treat the ped's tag as still neutral.",
+      "avoid": "Escalating: do not return the shove, do not draw a weapon, do not re-classify the ped as hostile. Most avoidable free-roam fights start exactly here.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "If the shoved ped is a gang member in their own turf, or a firefighter, the annoyance can escalate into an actual fistfight — leave the area rather than trade blows.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians",
+        "https://gta.wiki/w/Los_Santos_Fire_Department"
+      ]
+    },
+    {
+      "id": "aiming_at_peds_causes_panic_not_combat",
+      "category": "retaliation",
+      "cue": "combat_hated_targets_around is about to be called while civilians are in view.",
+      "context": "Free roam. The agent has no standalone aim action — the only way a weapon comes out is as a side effect of combat_hated_targets_around, which is engine-directed, not a deliberate 'point the gun to see what happens' choice.",
+      "meaning": "When a weapon is drawn near pedestrians — as a byproduct of engaging a hostile target — bystanders react as if threatened: hands up, ducking, running, or shouting. That does not usually make them attack, but it is a crime signal in its own right: brandishing a weapon in public is the kind of act that gets reported, and armed NPCs like security guards react to it, independent of whoever the actual hostile target was.",
+      "suggested_action": "Do not call combat_hated_targets_around in a crowd for any reason other than a confirmed hostile target — it has the same public-cost side effects described here even when the intended target is elsewhere. There is no lookaround or bluff use of it.",
+      "avoid": "Calling combat_hated_targets_around near civilians as a way to 'see what happens' — it invites a wanted level for nothing.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "None — the store-robbery activity requires a deliberate aim-at-clerk action the agent does not have, so it is not an exception he can use (see store_clerks_and_robbery).",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "carjack_victims_can_kill_you",
+      "category": "retaliation",
+      "cue": "the agent pulls a driver out of an occupied vehicle and does not immediately drive off.",
+      "context": "Free roam vehicle acquisition.",
+      "meaning": "Some civilians in GTA V are armed. If a carjacked ped is armed and the player fails to leave quickly, the ped can pull the player back out of the vehicle and shoot them repeatedly on the ground. This is one of the few ways an ordinary free-roam civilian kills the player outright.",
+      "suggested_action": "After a carjack, drive away immediately — do not idle, do not switch seats, do not look around. Prefer stealing empty parked vehicles when there is no time pressure.",
+      "avoid": "Lingering next to the victim. Also avoid carjacking in Blaine County where armed civilians are more common.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Female victims rarely retaliate, per the wiki, with rural older women as the exception.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "hostile_ped_count_is_bounded",
+      "category": "retaliation",
+      "cue": "Multiple ambient peds have turned hostile at once during a free-roam brawl.",
+      "context": "Free-roam civilian/gang scuffles, not scripted mission combat.",
+      "meaning": "Ambient free-roam brawls are usually short-lived: the group tends to break up and flee once one of them engages law enforcement or takes enough damage. There is no confirmed, documented hard cap on how many ambient peds can be hostile at once, so do not rely on one — but escalating to firearms is reliably what turns a short, survivable scuffle into an unbounded police problem.",
+      "suggested_action": "If a free-roam fight has started, expect it to resolve on its own in a matter of seconds — do not panic-escalate to firearms, which is what converts a survivable brawl into an unbounded police pursuit.",
+      "avoid": "Treating an ambient brawl with the same urgency as a mission firefight, and assuming a hostile crowd cannot grow past a fixed number.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "A specific numeric cap on simultaneous ambient hostiles was claimed by a single wiki source and could not be cross-verified, so it has been removed rather than repeated as fact. Mission-scripted enemy counts are not bounded this way regardless.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "mission_naming_is_authoritative_hostility",
+      "category": "missions",
+      "cue": "mission_active flag is true and the objective text or blip names a target group or entity.",
+      "context": "Any story mission.",
+      "meaning": "Mission scripts explicitly place peds into hostile relationship groups and give them combat tasks. This is the strongest and cleanest hostility signal available — stronger than any inference from behaviour, because it comes from the game itself rather than from the agent's reading of the scene.",
+      "suggested_action": "When a mission names enemies, use combat_hated_targets_around and seek_cover freely against them. This is the one context where aggressive default behaviour is correct.",
+      "avoid": "Extending mission hostility to bystanders. Mission areas still contain civilians, and killing them can fail objectives or cost gold-medal criteria.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Some missions explicitly require avoiding detection or avoiding kills; the objective text overrides the default aggressive posture.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V",
+        "https://gist.github.com/ghermans/30b7e578fca2494b20616f8d4725d05c"
+      ]
+    },
+    {
+      "id": "cutscene_means_do_nothing",
+      "category": "missions",
+      "cue": "The cutscene flag is set in the game state.",
+      "context": "Mission starts, transitions, story beats.",
+      "meaning": "During cutscenes the player character is not under player control and the world state reported (nearby peds, positions, hostility) is not actionable — enemies may be staged mid-scene and civilians may be scripted props.",
+      "suggested_action": "Issue stop, suspend all combat and navigation decisions, and hold until the flag clears. Use the window for commentary instead of action.",
+      "avoid": "Reacting to entities visible during a cutscene, or queuing a task that fires the instant control returns into an unknown situation.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "None worth acting on; if the flag is unreliable, prefer inaction.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "random_events_with_hostiles",
+      "category": "missions",
+      "cue": "An unexpected blip and a small cluster of peds appears in free roam, often with one ped fleeing another or a vehicle speeding away.",
+      "context": "Story-mode free roam random events, which are the main source of free-roam combat that is actually intended.",
+      "meaning": "Story mode seeds recurring random events where the hostility is real and legitimate: muggings (some of which are ambushes where both peds are hostile), Lost MC countryside bike attacks, armed thieves fleeing on foot or by car, a hitchhiker variant whose boyfriend attacks, a Trevor-only drug shootout at a guarded farm, security van robberies, and a prisoner-lift variant where the prisoner ambushes and steals your car.",
+      "suggested_action": "Treat these as the sanctioned free-roam combat opportunities — good stream content with a defined start and end. Confirm hostility from behaviour (they attack, or they flee with stolen goods) before engaging.",
+      "avoid": "Assuming every random-event ped is hostile. Several events have a victim who must not be shot, and the security-van event carries a police response.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some events have friendly-then-hostile turns (the hitchhiker's boyfriend, the ambush mugging), so re-evaluate after the first few seconds rather than locking classification in.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "red_blips_as_a_secondary_signal",
+      "category": "hostility_evidence",
+      "cue": "Red dots appear on the radar/minimap.",
+      "context": "Missions, gang encounters, and shark encounters in water.",
+      "meaning": "The game marks genuine threats as red radar blips — mission enemies and tiger sharks both surface this way. It is a useful corroborating signal, but the agent's harness may not expose the radar directly and blips can also mark non-immediate contacts.",
+      "suggested_action": "Use a red blip to raise suspicion and orient, then confirm with a behavioural signal or the harness's own hostile tag before committing to combat.",
+      "avoid": "Treating a blip alone as a shoot authorisation.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Whether the harness surfaces radar blips at all is unverified; if it does not, this item is inert.",
+      "sources": [
+        "https://gta.wiki/w/Sharks_(animal)"
+      ]
+    },
+    {
+      "id": "store_clerks_and_robbery",
+      "category": "classification",
+      "cue": "the agent is inside a Rob's Liquor, LTD Gasoline, or 24/7 store with a clerk behind the counter.",
+      "context": "Story-mode store robbery activity.",
+      "meaning": "Clerks are neutral service NPCs. The store-robbery activity is initiated by deliberately aiming a weapon at the clerk — an action the agent does not have (no manual aim, no target selection). So regardless of whether this activity exists or pays out in story mode, it is not something the agent can perform.",
+      "suggested_action": "Leave clerks alone entirely — they are not a threat, not a target, and robbing them is not an action available to the agent. Do not plan any income or content around store robbery.",
+      "avoid": "Treating a clerk as hostile just because the agent has a weapon out from an unrelated combat_hated_targets_around call, and treating robbery as a real option in the plan.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Unverified even setting the action problem aside: whether clerks shoot back, how many stores are robbable in story mode, and the exact wanted level. Ammu-Nation clerks are a different case and are not part of the robbery activity.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "relationship_groups_as_ground_truth",
+      "category": "classification",
+      "cue": "The harness needs a principled rule for mapping a ped model to hostile / friendly / neutral.",
+      "context": "Harness-side classification logic, not an in-game decision.",
+      "meaning": "GTA V's ped relationships live in relationships.dat and are keyed by group: PLAYER, CIVMALE, CIVFEMALE, COP, ARMY, SECURITY_GUARD, PRIVATE_SECURITY, PRISONER, FIREMAN, MEDIC, HATES_PLAYER, the AMBIENT_GANG_* family (LOST, MEXICAN, FAMILY, BALLAS, MARABUNTE, CULT, SALVA, WEICHENG, HILLBILLY), and animal groups DOMESTIC_ANIMAL, WILD_ANIMAL, DEER, SHARK, COUGAR, HEN. Relationship strength runs across hate / dislike / neutral / like / respect.",
+      "suggested_action": "Derive the hostile tag from the engine's actual relationship state and combat task, not from model name guessing. Map animal groups to a separate 'wildlife' channel that never reaches the combat decision path.",
+      "avoid": "Hard-coding gang model names as hostile. Ambient gang groups are not universally set to hate the player, and Families are effectively allied to Franklin.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The exact vanilla relationship matrix is documented mostly by the modding community rather than officially; the group names are reliable, the specific hate/like values less so.",
+      "sources": [
+        "https://gist.github.com/ghermans/30b7e578fca2494b20616f8d4725d05c",
+        "https://gta.wiki/w/The_Families"
+      ]
+    },
+    {
+      "id": "flee_over_fight_default",
+      "category": "hostility_evidence",
+      "cue": "Combat has started in free roam and the agent must choose between fighting and disengaging.",
+      "context": "Free roam only, never during a mission that requires clearing enemies.",
+      "meaning": "Almost every free-roam fight in GTA V has a negative expected value for a 24/7 autonomous stream: brawls escalate to gunfire, gunfire produces witnesses, witnesses produce stars, stars produce a chase that ends in death and a hospital respawn with a cash penalty and no armour — weapons themselves are kept through death, so the real cost is lost time and cash, not a wiped loadout. Disengagement is nearly always available because the world is open and vehicles are everywhere.",
+      "suggested_action": "Default to flee_police / drive away / walk_to a waypoint out of the area. Reserve combat_hated_targets_around for mission-named enemies, confirmed random events, and lethal animals that cannot be escaped.",
+      "avoid": "Fighting to 'win' an ambient encounter. There is no reward state for it in story mode.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Cougars and dogs mid-attack cannot be outrun on foot and must be killed or escaped vertically (onto a vehicle). Sharks cannot be fought while swimming.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Cougars",
+        "https://gta.wiki/w/Dogs"
+      ]
+    },
+    {
+      "id": "panicking_crowd_is_a_sensor",
+      "category": "hostility_evidence",
+      "cue": "Multiple nearby peds simultaneously start fleeing or screaming with no action from the agent.",
+      "context": "Anywhere, on foot or in a vehicle.",
+      "meaning": "A mass panic that the agent did not cause is the game telling him something dangerous entered the scene — most classically a cougar in a populated area, but also an NPC shooter, a fire, or an out-of-control vehicle. Peds fleeing are never themselves the threat.",
+      "suggested_action": "Treat mass flight as a cue to look for the cause and to increase caution — get into a vehicle, move away from the epicentre — rather than as a cue to attack anyone.",
+      "avoid": "Shooting at fleeing peds. Fleeing is the clearest possible non-hostility signal.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Peds also flee from the agent himself if he is armed and brandishing, in which case the cause is the agent and no threat exists.",
+      "sources": [
+        "https://gta.wiki/w/Cougars",
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "lost_mc_and_trevor",
+      "category": "gangs",
+      "cue": "Playing as Trevor in Blaine County; bikers on Hexers, Daemons or Sovereigns nearby, or near Stab City / Sandy Shores Airfield / the East Vinewood clubhouse.",
+      "context": "Story mode, strongest as Trevor.",
+      "meaning": "The Lost MC are described as attacking Trevor on sight, reflecting his campaign against them. They carry pistols, shotguns, SMGs, assault rifles and melee weapons, and travel in groups on bikes, which makes them mobile and hard to disengage from on foot. Their strength is reduced later in the story.",
+      "suggested_action": "As Trevor near Stab City, expect Lost MC to open fire first — approach in a vehicle, keep distance, and engage with combat_hated_targets_around only once they actually attack or the harness flags them hostile. Do not attempt to outrun bikers on foot.",
+      "avoid": "Idling on foot at Stab City. Also avoid assuming the same on-sight aggression applies to Michael and Franklin.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The 'on sight' framing is Trevor-specific in the source; treatment of other protagonists is not clearly documented.",
+      "sources": [
+        "https://gta.wiki/w/The_Lost_MC"
+      ]
+    },
+    {
+      "id": "gang_colour_identification",
+      "category": "gangs",
+      "cue": "the agent needs to identify which gang a ped belongs to from appearance alone.",
+      "context": "Free roam in Los Santos.",
+      "meaning": "GTA V uses consistent colour coding: Ballas purple (varsity jackets, Boars/Los Santos Panic sportswear), Families green (Corkers/Feud sportswear), Vagos yellow (yellow tees, bandanas), Varrios Los Aztecas light teal/turquoise cholo styling with no face tattoos, Marabunta Grande blue and white with heavy full-face tattoos. Gang vehicles follow suit — lowriders (Buccaneer, Tornado, Peyote, Manana) painted in gang colours.",
+      "suggested_action": "Use colour plus location together for identification: green in Chamberlain Hills means Families, purple in Davis means Ballas. Feed both into the friend/foe decision, especially for Franklin.",
+      "avoid": "Identifying on colour alone across the map — a purple car in Vinewood is just a car.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Civilian peds wear these colours too; the model type and turf must agree before treating it as a gang identification.",
+      "sources": [
+        "https://gta.wiki/w/Ballas_(HD_Universe)",
+        "https://gta.wiki/w/The_Families",
+        "https://gta.wiki/w/Los_Santos_Vagos_(HD_Universe)",
+        "https://gta.wiki/w/Varrios_Los_Aztecas_(HD_Universe)",
+        "https://gta.wiki/w/Marabunta_Grande"
+      ]
+    },
+    {
+      "id": "aztecas_mission_context",
+      "category": "gangs",
+      "cue": "Varrios Los Aztecas peds appear during Mr. Philips, Trevor Philips Industries, or arms trafficking side missions.",
+      "context": "Story mode missions, plus northern Rancho in free roam.",
+      "meaning": "The Aztecas are a small Mexican street gang that appears as scripted opposition in specific Trevor missions — notably attacking the Sandy Shores meth lab in Trevor Philips Industries — and in a West Vinewood random event where an Azteca mugs a woman at an ATM. In free roam they are territorial around northern Rancho.",
+      "suggested_action": "Treat Aztecas as mission enemies when the script names them, and as ordinary ambient gang members otherwise (avoid, do not engage).",
+      "avoid": "Carrying mission-time hostility into free roam and hunting Aztecas in Rancho for no objective.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Their free-roam aggression level is less documented than Ballas or Vagos; assume the standard warn-then-escalate pattern.",
+      "sources": [
+        "https://gta.wiki/w/Varrios_Los_Aztecas_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "blaine_county_is_more_dangerous_on_foot",
+      "category": "classification",
+      "cue": "the agent is on foot in Sandy Shores, Grapeseed, Harmony, Paleto Forest or the Grand Senora Desert.",
+      "context": "Story-mode free roam outside Los Santos.",
+      "meaning": "Blaine County stacks several hazards that the city does not: hostile rednecks who can ambush after a crime (including a Sanchez-riding attacker), the Lost MC, the Altruist camp, property-owning locals with dogs, armed rural civilians who retaliate to carjacking, and cougars in the surrounding hills. Police response is also slower (firefighters take 45-60s versus 20-30s in the city, indicating longer rural dispatch generally), which cuts both ways.",
+      "suggested_action": "In Blaine County, prefer staying in a vehicle, keep foot excursions short and purposeful, and avoid committing crimes near residential properties.",
+      "avoid": "Long unarmed foot wandering in the desert or forest as idle content.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Slower emergency dispatch in Blaine County is documented for the fire department specifically; extending it to police response is an inference.",
+      "sources": [
+        "https://gta.wiki/w/Rednecks_(GTA_V)",
+        "https://gta.wiki/w/The_Lost_MC",
+        "https://gta.wiki/w/Altruist_Cult",
+        "https://gta.wiki/w/Los_Santos_Fire_Department",
+        "https://gta.wiki/w/Cougars"
+      ]
+    },
+    {
+      "id": "jurisdiction_shapes_pursuit",
+      "category": "law_enforcement",
+      "cue": "A wanted level starts, and the agent must choose a direction to flee.",
+      "context": "Story mode pursuit.",
+      "meaning": "LSPD covers Los Santos proper plus Del Perro, Davis and Rockford Hills; the Los Santos County Sheriff covers Blaine County; there are also LSPD Water and Airport divisions; NOOSE is a separate tactical body that joins from 3-4 stars upward. Jurisdiction changes the responding units' vehicles and density but does not create a safe zone — crossing a boundary does not clear a wanted level.",
+      "suggested_action": "Pick flee routes for line-of-sight cover (tunnels, underpasses, car parks, dense buildings), not for jurisdiction. Fleeing the city into open desert removes cover and helps the helicopter, not the agent.",
+      "avoid": "The 'drive out of town' instinct. Open Blaine County terrain at 3+ stars with a Maverick overhead is the worst place to be.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Water and air divisions mean boats and aircraft are not automatic escapes either.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "disguise_reduces_wanted_level",
+      "category": "law_enforcement",
+      "cue": "Wanted level is in search mode (stars flashing) and the agent has a mask or headgear available.",
+      "context": "Story-mode pursuit, during the search phase only.",
+      "meaning": "Changing appearance — putting on or taking off a mask or sunglasses — is reported to reduce the wanted level by one star while police are in search mode. The agent has no menu access at all (no interaction menu, no clothes shop, no equip action) and no way to trigger this himself, so the mechanic is inert for him regardless of whether it is real in story mode.",
+      "suggested_action": "Do not build any part of flee_police around this — the agent cannot trigger it. Rely on breaking line of sight and the standard recovery ladder (cover, distance, changing vehicle out of sight) instead.",
+      "avoid": "Treating this as an available step in an escape plan. It requires an action the agent does not have.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Documented on one wiki source only and not cross-verified, and moot in any case since the agent has no menu or equip action to invoke it.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "prisoners_and_army_groups",
+      "category": "classification",
+      "cue": "PRISONER or ARMY relationship-group peds appear — near Bolingbroke, in a prison transport random event, or at Fort Zancudo.",
+      "context": "Story mode free roam.",
+      "meaning": "Prisoners and soldiers are distinct relationship groups with distinct behaviour. Soldiers at Fort Zancudo are hostile only inside the restricted footprint and respond with tanks and jets. Prisoners appear in transport events, where one variant is an ambush: the freed prisoner attacks and steals the agent's vehicle.",
+      "suggested_action": "Never enter the Fort Zancudo footprint. In prisoner-transport events, keep the vehicle secured and re-evaluate the prisoner's classification a few seconds after freeing them.",
+      "avoid": "Assuming a freed prisoner is a friendly follower. At least one variant is scripted to turn.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Not every prisoner variant is an ambush — some are ordinary escort/reward events.",
+      "sources": [
+        "https://gta.wiki/w/Fort_Zancudo",
+        "https://gta.wiki/w/Random_Events_in_GTA_V",
+        "https://gist.github.com/ghermans/30b7e578fca2494b20616f8d4725d05c"
+      ]
+    },
+    {
+      "id": "npc_gunfire_flips_third_parties",
+      "category": "retaliation",
+      "cue": "A firefight is happening nearby that the agent did not start.",
+      "context": "Free roam, gang turf, random events.",
+      "meaning": "Gunfire near other NPCs changes their state: dogs can turn hostile toward an NPC who fires near them and maul that NPC; ambient hostile peds break off and flee once one of them engages law enforcement; Families members join in against police for Franklin at low stars. The scene is not static once shots are fired.",
+      "suggested_action": "After the first shot, re-read the ped list every cycle rather than caching classifications. Third parties can become allies, threats, or leave entirely.",
+      "avoid": "Locking a target list at the start of an engagement and blindly working through it.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Documented behaviours here come from a small number of wiki claims; treat them as tendencies, not guarantees.",
+      "sources": [
+        "https://gta.wiki/w/Dogs",
+        "https://gta.wiki/w/Pedestrians",
+        "https://gta.wiki/w/The_Families"
+      ]
+    },
+    {
+      "id": "no_gta_online_npc_assumptions",
+      "category": "classification",
+      "cue": "A plan cites NPC behaviour learned from GTA Online sources — hostile NPC organisations, freemode enemies, Merryweather mercenaries you can call, or restricted areas that are open.",
+      "context": "Any planning step drawing on general GTA knowledge.",
+      "meaning": "Story mode and Online differ materially on NPC behaviour and area restrictions. Humane Labs is a 4-star instant restricted area in story mode but unrestricted in GTA Online. Gang Attacks, gang bounties and Lester's wanted-level bribe are Online-only. Wiki pages routinely mix the two in the same article.",
+      "suggested_action": "When a source does not clearly say 'in GTA V' or 'story mode', treat the claim as unverified and lower its weight.",
+      "avoid": "Acting on an Online mechanic and then being surprised when the world does not respond — which reads badly on stream and wastes real time.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None. This is a discipline rule, not a game mechanic.",
+      "sources": [
+        "https://gta.wiki/w/Humane_Labs_and_Research",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    }
+  ],
+  "notes": "SOURCE ACCESS: gta.fandom.com returns HTTP 402 as stated, so all wiki material came from the gta.wiki mirror plus grandtheftwiki.com, gtabase.com, and one modding-community gist for relationship-group names. www.ign.com was not fetchable from this environment. The session's WebSearch budget (200 calls) was exhausted partway through, so later verification was done by direct WebFetch of specific URLs rather than by search.\n\nSOURCE DISAGREEMENTS:\n1. Ambient gang hostility. gta.wiki's Ballas (HD Universe) article says Ballas \"spawn and are hostile to players in their territory during free roam\"; gtabase's Ballas page says they \"may attack Franklin on sight, albeit usually only when provoked.\" I resolved this as a warn-then-escalate model (item gang_hostility_is_provocation_weighted) and set confidence to medium. The agent should treat gang shouting as a leave-now cue, not a shoot cue, under either reading.\n2. Dog aggression. gta.wiki's Dogs article says dogs attack when they or their owner are provoked or their property is invaded; a secondary summary claimed dogs \"sometimes attack unprovoked, for no reason at all.\" I kept the provoked model and flagged the unprovoked claim as inconsistent.\n3. Altruist Cult. gta.wiki describes them as \"initially neutral\" with hostility triggered by the four-victim delivery script, but widespread player experience is that entering the camp draws fire. I could not confirm the on-entry case against a second source; the item says so explicitly.\n\nCOULD NOT VERIFY:\n- Store/convenience-store robbery specifics in GTA V story mode. Every GTA-V-specific store-robbery page I could reach 404'd or turned out to cover Vice City / Vice City Stories. The count of robbable stores, the exact wanted level, and the widely reported \"clerk pulls a shotgun\" behaviour are all unconfirmed — that item is confidence low.\n- Whether the harness surfaces radar blips at all; the red-blip item is inert if it does not.\n- Whether paramedics actively revive downed NPCs (wiki shows imagery but makes no behavioural claim).\n- Exact crime-to-star thresholds. Rockstar publishes none; wiki descriptions are qualitative, so those values are ordering guidance rather than precise rules.\n- The vanilla relationships.dat hate/like matrix. Group NAMES are reliable (confirmed against a data listing), but the specific per-pair relationship values come from the modding community and describe a file that mods routinely rewrite. Recommendation: rather than trusting this, have the bridge read the engine's actual relationship and combat state per ped and expose that as the hostile tag — that is ground truth and removes this whole class of uncertainty.\n- Cat, rabbit, bird, cow, pig and chicken harmlessness rests on a single categorised list (gtabase) plus absence of any contrary claim; deer, coyote and boar harmlessness are each directly confirmed by gta.wiki.\n- Whether guard dogs spawn at every guarded location or only occasionally.\n- The ~3 simultaneous ambient hostile ped cap comes from one wiki source only (confidence low).\n- Blaine County police dispatch being slower than the city is an inference from documented FIRE department dispatch times (20-30s LS vs 45-60s Blaine County), not a directly sourced police claim.\n\nONLINE CONTAMINATION REMOVED: gang \"Gang Attacks\" / bounty / \"The Boss sends threatening messages\" content appears on the gta.wiki Vagos and Marabunta Grande pages but is GTA Online freemode content; I captured it as an explicit do-not-use item rather than as usable knowledge. Same for Lester's wanted-level bribe and Humane Labs being unrestricted.\n\nREPAIR PASS (post-critic, this session): no ids added or deleted, all 45 items kept. Rewrote every suggested_action/avoid that implied an action the agent cannot perform (manual aim, manual fire at a named target, melee/punch/kick/knife, swim-as-a-verb, special abilities/Caps Lock, interaction-menu appearance change) to route through combat_hated_targets_around, walk_to/drive_to, or plain disengagement instead — hit cougar_is_lethal_and_unprovoked, tiger_shark_kills_swimmers, dogs_are_conditionally_hostile, guard_dogs_with_security, punching_a_ped_triggers_retaliation (renamed premise from 'the agent punches' to 'a ped attacks the agent'), aiming_at_peds_causes_panic_not_combat (reframed around combat_hated_targets_around's side effects, since the agent has no standalone aim), store_clerks_and_robbery (robbery itself is now marked not-performable), disguise_reduces_wanted_level (no menu access, dropped from any flee plan), and animals_never_consume_combat_decisions (Trevor hunting exception removed as non-performable). Fixed lost_mc_and_trevor to drop 'pre-authorised' language per critic (engage only on actual attack or a hostile flag). Verified via WebFetch against gta.wiki and grandtheftwiki.com and corrected wanted_level_escalation_ladder: 3 stars now has no NOOSE (roadblocks/spike strips/one Maverick only), 4 stars is where NOOSE TRU/Grangers/second Maverick appear, and 5 stars no longer claims an army/Rhino-tank response or emptied streets (only Fort Zancudo's own footprint gets military, per CAPABILITIES.md's existing restricted-area item). Removed the unverified numeric 'cap of three' from hostile_ped_count_is_bounded per critic, keeping the true half (brawls are usually short) without the false ceiling guarantee. Fixed flee_over_fight_default's death-penalty clause (weapons are kept through death; only cash and armour are lost), matching the rest of the domain."
+}

@@ -1,11 +1,220 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-08-25 (evening).
+run log, or URL) noted next to it. Last updated: 2026-09-02 (late).
+
+## 2026-09-02 — WANTED IS LIVE. First verified play session on the real game.
+
+The brain was deployed to the server and started while the stream was running. **This is the
+first time anything in this project has been verified against the real game rather than a test
+suite** (CLAUDE.md non-negotiable 2).
+
+**Verified live, from the harness log and `/health`:**
+- Deploy gates all passed: 15 knowledge files unpacked, **632 items across 13 domains loaded**,
+  prompt audit passed against the real API, game still ticking before and after (`tick_hz` 46 -> 50).
+- `obs connected obs=32.2.2 ws=5.7.4`; Supabase taking `sessions`, `events`, `decisions`, `stats`.
+- **The follow-the-blue-dot fix fired on a real mission within 20 seconds of starting:**
+  `no objective marker; tailing the friendly blue dot instead handle=1282 distance_m=23.9`.
+  That is exactly the failure that produced "Franklin lost Lamar" — he now recognises a
+  marker-less follow phase and tails the crew instead of standing still waiting for a marker.
+- Day planner running a mission block; lifetime totals seeded from previously published rows
+  (deaths=4, busted=0, missions_passed=0).
+
+**BUG FOUND AND FIXED IN THE SAME SESSION — the director was dead on arrival.**
+Every director call failed twice and the reflex layer kept control, so the agent played with no
+strategic layer at all. The logged error ("model returned no parseable decision object") was
+misleading: the text was PRESENT, just cut off. Reproduced against the real API:
+
+    stop_reason: max_tokens · output_tokens: 500 · block types: ['thinking', 'text']
+
+**Sonnet 5 emits a thinking block, and it is billed against the same `max_tokens` budget.** At the
+shared 500-token cap the thinking consumed the whole allowance and the decision JSON was truncated
+mid-`params`. Haiku does not think, which is precisely why the tactical tier never showed the bug
+and why 500 had looked fine for months. Measured at the same prompt: cap 1200 -> 443 tokens,
+`end_turn`, parses; cap 2000 -> 599 tokens (the model spends more thinking when offered more).
+
+Fix: `DIRECTOR_MAX_DECISION_TOKENS = 1200`, passed explicitly at the director call site, plus the
+error now names a `max_tokens` stop instead of claiming the response was empty. Cost: 443 output
+tokens at Sonnet 5's $10/MTok = **$0.0044/director call, ~$0.05/hour**. Three regression tests
+added, including one asserting the call site actually passes the constant — the constant existing
+was never the bug, not passing it would have been.
+
+**Still not verified:** the 20-minute unattended behavioural sample, and whether he plays *well*
+(as opposed to *at all*). Do not read "he is running" as "he is good".
+
+## 2026-09-02 (late) — the agent is TAUGHT the game: 651-item knowledge base + 72 mission state machines
+
+**Built offline, on purpose.** The operator disabled the API key and the Windows Administrator
+account is locked out (error 0xd07, caused by my own SSH retry storm). Nothing in this section
+touched the server, and nothing in it is proven in the running game.
+
+- **Knowledge base — `harness/wasted_harness/brain/knowledge/`.** 13 domain files, **651 items**
+  (hud_icons, map_markers, police_system, driving, combat, npc_entities, random_events,
+  activities_freeroam, controls_interactions, vehicles, aircraft_water, failure_recovery,
+  world_common_sense), each item carrying cue / context / meaning / suggested_action / avoid /
+  urgency / confidence / exceptions / sources. Researched by 13 Opus agents against gta.wiki,
+  gtabase, IGN and PCGamingWiki. Then **three adversarial Opus critics** reviewed the combined
+  result and found **55 problems, 11 of them blockers**, which a repair pass then fixed
+  (see "Knowledge quality" below). Not invented, not a walkthrough dump: sourced and reviewed.
+- **`mission_states.json` — 72 story missions as state machines, 557 states.** Each state carries
+  what he would SEE, what to do, the success and failure signals, a recovery path, and
+  `has_marker`. **116 states are flagged `has_marker: false`** — the follow/escort phases where the
+  game never draws a marker and he used to stand still waiting for one.
+- **Retrieval, not injection (`brain/knowledge_base.py`).** The encyclopedia stays on disk; a
+  per-tick `select()` returns only the items that match the situation — police knowledge when
+  wanted > 0, aircraft knowledge in a helicopter, combat when something is hitting him, only
+  locked-control items during a cutscene, and rotated free-roam knowledge otherwise. Verified
+  against the real 651-item base: a Buzzard retrieves rotor-contact and Fort Zancudo airspace; four
+  stars retrieves "break line of sight, not speed"; a cutscene retrieves 3 items and nothing else.
+  Ranking is urgency, then situational preference, then confidence — preference breaks ties INSIDE
+  an urgency tier so a four-star police warning is never pushed out by a map note.
+- **Measured cost of the knowledge block:** ~450 uncached input tokens per call =
+  **$0.119/hour** ($2.85/day at 24/7). The static prompt grew 13.8k → 15.7k tokens, which is
+  cached and therefore ~10% of that per read.
+- **Measured latency:** `select + render + mission_state_hint` = **0.28 ms per decision** over 500
+  runs against the real files, which are read from disk once and then served from an `lru_cache`
+  (7 misses, 3500 hits). Against an 8–25 s decision cadence this is free. Retrieval runs only
+  inside `_dynamic_context`, i.e. once per model call, never per tick.
+- **Integrity check:** all 15 knowledge files parse, no duplicate ids, every item carries all 11
+  required keys, and all 72 mission names match `missions.json` exactly, so the state machines
+  actually resolve for the mission the vision call identifies.
+
+### Knowledge quality — what the critics caught
+
+Worth recording because it is the reason this is not just a pile of scraped text:
+
+- **Capability contradiction (blocker).** Five domains built survival policy on pressing Caps Lock
+  for special abilities; the combat domain said he has no such key. The frozen action catalog
+  (CONTRACTS §2) settles it — **he has no aim, no fire, no weapon select, no special ability, and
+  no arbitrary keypress.** Knowledge that tells him otherwise makes him narrate actions that never
+  happened, which is the worst possible failure on a live stream.
+- **Friendly-fire risk (blocker).** Two mission states called for `combat_hated_targets_around` —
+  an AREA task — with Amanda and Tracey, and Franklin and Chop, inside the radius.
+- **"Never fight police" stated absolutely (blocker).** Eight scripted missions require exactly
+  that; the rule needed scoping to free roam.
+- **Wrong facts (blocker).** Two domains carried two different, both wrong, weapon-key tables.
+  The critics also reported The Third Way's protagonist assignments as rotated, and **I passed that
+  on to the repair pass as fact without checking it — I was wrong.** The repair agent refused the
+  instruction, re-verified, and kept the original. Confirmed afterwards against gta.wiki: it is
+  **Michael → Stretch** (B.J. Smith Recreation Center, "Michael decides to eliminate him for
+  Franklin"), **Trevor → Haines** (Del Perro Pier), **Franklin → Cheng** (Pacific Bluffs, "since
+  Franklin is unknown to the Triads"). The dataset's own notes already recorded that 3 of 4
+  sources agree with this and one outlier does not. Recorded here because the process working —
+  an executor rejecting an orchestrator's unverified claim — is the part worth keeping.
+- **Unbounded waits (blocker).** Seven mission states told him to hold position and explicitly
+  suppressed stall detection, with no maximum and no escalation — an infinite wait on a live show.
+
+## 2026-09-02 (late) — behaviour and bridge fixes from the live stream failures
+
+- **CONTRACTS v1.9 frozen** (and v1.8 written down retroactively — the bridge had been emitting
+  `mission.route_blips` for a day with no contract entry and nothing on the harness side reading it).
+- **Follow missions were unwinnable at the bridge level.** `StartFollowEntity` tailed with
+  `DrivingStyles.Normal` and a hard-coded 15 m/s cap: it stopped at red lights and topped out at
+  54 km/h while the NPC being tailed did neither. This is "Franklin lost Lamar", and no prompt
+  change could ever have fixed it. Now `ignore_lights` at 30 m/s by default, `speed_mps` settable,
+  clamped 1–60 m/s. `MissionFollower` escalates to 40 m/s once the gap has been widening for 6 s.
+- **`style` is deliberately NOT exposed to the brain on `follow_entity`.** It is a non-nullable
+  wire key (v1.4), so listing it would put `style: "normal"` on every follow and re-create the bug.
+- **The GPS route is now readable.** A `route_blips[]` entry with `kind: "entity"` beats guessing
+  at the nearest blue dot: it is the game's own answer, and it can name the car rather than the
+  driver.
+- **Mission failure was invisible to him.** `MissionTracker` decided failure with
+  `player_dead or player_arrested`, so a follow mission that fails because the target escaped —
+  killing nobody — emitted **no event at all** and the brain was never told. That is the operator's
+  "it cant understand if mission is failed it keeps on sayin random things". Now the mission-end
+  screen is read with one cheap vision call (the same mechanism CONTRACTS v1.3 established for
+  mission titles), `mission_end` is armed, and `missions_passed` — displayed on the public site and
+  the social preview image, and never incremented by anything — increments **only** on a confirmed
+  pass. An unreadable screen emits nothing rather than guessing.
+- **Animals can no longer be combat targets.** `NearestHostile`/`CountHatedTargets` now exclude
+  them, reusing `SnapshotBuilder.IsAnimal`. This is the cat that held him at 0.2 m of movement for
+  20 seconds mid-mission while he said "cat" more than any other word that session.
+- **New reasoning-discipline prompt (`prompts/thinking.md`)**: hypothesis-then-check, action memory,
+  a six-rung anti-loop ladder, anti-hallucination, and urgency tiers — written from the observed
+  failures, not from generic advice.
+- **Verified locally:** `481 passed`, `ruff check .` clean, both bridge projects `dotnet build`
+  succeeded (0 warnings, 0 errors) against the pinned ScriptHookVDotNet reference.
+- **NOT verified:** any of it, in the running game. See the blocker below.
+
+### Second critic pass (after repair) — what it caught and what was done
+
+The repaired base was re-audited by three more Opus critics. Two of their blockers were real and
+are now fixed:
+
+- **47 mission states told him to call actions that do not exist.** `enter_vehicle(...)` (the real
+  name is `enter_nearest_vehicle`) in 28 states, plus `fly_to`, `swim_to` and `use_phone`. The hint
+  renderer emits `expected_action` verbatim as `do: …`, so this was actively teaching a vocabulary
+  the schema rejects. Renamed 59 fields; **0 executable states now name a non-existent action**
+  (checked programmatically against `schemas.ACTION_TYPES`).
+- **Whole capability classes were unflagged.** `drive_to` issues the engine's GROUND driving task
+  (`Task.DriveTo` with road-node pathing), so it cannot pilot anything: every `kind: "fly"` state
+  (34) is now `executable: false`, as are the 6 swim states and the phone one. **67 of 557 states
+  (12%) are now honestly flagged as beyond his capability**, with the reason, instead of issuing
+  instructions that silently do nothing.
+- **"Never initiate combat with police" was stated absolutely** in both `rules.md` and
+  `action_catalog.md`, and eight scripted missions require exactly that (Prologue, Blitz Play, The
+  Paleto Score, The Bureau Raid, The Third Way...). Now scoped: free roam never, scripted police
+  assault yes, with `mission.active` named as the flag that decides. The catalog also now warns
+  that area combat cannot choose its target, so when a crewmate or hostage is inside the radius
+  there is no right action at all.
+
+Still open, recorded rather than quietly dropped: some Caps-Lock / weapon-key policy remains in
+domains other than `combat` and `controls_interactions`; `police_system` carries several
+mutually-exclusive standing instructions about accepting arrest; and `mission_state_hint` only ever
+surfaces two states per mission (the first, and the first no-marker one), so most per-state work is
+latent until state tracking gets better. None of these can loop him or make him shoot a friendly.
+
+### Blocked on the operator (physical-world only)
+
+1. The Windows Administrator account is locked out (0xd07) **because of my SSH retry storm**. It
+   needs the lockout window to expire, or a console/rescue reset. Until then nothing deploys.
+2. The Anthropic API key is disabled by the operator, so the agent's brain is stopped.
+3. Once both are back: raise the lockout threshold so a retry can never lock the operator out
+   again, deploy the harness package + bridge DLL, switch OBS to window capture, relaunch the game,
+   and run the **20-minute behavioural sample that has still never completed**.
+
+## 2026-09-02 — harness/bridge: full fix set built and unit-verified, live verification PENDING
+
+- Working tree (uncommitted): 349 tests pass, ruff clean, `--prompt-audit` passes (tactical prefix
+  14,484 tok, director 15,144 tok; warm tactical call ≈ $0.0026).
+- Contents since the last server deploy: typed `action.params` (v1.4 — the "F F F F" root cause, verified
+  against the real API and in live decisions), combat latch, think-time slow-motion removed + timescale
+  guard, unstick rate-limit, backoff fix, mission_start vision wiring, mission knowledge base (72 missions,
+  Opus-QA'd), radar legend + mechanics briefs, `friendly` crew + entity `pos` (v1.5/1.6), `player.protagonist`
+  + `mission.starts[]` (v1.7, bridge built sha a9d50b03, staged, needs a game restart), day planner.
+- **Server state right now:** an OLDER harness (params/combat/timescale fixes) is deployed; the newest
+  package (206 KB) and the v1.7 bridge are staged but NOT swapped in; sshd is throttling connections
+  (see RUNBOOK ops notes). VB-CABLE installed (Rockstar launcher requires an active playback endpoint).
+- **Not yet proven live (CLAUDE.md rules 2/3):** the 20-minute unattended behavioural sample (drives,
+  fights, follows crew, holds timescale 1.0, no stalls) and the watchability review. Do not read the
+  test count as evidence that he plays well; only the live sample is.
+
+## 2026-09-02 — web: production verified, domain live, cost display removed
+
+- **Production deploy** aliased to the project's production domain
+  (domain attached to the project, certificate issued for the apex + wildcard, `www` 307→apex).
+- **Verified against the live production URL:** Playwright **42 passed, 2 skipped** (the skips are "no clip
+  rows exist yet" — honest), served HTML contains **0** cost strings (`Brain bill`, `cost_per_hour_usd`,
+  `per hour`), `/missions` has no Tokens column. `npm run lint` / `typecheck` / `build` clean.
+- **Cost display removed** by operator request: `BrainBill.tsx` deleted, the `/agent` cost section and
+  "cost transparency" wording removed, and the spend columns are no longer *fetched* (explicit column
+  lists in `web/src/lib/columns.ts`; previously `select("*")` shipped them in the RSC payload).
+  `docs/STATUS.md` remains the place where measured $/hour is recorded (CLAUDE.md §9).
+- **Decision-feed freshness — root cause fixed:** Supabase Realtime was correctly enabled; the bug was a
+  socket that reports `SUBSCRIBED` then delivers nothing and never re-fires, with only `stats` having a
+  fallback poll. Now: 15 s incremental poll for `decisions`/`events`, refetch on `visibilitychange` /
+  `focus` / `online`, coalesced so realtime + poll never double-post, and `stats` listens to `*` (a new
+  session's first heartbeat is an INSERT and was being missed). End-to-end realtime delivery through the
+  new code is still to be observed on the next live harness run.
+- **Online/offline timing:** threshold stays 60 s (CONTRACTS §5); age text ticks every 1 s and resyncs
+  on tab return; stats poll 10 s so ON/OFF flips within 10 s of a heartbeat resuming. Boundary proven
+  against the real heartbeat row: on-air at +48 s, off-air at +62 s.
+- Vercel preview URLs are behind Deployment Protection with no automation-bypass secret, so previews
+  cannot be tested from outside; verification is done against the public production URL after promote.
 
 ## Delivery-day readiness pass — 2026-08-29 (commit `71140c0`)
 
-Server ordered (Hetzner auction i5-12500, ref B20260829-3496963, awaiting delivery). While
+Server ordered (Hetzner auction i5-12500). While
 waiting, a full readiness pass ran: 2 recon agents + 4 hardening agents + 4 verifiers + 4 fixers
 + 1 confirmer. **Confirmer verdict: SAFE TO COMMIT, 15/15 checks PASS**, each falsification-tested.
 
@@ -48,11 +257,11 @@ Twitch channel name.**
 
 ## Cloud layer — verified against REAL services (2026-08-25, workflow wf_04a3dc63-84d + inline)
 
-- **Site LIVE (production): https://wasted-lemon.vercel.app** — `/api/health` `{"ok":true,
+- **Site LIVE (production)** — `/api/health` `{"ok":true,
   "supabase_configured":true}`; renders the honest OFFLINE banner *and* the first real decision
-  rows server-side. Vercel project `wasted` in scope `<redacted>`; env vars set for
+  rows server-side. Vercel project `wasted`; env vars set for
   preview+production. ⚠ Production went live via Vercel CLI v53's changed default (plain
-  `vercel deploy` now targets production) — disclosed to the human; brand-new project, nothing
+  `vercel deploy` now targets production); brand-new project, nothing
   overwritten. Preview URLs are SSO-protected (Vercel Authentication) — disable in Project
   Settings → Deployment Protection if preview access is wanted.
 - **Cloud Supabase schema applied + verified** (project wwluuzkboosvtupcexsp, empty pre-apply):
@@ -101,7 +310,7 @@ supabase-js pinned 2.109.0 until Node ≥22 baseline; drive/walk arrival = plana
 
 ## Broken / known gaps
 
-- **Nothing further is verifiable on this Mac.** The remaining work requires: the Windows GPU
+- **Nothing further is verifiable on the development machine.** The remaining work requires: the Windows GPU
   server (Phases 0a,1,2,3,4,6,7), an Anthropic API key (brain verification), Supabase keys
   (cloud migration apply + Realtime), Vercel access (Phase 5 previews), a stream channel (0a/6).
 - vgamepad/ViGEmBus on Server 2025 untested (known Code-28 risk) — SendInput is the plan of record.
@@ -118,8 +327,6 @@ supabase-js pinned 2.109.0 until Node ≥22 baseline; drive/walk arrival = plana
    (Anthropic org spend-cap tier still to confirm before 24/7.)
 4. **Twitch channel name** (free) — then it goes into `site_config` and OBS.
 5. Later, on the server: one-time Steam + Rockstar logins, offline args, BattlEye off.
-6. Housekeeping: free disk space on this Mac; decide whether the accidental production URL
-   (wasted-lemon.vercel.app) stays live (it only shows the honest offline page + verify data).
 
 ## Cost
 
@@ -132,15 +339,10 @@ supabase-js pinned 2.109.0 until Node ≥22 baseline; drive/walk arrival = plana
 
 ## Environment / operations notes (2026-08-25)
 
-- **Host disk is effectively full** (~421 of 460 GB is user data). During the build the disk hit
-  0 bytes twice; recovered by clearing rebuildable caches (npm/pip/Chrome/updater ≈ 7 GB) and
-  restarting colima's VM (its FS wedged on ENOSPC both times — `colima restart` heals it). The
-  full local Supabase stack (~6 GB images) is **not viable on this machine**; SQL verification
-  runs via `infra/verify-local.sh` (throwaway postgres:16-alpine). **Human: free some tens of GB
-  for comfort**, and note `~/Library/Containers/com.docker.docker/…/Docker.raw` (1.1 GB) is a
-  remnant of Docker Desktop — you run colima now; delete it if you no longer use Docker Desktop.
-- Local toolchain installed user-locally (removable): .NET SDK 8 in `~/.dotnet`, PowerShell 7.4.6
-  in `~/.powershell`.
+- Running the full local Supabase stack (~6 GB of images) is not required to develop here; SQL and
+  RLS verification runs via `infra/verify-local.sh` against a throwaway `postgres:16-alpine`
+  container, which is both faster and reproducible on any machine.
+- Local toolchain is installed user-locally and is removable: .NET SDK 8, PowerShell 7.4.6.
 - Game target: GTA V **Legacy** (271590) via Enhanced purchase; SHV 1.0.3889.0/1158.13; SHVDN
   **v3.7.0-nightly.189 pinned** (recorded in bridge/README); .NET Framework 4.8; `-nobattleye`.
 - Paste-corruption note: master brief arrived with minor copy damage; reconstructed spots flagged

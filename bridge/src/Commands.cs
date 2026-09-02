@@ -14,8 +14,8 @@ namespace WastedBridge
         public string Type;
 
         public float X, Y, Z;               // drive_to, walk_to, set_waypoint
-        public float SpeedMps;              // drive_to
-        public VehicleDrivingFlags Style;   // drive_to, wander_drive
+        public float SpeedMps;              // drive_to; follow_entity in-vehicle tail (v1.9, reuses this field)
+        public VehicleDrivingFlags Style;   // drive_to, wander_drive; follow_entity in-vehicle tail (v1.9, reuses this field)
         public float ArriveRadiusM;         // drive_to
         public bool Run;                    // walk_to
         public string Prefer;               // enter_nearest_vehicle: "nicer" | "any"

@@ -172,10 +172,18 @@ function Test-ObsSceneCollectionInstalled {
 
 function Set-GameDisplaySettings {
     <#
-    Read (and with -EnforceDisplaySettings, write) ScreenWidth / ScreenHeight / Windowed in the
-    Rockstar settings.xml. The elements are located by name anywhere in the document rather than
-    by a hardcoded path, and anything the file does not already contain is reported instead of
-    invented.
+    Read (and with -EnforceDisplaySettings, write) ScreenWidth / ScreenHeight / Windowed /
+    PauseOnFocusLoss in the Rockstar settings.xml. The elements are located by name anywhere in
+    the document rather than by a hardcoded path, and anything the file does not already contain
+    is reported instead of invented.
+
+    PauseOnFocusLoss is the fourth key for a reason. It is GTA V's own video preference (the RAGE
+    profile setting PREF_VID_PAUSE_ON_FOCUS_LOSS, exposed in-game as Settings -> Graphics ->
+    "Pause Game On Focus Loss") and it ships ON, which freezes the game whenever its window is not
+    the foreground window. On a headless box that nobody is sitting in front of, that is the
+    difference between a live stream and a still frame. Anything that resets settings.xml — a
+    graphics auto-detect after a driver change, a game update, verifying files — silently puts it
+    back to On, so it is re-checked on every launch rather than assumed.
     #>
     [CmdletBinding(SupportsShouldProcess)]
     param([Parameter(Mandatory)][string]$Path)
@@ -186,8 +194,18 @@ function Set-GameDisplaySettings {
     }
     # Windowed: 0 = fullscreen, 1 = windowed, 2 = borderless. Borderless is mandatory here:
     # exclusive fullscreen cannot be entered over Terminal Server and is fragile on an
-    # indirect display.
-    $wanted = @{ ScreenWidth = "$ScreenWidth"; ScreenHeight = "$ScreenHeight"; Windowed = '2' }
+    # indirect display. PauseOnFocusLoss: 0 = keep running when unfocused (what we need), 1 = pause.
+    $wanted = @{ ScreenWidth = "$ScreenWidth"; ScreenHeight = "$ScreenHeight"; Windowed = '2'; PauseOnFocusLoss = '0' }
+
+    # The game rewrites settings.xml when it exits, so an edit made while it is running is thrown
+    # away and would leave the log claiming a fix that is not there.
+    $gameUp = @(Get-Process -Name 'GTA5' -ErrorAction SilentlyContinue) + @(Get-Process -Name 'GTA5_Enhanced' -ErrorAction SilentlyContinue)
+    $mayWrite = $EnforceDisplaySettings
+    if ($EnforceDisplaySettings -and $gameUp.Count -gt 0) {
+        $mayWrite = $false
+        Write-WastedWarn ('The game is already running, so settings.xml will only be REPORTED, not written: the game rewrites ' +
+            'this file on exit and would clobber the edit. Change these from the in-game menus, or close the game and re-run.')
+    }
     try {
         $xml = [System.Xml.XmlDocument]::new()
         $xml.PreserveWhitespace = $true
@@ -199,7 +217,7 @@ function Set-GameDisplaySettings {
     }
 
     $changes = @()
-    foreach ($name in @('ScreenWidth', 'ScreenHeight', 'Windowed')) {
+    foreach ($name in @('ScreenWidth', 'ScreenHeight', 'Windowed', 'PauseOnFocusLoss')) {
         $node = $xml.SelectSingleNode("//$name")
         if ($null -eq $node) {
             Write-WastedWarn "settings.xml has no <$name> element — not creating one. Set it in the game's graphics menu, then re-run."
@@ -215,9 +233,15 @@ function Set-GameDisplaySettings {
             Write-WastedInfo "settings.xml $name=$current (correct)."
             continue
         }
-        if ($EnforceDisplaySettings) {
+        if ($mayWrite) {
             $attr.Value = $wanted[$name]
             $changes += "$name $current -> $($wanted[$name])"
+        }
+        elseif ($name -eq 'PauseOnFocusLoss') {
+            Write-WastedWarn ("settings.xml PauseOnFocusLoss=$current, expected 0. The game will FREEZE whenever its window is not " +
+                'focused, which is every moment nobody is at the keyboard. Fix it in-game: Esc -> Settings -> Graphics -> ' +
+                '"Pause Game On Focus Loss" -> Off (and Settings -> Audio -> mute-on-focus-loss -> Off, which is a Rockstar ' +
+                'profile setting and is not in this file), or close the game and re-run with -EnforceDisplaySettings.')
         }
         else {
             Write-WastedWarn "settings.xml $name=$current, expected $($wanted[$name]). Re-run with -EnforceDisplaySettings to fix it, or edit the file by hand."

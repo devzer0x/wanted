@@ -30,7 +30,16 @@ from wasted_harness.behavior.activities import (
 )
 from wasted_harness.behavior.humanizer import MoodModel
 from wasted_harness.behavior.missions import MissionTracker
-from wasted_harness.behavior.recovery import StrandedEscalator, StuckDetector
+from wasted_harness.behavior.planner import DayPlanner
+from wasted_harness.behavior.recovery import (
+    DamageTracker,
+    DeathArrestRecovery,
+    StrandedEscalator,
+    StuckDetector,
+    TaskStallDetector,
+    ThreatLatch,
+)
+from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.bridge_client import GameState
 from wasted_harness.main import Harness
 from wasted_harness.perception import Delta
@@ -107,8 +116,24 @@ class StubHarness:
         # collaborators used by _reflex
         self.activity_runner = ActivityRunner(ActivityPicker(random.Random(1)), random.Random(1))
         self.missions = MissionTracker()
+        # `_reflex` gates the stranded escalator and the L2 wander on the day
+        # plan's mission block, so the stub carries the real planner.
+        self.planner = DayPlanner(random.Random(1))
         self.stuck = StuckDetector()
+        self.task_stall = TaskStallDetector()
         self.stranded = StrandedEscalator()
+        self.threat_latch = ThreatLatch()
+        self.damage = DamageTracker()
+        self.vehicle = VehicleController()
+        self.wheel = MovementWheel()
+
+        class _Breaks:
+            on_break = False
+
+        self.breaks = _Breaks()
+        self._threat_has_the_wheel = False
+        self._screen_blocked = False
+        self.death_recovery = DeathArrestRecovery()
         self.primitives = None
         self.bridge = None
         self.counters = {"deaths": 0, "busted": 0, "missions_passed": 0}
@@ -126,6 +151,12 @@ class StubHarness:
             return self._next_task_id
         return None
 
+    def _vehicle_hold(self, state: GameState) -> str | None:
+        # The real one: governor L3 ("asleep in the car, parked somewhere
+        # scenic", CONTRACTS §7) is one of the reasons it returns a hold, and
+        # that is exactly what these tests are about.
+        return Harness._vehicle_hold(self, state)
+
     def _say(self, text: str, mood: str | None = None) -> None:
         self.said.append(text)
 
@@ -137,6 +168,11 @@ class StubHarness:
 
     def _capture_clip_async(self, event_type: str, caption: str) -> None:
         pass
+
+    def _handle_mission_events(self, state, delta) -> None:
+        # Borrow the REAL wiring (extracted from _reflex) so this stub keeps exercising
+        # the production mission-event path.
+        Harness._handle_mission_events(self, state, delta)
 
 
 class _Recorder:

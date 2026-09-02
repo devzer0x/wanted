@@ -1,0 +1,715 @@
+{
+  "domain": "police_system",
+  "items": [
+    {
+      "id": "two_pursuit_states",
+      "category": "pursuit_state",
+      "cue": "wanted_stars > 0. Stars are SOLID and the radar/minimap edge is flashing red-and-blue = ACTIVE PURSUIT. Stars are FLASHING and the radar has stopped flashing = SEARCH/cooldown.",
+      "context": "GTA V story mode, any wanted level 1-5. This is the single most important state distinction in the whole police system.",
+      "meaning": "Solid stars = at least one officer currently has eyes on the agent and is driving/running straight at his real position. Flashing stars = nobody can see him; a countdown to zero stars is running and search cones have appeared on the radar. The slower the stars blink, the closer the timer is to expiring.",
+      "suggested_action": "Branch behaviour on this flag every tick. Solid stars -> break line of sight NOW (turn off the road, get under cover, get out of the helicopter's view). Flashing stars -> STOP driving fast, stop making noise, hold still or crawl away from the cones and let the timer run out.",
+      "avoid": "Treating a wanted level as one undifferentiated 'run away' state. Continuing to sprint/drive at speed once the stars start flashing is the classic way to drive straight back into a search cone and reset the timer.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some HUD mods/replacements change the flash behaviour. If the bridge exposes a raw IS_PLAYER_BEING_ARRESTED / wanted-state native rather than the HUD, prefer the native.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "search_cones_on_radar",
+      "category": "pursuit_state",
+      "cue": "Stars flashing; cone/wedge shapes attached to police blips on the radar.",
+      "context": "Search/cooldown phase only. Cones are not drawn during active pursuit.",
+      "meaning": "Each individual officer has his own field of view. Entering an unobstructed cone re-acquires the agent and flips the chase back to ACTIVE. Cone width scales with the unit: officers on foot have a narrow cone, ground vehicles a moderate cone, helicopters a wide cone.",
+      "suggested_action": "Treat cones as no-go polygons. Plan the escape path as 'move away from every cone', not 'move away from every blip'. Prioritise avoiding helicopter cones because they are the widest and move fastest.",
+      "avoid": "Navigating by distance to police blips alone. A cop 150 m away pointed at you is far more dangerous than one 40 m away facing the other direction.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Cone drawing is a HUD affordance; line of sight is still blocked by real geometry, so a cone that overlaps the agent through a solid wall or a tunnel roof does not necessarily re-acquire him.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211"
+      ]
+    },
+    {
+      "id": "escape_timer_per_star",
+      "category": "evasion",
+      "cue": "Stars begin flashing (search phase entered) at a known star count.",
+      "context": "GTA V story mode, free roam. The timer only runs while nobody has line of sight.",
+      "meaning": "Reported cooldown durations are roughly 1 star ~30 s, 2 stars ~45 s, 3 stars ~60 s, 4 stars ~75 s, 5 stars ~90 s. Wiki text elsewhere only says 'the length of time depends on the severity of the Wanted Level', so treat the exact numbers as approximate but the ordering and the ~90 s ceiling as solid.",
+      "suggested_action": "When search mode starts, commit to a hiding plan sized to the star count: budget at least 40 s of hidden time at 1-2 stars and 100-120 s at 4-5 stars before expecting the stars to clear. Announce the countdown in commentary; it is good television.",
+      "avoid": "Abandoning a good hiding spot after 15 seconds because 'nothing is happening'. Nothing happening IS the mechanic working.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The 30/45/60/75/90 table comes from one wiki; a second source only independently confirms ~90 s at 5 stars. Titles/patches may differ. Measure the real values on the show machine and correct this entry.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "timer_resets_on_reacquire",
+      "category": "evasion",
+      "cue": "Stars were flashing and go back to solid; radar edge starts flashing red/blue again.",
+      "context": "Any wanted level during the cooldown phase.",
+      "meaning": "A single police unit regaining line of sight reverts the chase to active mode and the escape timer resets to full. Partial progress is not banked.",
+      "suggested_action": "Weigh every move during search mode against this: a 5 second dash that risks crossing one cone costs the entire accumulated timer. Prefer staying put over repositioning unless a cone is actively sweeping onto the current spot.",
+      "avoid": "Peeking, repositioning 'for a better view', or driving out to check whether the cops have gone. There is no cheap probe; being seen costs the whole timer.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "no_search_radius_map_wide",
+      "category": "evasion",
+      "cue": "Search phase active and the agent is far from where the crime happened.",
+      "context": "GTA V specifically. This is a behavioural change from GTA IV.",
+      "meaning": "GTA V does not confine the search to a circle around the last known position the way GTA IV did. Police search across the map, and dispatch keeps working from the last known location plus a description of the last seen vehicle. Distance alone therefore does NOT clear stars.",
+      "suggested_action": "Optimise for concealment and vehicle identity, not for kilometres travelled. A concealed spot 200 m from the crime beats an exposed highway 4 km away.",
+      "avoid": "The 'drive fast in a straight line until they give up' plan. It is the wrong model of this game's police AI and it burns fuel, health and airtime for nothing.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Practically, the countryside does have thinner police spawn density, so distance helps indirectly by reducing the number of units that can stumble onto you.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "vehicle_swap_while_unseen",
+      "category": "evasion",
+      "cue": "Stars flashing, no cone covering the agent, another driveable vehicle within a few metres.",
+      "context": "Search phase only. Must be genuinely unobserved during both the exit and the entry.",
+      "meaning": "Dispatch tracks the colour, make and model of the vehicle the agent was last seen in. Swapping vehicles while unseen invalidates that description.",
+      "suggested_action": "During cooldown, if a spare vehicle is reachable without crossing a cone, exit-and-swap. Then park it and stay still rather than driving the new car around. There is no on-screen confirmation that the swap registered - treat it as done once the exit and entry both happened unseen, and judge success only by whether the stars keep counting down afterward.",
+      "avoid": "Swapping while a cone covers you (the new vehicle is immediately described too), and re-entering the original vehicle afterwards, which hands the description straight back.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Swapping does not by itself clear stars; the cooldown timer still has to run out. If a cop sees the swap the whole thing is wasted. No blip-colour or other HUD tell confirms a successful swap - do not build a check around one.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211"
+      ]
+    },
+    {
+      "id": "los_santos_customs_clears_stars",
+      "category": "evasion",
+      "cue": "Any wanted level, in a vehicle, an LS Customs blip within reach, and the stars are FLASHING (not solid).",
+      "context": "Story mode. Requires the garage door to actually open.",
+      "meaning": "Driving a vehicle into a Los Santos Customs garage removes any wanted level. But if police spot the agent while he is approaching the workshop, the door will not open at all.",
+      "suggested_action": "Only route to LS Customs from search mode with no cone on the approach lane. Park short of the door if a cone is sweeping, wait for it to pass, then drive in. Treat a door that fails to open as proof he was seen, and immediately fall back to a normal hide.",
+      "avoid": "Driving to LS Customs mid-active-pursuit with a convoy behind. The door stays shut, the agent is boxed into a dead end against a wall, and that is a very bad place to be at 3+ stars.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "LS Customs also closes if the shop was damaged or the mechanic was killed, so a refused door is not always a line-of-sight problem. Some branches are unavailable in story mode until unlocked by progression.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Customs",
+        "https://gamefaqs.gamespot.com/boards/634490-grand-theft-auto-v/67820832",
+        "https://fictionhorizon.com/gta-v-is-los-santos-customs-always-closed-heres-how-to-fix-it/"
+      ]
+    },
+    {
+      "id": "safehouse_below_three_stars",
+      "category": "evasion",
+      "cue": "1-2 stars and a character safehouse blip nearby.",
+      "context": "Story mode safehouses (Michael's Rockford Hills house, Franklin's Vinewood Hills/Forum Drive, Trevor's trailer and Vespucci apartment).",
+      "meaning": "Retreating into a safehouse is a listed way to shed police, but the method is not available at three stars or higher. At two or more stars, entering Michael's house or Trevor's strip club makes the occupants evacuate.",
+      "suggested_action": "Only consider the safehouse route at 1-2 stars. Above that, ignore safehouse blips entirely and hide in geometry instead.",
+      "avoid": "Routing across town to a safehouse at 4-5 stars. It will not work and the drive is a long exposed run past helicopters.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources disagree on the exact rule: one says the safehouse method is unavailable at 3+ stars, another notes Trevor's trailer can still be entered at two stars. Whether entry is blocked, or entry simply does not clear the stars, is unverified. Also note: saving the game does NOT clear a wanted level in GTA V, unlike older titles.",
+      "sources": [
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211",
+        "https://gta.wiki/w/Safehouses_in_GTA_V",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "break_line_of_sight_not_speed",
+      "category": "evasion",
+      "cue": "Solid stars, police vehicles in the mirror, open road ahead.",
+      "context": "The core doctrine of this whole domain. Applies at every star level.",
+      "meaning": "Losing the police in GTA V is a line-of-sight and timer problem, not a top-speed problem. Police cruisers are fast, dispatch is map-wide, and helicopters at 3+ stars out-see any car. Speed is only useful as a tool to buy the seconds needed to get out of sight.",
+      "suggested_action": "Use speed for exactly one purpose: open a gap big enough to turn out of sight (a corner, a tunnel mouth, an underpass, a garage ramp, a treeline). The moment stars start flashing, kill the speed and hide.",
+      "avoid": "wander_drive / drive_to at max speed as a standing response to a wanted level. It is the single most common failure mode and it ends in a PIT manoeuvre, a spike strip, or a helicopter overhead.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None. Even at 5 stars where escape is hardest, the win condition is still ~90 s unseen.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211"
+      ]
+    },
+    {
+      "id": "helicopter_is_the_real_problem",
+      "category": "evasion",
+      "cue": "3+ stars and a helicopter blip, or rotor audio, or a searchlight cone at night.",
+      "context": "Police Maverick pursues from three stars upward; a second joins at four, and up to three may be airborne at four to five stars (typically two).",
+      "meaning": "The Maverick has the widest search cone in the game and no ground obstacles block it. While it is overhead the escape timer will essentially never run. The crew includes sharpshooters with carbine rifles and it can rappel NOOSE officers onto the ground; at night it runs a searchlight.",
+      "suggested_action": "When a helicopter is up, prioritise OVERHEAD cover above everything else: tunnels, subway/train tunnels, storm-drain and aqueduct culverts, multi-storey parking structures, underpasses, dense tree cover. Ground-level alleys are not enough.",
+      "avoid": "Hiding in an open alley, a flat rooftop, a beach, an open field or a car park with no roof while a Maverick is overhead. Those work only against ground units.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The Maverick is unarmoured and dies to a single standard explosive, but shooting one down escalates the wanted level (destroying pursuing helicopters is listed as a four-star trigger) and is usually the wrong trade for an escape.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Police_Maverick",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "tunnels_and_subway",
+      "category": "evasion_location",
+      "cue": "Wanted level active, a tunnel / subway portal / storm drain mouth within reach.",
+      "context": "Best-known reliable escape geography in Los Santos. Works at any star level, including 5.",
+      "meaning": "Underground tunnels, the rail/subway tunnel network and the storm-drain (aqueduct) system cut all air line of sight and are hard for ground AI to follow. Player reports consistently say that once you are a few hundred metres in and out of view of any opening, the police cannot re-acquire you.",
+      "suggested_action": "Keep a mental shortlist of the nearest tunnel mouths and treat 'get underground' as the default high-star escape plan. Once inside, drive in far enough that no exterior opening has line of sight, then STOP and let the timer run.",
+      "avoid": "Stopping just inside the entrance where a helicopter or a cruiser can still see down the mouth, and driving in and straight out the far end into open sky.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Community/player-reported rather than documented in the wikis; the underlying mechanic (blocked line of sight) is well established, the specific spot quality is not. Trains in the tunnel are a genuine collision hazard.",
+      "sources": [
+        "https://www.sportskeeda.com/gta/how-lose-cops-gta-5",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "other_reliable_hides",
+      "category": "evasion_location",
+      "cue": "Search phase, no tunnel available, needs cover within ~10 seconds.",
+      "context": "Free roam, on foot or in a vehicle.",
+      "meaning": "Documented and widely used concealment: multi-storey parking structures, underpasses and freeway undersides, narrow alleys and back lots, bushes and dense tree cover on foot, and trams/trains. Some interior garages are never entered by police at any wanted level.",
+      "suggested_action": "When search mode starts, pick the nearest option with a roof and at most one sightline, drive/walk in, then issue stop and hold. Prefer somewhere with two exits so a sweeping cone does not trap him.",
+      "avoid": "Bushes or trams as a hide while a helicopter is overhead - crews will still shoot at a visible target from the air.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Which specific garages police refuse to enter is player lore, not documented behaviour; do not build a mission plan on any one address without testing it on the show machine.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.sportskeeda.com/gta/how-lose-cops-gta-5"
+      ]
+    },
+    {
+      "id": "countryside_vs_city",
+      "category": "evasion_location",
+      "cue": "Wanted level acquired near a Blaine County / northern map boundary.",
+      "context": "Comparative escape geography.",
+      "meaning": "Blaine County and the northern hills have far thinner police spawn density than downtown Los Santos, and the mountain rail tunnels are good cover. The trade-off is long open sightlines and almost no roofs, which favours the helicopter.",
+      "suggested_action": "Use the countryside as an escape direction only if there is a specific tunnel, culvert or treeline to reach. Otherwise the dense city gives more line-of-sight breaks per second of driving.",
+      "avoid": "Fleeing into open desert or up an exposed hillside road at 3+ stars. That is the best possible environment for an airborne pursuer.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Player-reported spawn-density claim; the geography claim is straightforward.",
+      "sources": [
+        "https://www.sportskeeda.com/gta/how-lose-cops-gta-5",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "one_star_response",
+      "category": "response_by_level",
+      "cue": "wanted_stars == 1",
+      "context": "Story mode free roam.",
+      "meaning": "Minor crimes. One or two police vehicles dispatched. Officers try to ARREST rather than kill: they approach on foot and hold the agent at gunpoint. Security guards and motorcycle officers are exceptions and will shoot on sight. Resisting or fleeing while being held immediately escalates to two stars.",
+      "suggested_action": "At one star the cheapest resolution is often to simply break contact and wait ~30 s. If the agent is cornered on foot, standing still and taking the arrest is a survivable, cheap, and very watchable outcome.",
+      "avoid": "Reflexively shooting at a one-star arrest attempt. It converts a 30-second nuisance into a two- or three-star firefight for no gain.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Pressing sprint while officers are attempting the arrest cancels the surrender and they open fire.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Busted"
+      ]
+    },
+    {
+      "id": "two_star_response",
+      "category": "response_by_level",
+      "cue": "wanted_stars == 2",
+      "context": "Story mode free roam.",
+      "meaning": "Police now shoot to kill and call for backup. A minimum of about three cruisers pursue at full speed, drive aggressively, attempt PIT manoeuvres and try to box the player in and ambush him. Officers generally only fire from inside their vehicles if the agent shoots first or aims a weapon at them. Police Predator boats operate on water from two stars.",
+      "suggested_action": "Two stars is the last level where a clean, quick break of line of sight reliably ends it in under a minute. Take the first available cover/tunnel rather than escalating.",
+      "avoid": "Aiming a weapon at a pursuing cruiser. It unlocks drive-by fire against the agent that would not otherwise have happened.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "On the legacy PS3/Xbox 360 builds some drive-by behaviour differs; the PC build is the relevant one for this show.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "three_star_response",
+      "category": "response_by_level",
+      "cue": "wanted_stars == 3",
+      "context": "Story mode free roam. This is the threshold where the fight changes character.",
+      "meaning": "Roadblocks appear, spike strips are deployed (Police Transporters carry them from three stars), all officers wear bulletproof vests, and one Police Maverick joins as air support. Minimum roughly four ground vehicles plus one helicopter. Officers will run up to a stationary occupied vehicle, drag the player out and execute him. NOOSE TRU is NOT yet deployed at three stars - that is the defining feature of four stars (see four_star_response); the single helicopter is the clearest 3-vs-4 tell.",
+      "suggested_action": "Treat three stars as the point where 'sit still in the car and wait' becomes lethal. Either be under a roof and out of every cone, or be moving. Scan ahead for roadblocks and stationary transporters and take a side street rather than threading them.",
+      "avoid": "Idling in a vehicle in the open, and taking long straight arterial roads or freeway on-ramps where roadblocks and spike strips are placed.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Arrest is already close to impossible at three stars and above; police are trying to kill, not detain.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "four_star_response",
+      "category": "response_by_level",
+      "cue": "wanted_stars == 4",
+      "context": "Story mode free roam.",
+      "meaning": "NOOSE TRU deploys for the first time here (it is absent at three stars) in FIB Grangers and Sheriff SUVs with mounted gunners, armed with carbine rifles, pump shotguns and tear gas; Police Riot vans appear in roadblocks. A second Maverick joins (up to three may be involved, typically two). NOOSE may rappel from helicopters or be dropped directly on top of the agent. Minimum roughly five ground vehicles and two helicopters. Police now fire from vehicles without provocation. The appearance of a second helicopter plus NOOSE TRU vehicles is the reliable 3-vs-4 tell.",
+      "suggested_action": "Do not attempt a stand-up fight. Route directly for the nearest overhead cover; the ~75 s timer is achievable but only completely out of sight. Expect gunfire the whole way, so favour cover-to-cover movement over long open sprints.",
+      "avoid": "Trading fire with NOOSE to 'thin them out'. Killing officers escalates toward five stars, and TRU are the best-armed and best-armoured units short of the military.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some drive-by-fire behaviour differed on the old-gen console builds.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "five_star_response",
+      "category": "response_by_level",
+      "cue": "wanted_stars == 5",
+      "context": "Story mode free roam. Maximum level in GTA V (five stars, not six as in older titles).",
+      "meaning": "Effectively unlimited LSPD/Sheriff response and a much higher proportion of NOOSE TRU than at four stars, plus up to three Police Mavericks (usually two). This is still an ordinary law-enforcement response, not a military one: soldiers, Rhino tanks and Fort Zancudo's air defences do not deploy out in the open world at five stars - the army only engages inside Fort Zancudo's own footprint (see fort_zancudo_military), regardless of star level elsewhere on the map. Reports also describe civilian traffic thinning out or clearing near the player at five stars, but this is less firmly documented than the rest of this item - see empty_streets_at_five_stars. Escape needs roughly 90 s completely unseen.",
+      "suggested_action": "Five stars is a survival problem: get underground or under a roof within the first 20-30 seconds and then do nothing at all for a minute and a half. Commentate the wait rather than filling it with movement.",
+      "avoid": "Any plan involving open road, open water or open air. Also avoid concluding that death is the only exit - a tunnel plus patience genuinely clears five stars. Do not expect tanks or soldiers anywhere except at Fort Zancudo itself, even at five stars.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "GTA V's five-star response is police/NOOSE only outside Fort Zancudo - the 'army shows up at max wanted level' behaviour from GTA San Andreas/GTA IV does not carry over. Do not port that assumption in.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211"
+      ]
+    },
+    {
+      "id": "one_star_triggers",
+      "category": "wanted_acquisition",
+      "cue": "About to perform a minor act with a police blip in line of sight.",
+      "context": "At zero stars, in view of an officer.",
+      "meaning": "One star is earned by: hitting pedestrians with a vehicle, killing a civilian with fists or melee, firing explosives, stealing a vehicle when it is reported, annoying an officer (honking, revving, insulting, rude gestures), crashing into a police vehicle, damaging an unoccupied police vehicle, or shoplifting.",
+      "suggested_action": "Feed this list into the pre-action check. Before any wander_drive or vehicle theft, check whether a police blip has line of sight; if it does and the act is on this list, either wait, move away, or accept the star deliberately and plan the escape first.",
+      "avoid": "Casually bumping a parked cruiser while parking, or honking near police - both are real one-star triggers and they generate 'accidental' chases that eat show time.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Vehicle theft only draws a star when it is actually reported/witnessed; stealing an unattended car with no observers often costs nothing.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "two_star_triggers",
+      "category": "wanted_acquisition",
+      "cue": "Weapon fired, or violence committed, within an officer's line of sight.",
+      "context": "Escalation from zero or one star.",
+      "meaning": "Two stars come from: firing a ranged weapon near police, killing or injuring civilians in an officer's sight, injuring roughly five or more pedestrians while at one star, attacking officers with melee, running officers over, resisting arrest, threatening officers with a firearm, destroying an unoccupied aircraft, crashing at high speed in an officer's sight, or robbing a store.",
+      "suggested_action": "Treat 'discharge a firearm' as a two-star commitment whenever a police blip is within sight. If combat_hated_targets_around is about to fire in a street with police present, expect the wanted level and pre-plan the exit.",
+      "avoid": "Melee-ing or running over an officer as a quick way to clear a path. It converts a passive one-star situation into an armed pursuit.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Suppressed weapons and out-of-sight kills do not reliably draw the same response.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "three_to_five_star_triggers",
+      "category": "escalation",
+      "cue": "Officer casualties, destroyed police vehicles, or sustained civilian killing.",
+      "context": "Escalation while already wanted.",
+      "meaning": "Three stars: injuring roughly fifteen or more civilians after two stars, killing an officer, destroying a second unoccupied aircraft, destroying an officer's or soldier's vehicle, or trespassing in restricted police-station areas. Four stars: continued killing, injuring or killing roughly ten or more officers, destroying a pursuing helicopter, entering Fort Zancudo or Humane Labs, or robbing four-plus stores while killing owners. Five stars: sustained civilian murder, injuring or killing on the order of forty officers, destroying large numbers of vehicles, or firing missiles from military aircraft at airports or Fort Zancudo.",
+      "suggested_action": "Model wanted level as a running body count, not a fixed state. Once at 3+, every officer the agent kills is a step toward five stars and a harder escape; disengagement is nearly always better value than winning the firefight.",
+      "avoid": "combat_hated_targets_around as a default response to police. It is the escalation engine. Reserve it for cases where cover is unreachable and disengagement is impossible.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The specific counts (5, 15, 10, 40) come from one wiki and are approximate thresholds, not exact game constants. The direction and ordering are reliable; the numbers are not.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "restricted_zones_auto_stars",
+      "category": "restricted_zones",
+      "cue": "Route or waypoint crosses a marked military/secure area boundary.",
+      "context": "Free roam, story mode. Applies on entry regardless of behaviour.",
+      "meaning": "Entering certain areas grants stars automatically: Fort Zancudo four stars on the ground (two for flying over, escalating fast), Bolingbroke Penitentiary four stars (two flying over), Humane Labs and Research four stars, Los Santos Naval Port four stars, LSIA tarmac three stars (two flying over), and restricted zones of Mission Row police station three stars.",
+      "suggested_action": "MISSION OVERRIDE: while mission_active is true and the current objective_blip or a route_blip lies inside one of these polygons (several missions require exactly this - stealing an aircraft from inside Fort Zancudo, an infiltration at Humane Labs, a job at a police-station car park, a chase across LSIA tarmac), the objective overrides this rule - drive_to/walk_to should route in deliberately, expect the stated star level, and the plan should account for the exit before entering. Free roam only (mission_active false, or the blip is outside the polygon): hard-block these polygons in the navigation layer - drive_to and walk_to should refuse or reroute rather than clipping a corner of Fort Zancudo or the airport tarmac.",
+      "avoid": "Letting a straight-line path to a distant waypoint pass through the airport or the base during free roam. This is a very common way for an autonomous driver to acquire four stars for no narrative reason. Do not, however, refuse or stall a mission objective that legitimately sits inside one of these polygons.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Story missions that route through these areas are the override case above, not an exception to track separately - the automatic-star penalty itself still applies during the mission unless the mission is scripted to suppress it.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Fort_Zancudo"
+      ]
+    },
+    {
+      "id": "cannot_lose_stars_inside_restricted_zone",
+      "category": "restricted_zones",
+      "cue": "Wanted level acquired and the agent is still inside Fort Zancudo, the prison, Humane Labs, the naval port or the airport tarmac.",
+      "context": "Free roam.",
+      "meaning": "While inside these areas the wanted level cannot be shed - hiding does not work and even the lower-wanted cheat is disabled. The stars only start clearing once the agent is outside the boundary.",
+      "suggested_action": "In free roam, the first and only objective on acquiring stars inside a restricted zone is to LEAVE the polygon by the shortest route, then start the normal hide-and-wait procedure outside it. MISSION OVERRIDE: if a mission objective is what put the agent inside the polygon (e.g. Fort Zancudo, Humane Labs), stay on the objective and keep the exit route in mind for afterward - the stars still will not clear until he leaves, so plan to shed them once the objective is complete and he is back outside, not mid-objective.",
+      "avoid": "Trying to hide in a hangar, a building or behind a wall inside the base. The timer will never run. Also avoid abandoning a mission objective just to chase the star clear early - leaving and re-entering costs more time than finishing the job and leaving once.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None documented for the free-roam case. The mission-objective case is a corollary of the general mission-override rule in restricted_zones_auto_stars.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "fort_zancudo_military",
+      "category": "restricted_zones",
+      "cue": "Four stars acquired at or over Fort Zancudo; Rhino tank, Barracks, Crusader or P-996 LAZER blips appear.",
+      "context": "Fort Zancudo only. This is the military response, distinct from LSPD/NOOSE.",
+      "meaning": "Detected intruders draw P-996 LAZER fighters firing missiles and cannon, patrolling Rhino tanks, Barracks trucks and Crusaders, and armed soldiers on foot. Rhino fire is notably accurate in free roam.",
+      "suggested_action": "If stars are taken at Zancudo, drive/run for the boundary immediately and do not stop for anything. Assume tank and jet fire is lethal on first contact.",
+      "avoid": "Any plan that involves fighting the military or lingering to steal aircraft while at four stars. Also avoid 'flee_police' behaviour tuned for cruisers - the threat model here is armour and aircraft.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Entering by ground undetected costs nothing until personnel actually spot the agent, so a quiet approach is possible in principle.",
+      "sources": [
+        "https://gta.wiki/w/Fort_Zancudo",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "spike_strips_and_roadblocks",
+      "category": "response_by_level",
+      "cue": "3+ stars, a stationary police vehicle or transporter across the road ahead, or a marked strip on the tarmac.",
+      "context": "Three stars and above; Police Riot vans are used as roadblock vehicles at four to five stars.",
+      "meaning": "Roadblocks with spike strips are deployed from three stars, usually on the obvious arterial route ahead of the player. Hitting a strip shreds the tyres and effectively ends the vehicle escape. The AI itself is careless about them and sometimes blows out its own tyres.",
+      "suggested_action": "At 3+ stars, prefer side streets, alleys and off-road lines over the road the police would predict. If a roadblock appears with no gap, brake and turn rather than ramming through the strip line.",
+      "avoid": "Ramming roadblocks head-on at speed. Even when the block breaks, the strip usually does not, and a wrecked or tyreless car at four stars is close to a death sentence.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Some heavy vehicles survive strips better, and bulletproof/heist vehicles behave differently. Motorcycles can often thread gaps a car cannot.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "pit_and_boxing_in",
+      "category": "response_by_level",
+      "cue": "2+ stars, a cruiser drawing level with or nudging the agent's rear quarter; multiple cruisers converging from two sides.",
+      "context": "Two stars and above. GTA V's police AI is markedly better at this than earlier titles.",
+      "meaning": "Police actively perform PIT manoeuvres, ram, corner and box the player's vehicle in, and set ambushes rather than just following.",
+      "suggested_action": "Do not drive long straight open stretches where cruisers can pull alongside. Use corners, kerbs, alleys and traffic to deny the side-by-side geometry. Accept a slower route with more turns.",
+      "avoid": "Freeways at 2+ stars. High speed plus long straights is exactly the condition PIT needs.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Heavy vehicles are hard to PIT; motorcycles are trivially knocked down and expose the rider to gunfire.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "stationary_in_vehicle_is_lethal",
+      "category": "response_by_level",
+      "cue": "3+ stars, the agent stopped or slowed to a crawl in a vehicle with an officer on foot within a few metres.",
+      "context": "Three stars and above.",
+      "meaning": "At three stars or higher, officers who reach a stationary occupied vehicle will pull the player out and kill him with their weapon immediately. There is no arrest animation to survive.",
+      "suggested_action": "At 3+ stars, either keep the vehicle moving or exit it under cover before officers close. If pinned and stopped, exit and seek_cover on foot rather than sitting in the car.",
+      "avoid": "Idling to 'wait out' the timer inside a car with any ground unit able to walk up. Hiding in a vehicle is only safe where officers cannot reach and cannot see.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Fully concealed parking (inside a tunnel, a closed garage, under a structure) is safe because no officer path exists.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "busted_penalties",
+      "category": "penalties",
+      "cue": "Screen desaturates and BUSTED appears, or an officer is holding the agent at gunpoint at 1-2 stars.",
+      "context": "Story mode. Arrest is realistically only possible at one or two stars.",
+      "meaning": "Being busted costs bail money, confiscates ammunition and body armour, and takes the weapon in hand at the time of arrest; the player respawns outside the nearest police station with no wanted level. Any mission in progress fails outright.",
+      "suggested_action": "Treat arrest as an acceptable, cheap, on-brand outcome during free roam at low stars when escape looks expensive. Announce it in commentary. Restock ammo and armour afterwards before starting anything violent.",
+      "avoid": "Accepting an arrest during a mission - it is a hard mission failure. And do not assume arrest is available at 3+ stars; there they simply kill him.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources vary on exactly which weapons are confiscated (one says ammo and armour only unless a weapon is drawn; another says all weapons). Verify empirically on the show build before writing recovery logic that assumes an inventory state.",
+      "sources": [
+        "https://gta.wiki/w/Busted",
+        "https://www.grandtheftwiki.com/Busted",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wasted_penalties",
+      "category": "penalties",
+      "cue": "Health reaches zero; WASTED / '<character> died' screen.",
+      "context": "Story mode, free roam or mission.",
+      "meaning": "Death deducts 5% of the player's money up to a maximum of $5,000 and respawns him outside the nearest hospital with no wanted level. Weapons are RETAINED. On a mission, death offers a checkpoint retry; declining sends him to the hospital with the money penalty.",
+      "suggested_action": "When both outcomes are inevitable, death is usually the cheaper one in free roam because the arsenal survives; arrest strips ammo and armour. Factor that into any last-ditch decision at 3+ stars.",
+      "avoid": "Deliberately dying as a routine wanted-level reset. It is expensive on screen time and money, and 'the agent suicides to clear stars' is bad television compared with a tunnel escape.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "If the agent's personal vehicle is within about a block when he goes down, it may be impounded rather than left where it was.",
+      "sources": [
+        "https://gta.wiki/w/Wasted",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "vehicle_impound",
+      "category": "penalties",
+      "cue": "Busted or wasted while the personal vehicle is nearby.",
+      "context": "Story mode.",
+      "meaning": "If the player is within roughly a block of his personal vehicle when busted or wasted, that vehicle is impounded rather than left in place.",
+      "suggested_action": "After a bust or death, do not path back to where the car was left; check whether it was impounded and treat it as lost for the current segment. Steal a replacement instead of wasting airtime searching.",
+      "avoid": "A recovery routine that blindly navigates to the last known vehicle position after a death.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Only applies to the character's designated personal vehicle, not to arbitrary stolen cars.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wanted_level_persists_through_save",
+      "category": "pursuit_state",
+      "cue": "Considering a save/load or a session restart while wanted.",
+      "context": "GTA V specifically; a change from earlier titles.",
+      "meaning": "Saving the game does not clear the wanted level in GTA V, and it reappears when the save is loaded.",
+      "suggested_action": "If the harness or watchdog restarts the game after a crash while the agent was wanted, assume the pursuit resumes on load and run the escape logic immediately at spawn rather than assuming a clean state.",
+      "avoid": "Using save/load as a wanted-level reset in recovery code, and assuming a freshly loaded session is at zero stars.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Documented on one wiki only; verify against the actual build during recovery testing.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wanted_during_mission",
+      "category": "mission_interaction",
+      "cue": "mission_active == true and wanted_stars > 0.",
+      "context": "Story mode missions.",
+      "meaning": "Picking up a wanted level during a mission generally suspends the mission and prompts the player to lose the heat before the objective resumes. Being busted during a mission fails it outright.",
+      "suggested_action": "When wanted during a mission, switch the whole policy to escape until stars clear; the objective blip is not the priority and pursuing it usually makes things worse. Then resume the mission objective.",
+      "avoid": "Continuing to drive to the mission waypoint with three stars up. It drags the pursuit to the objective and often gets the mission failed.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some missions are scripted around a permanent or scripted wanted level and cannot be cleared normally; if the stars will not fall despite good hiding, assume the mission script owns them and continue the objective.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "appearance_change_reduces_star",
+      "category": "evasion",
+      "cue": "Search phase; a mask or glasses can be equipped or removed.",
+      "context": "Primarily a GTA Online mechanic; the story-mode protagonists have far fewer disguise options.",
+      "meaning": "Adding or removing a mask or sunglasses while in the search phase is reported to drop the wanted level by one star.",
+      "suggested_action": "There is currently no mask/clothing-change action in the agent's action set (no bridge task or primitive exposes one), so this is not something to plan around or attempt today. Do not treat it as part of the flee_police sequence. If a clothing/appearance action is ever added to the harness, it would only be worth trying while already hidden - never as a reason to leave cover.",
+      "avoid": "Leaving cover to reach a clothing store, treating this as a substitute for the cooldown timer, or writing decision logic that calls an appearance-change action that does not exist in the harness.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Sources describe this mostly in a GTA Online context, and the ones that mention it for GTA V do not confirm story-mode behaviour. Treat as unverified for our use case. Similarly, calling Lester to clear a wanted level is GTA Online only and does not exist in story mode.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211"
+      ]
+    },
+    {
+      "id": "no_cheats_policy",
+      "category": "policy",
+      "cue": "Any temptation to invoke a wanted-level cheat code or phone cheat.",
+      "context": "WANTED show rules: Story Mode only, no cheats. This overrides any efficiency argument.",
+      "meaning": "GTA V exposes a lower-wanted-level cheat, but using it is off-limits for this show - a human player earning the escape is the whole point of the format. (Notably it is also disabled inside restricted zones anyway.)",
+      "suggested_action": "Never issue cheat codes or cheat phone numbers. Escape by line of sight and timer, or accept the bust or the death on camera.",
+      "avoid": "Any 'unstick' or 'recovery' helper that quietly clears stars. The only sanctioned nudge is a few metres of unstick when physically wedged, logged and announced.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None. This is a project rule, not a game mechanic.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "dont_shoot_during_search",
+      "category": "evasion",
+      "cue": "Stars flashing; a hostile or a lone officer wanders into view of the hiding spot.",
+      "context": "Cooldown phase, any star level.",
+      "meaning": "The cooldown depends on nobody perceiving the agent. Firing a weapon is loud, visible and by itself a documented two-star trigger near police, so shooting from a hiding spot is a reliable way to flip back to active pursuit and reset the timer.",
+      "suggested_action": "During search mode, suppress combat_hated_targets_around unless the agent is actually being shot at. Prefer stop / seek_cover and let the officer's cone sweep past.",
+      "avoid": "Opportunistic kills on isolated cops during cooldown. The tactical gain is zero and the cost is the entire escape.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The exact audio-perception model is not documented in the sources consulted; the star-trigger for firing near police is. If the agent is discovered and taking fire, fighting from cover may be the only option.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "water_and_boats",
+      "category": "evasion_location",
+      "cue": "Wanted level active near the coast, the Alamo Sea, or a canal.",
+      "context": "Two stars and above puts Police Predator boats on the water; helicopters cover water freely.",
+      "meaning": "Water is not a safe zone. Police Predators with armed passengers patrol from two stars, and open water gives a helicopter a perfect uninterrupted sightline.",
+      "suggested_action": "Use water only as a short crossing to reach cover on the far side, or to get under a bridge/pier. Do not plan to wait out a timer floating in open water.",
+      "avoid": "Swimming or boating into the middle of the bay at 3+ stars to 'get away from the roads'.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Submerging is widely believed to break line of sight, but that behaviour is not confirmed by the sources consulted here - treat as unverified.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Los_Santos_Police_Department_(HD_Universe)",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "night_searchlight",
+      "category": "pursuit_state",
+      "cue": "Night-time clock, 3+ stars, a bright moving light cone on the ground.",
+      "context": "Police Maverick air support at three stars and above.",
+      "meaning": "NPC-crewed Police Mavericks run a searchlight at night. Darkness therefore does not conceal the agent from air support the way it conceals him from ground units.",
+      "suggested_action": "At night, still prioritise overhead cover over darkness. On foot, treat the moving light pool as a hard cone to stay out of; it is the clearest visual signal in the whole police system and worth calling out in commentary.",
+      "avoid": "Assuming night makes an open rooftop, alley or field safe.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Only NPC-operated Mavericks use the searchlight. Darkness does genuinely help against ground officers' narrower cones.",
+      "sources": [
+        "https://gta.wiki/w/Police_Maverick",
+        "https://segmentnext.com/gta-5-wanted-levels-guide-how-to-lower-and-raise/"
+      ]
+    },
+    {
+      "id": "exit_vehicle_and_hide_on_foot",
+      "category": "evasion",
+      "cue": "Search phase, vehicle is damaged/smoking/tyreless, or the hide has no vehicle-sized entrance.",
+      "context": "Any star level during cooldown.",
+      "meaning": "An officer on foot has the narrowest field of view of any unit, so a person tucked behind geometry is much harder to re-acquire than a car sitting in a street. But the vehicle the agent was last seen in is described to dispatch, so leaving it behind also breaks the description.",
+      "suggested_action": "When the car is compromised, abandon it out of sight, walk (do not sprint) into an alley/interior/treeline, and stop. Consider parking the car somewhere plausible so it does not act as a beacon on the hiding spot.",
+      "avoid": "Standing next to the abandoned car. Cops converge on the last known vehicle, so put distance and a wall between the agent and it.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "On foot at 4-5 stars with NOOSE rappelling in, leaving the vehicle may be worse if there is no cover within a few seconds' walk.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "guards_and_non_police_shooters",
+      "category": "wanted_acquisition",
+      "cue": "Uniformed security guards, motorcycle officers, or guard dogs nearby (stores, banks, depots).",
+      "context": "One-star situations, mostly around businesses and secure premises.",
+      "meaning": "Civilian security guards and motorcycle police do not follow the standard one-star arrest behaviour - they shoot on sight. Guard dogs may also engage.",
+      "suggested_action": "Classify security guards as hostile shooters even at one star, and do not assume the 'stand still and get arrested' option applies near them.",
+      "avoid": "Walking calmly toward a security guard expecting an arrest animation.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Behaviour varies by location and by which businesses are scripted.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "shooting_down_helicopter_escalates",
+      "category": "escalation",
+      "cue": "3+ stars, a Maverick overhead, an explosive weapon available.",
+      "context": "Destroying pursuing helicopters is a documented four-star trigger.",
+      "meaning": "A Maverick is unarmoured and dies to a single standard explosive, which makes shooting it down tempting. But destroying a pursuing helicopter escalates the wanted level toward four stars, and at four stars more Mavericks are dispatched (up to three). The agent also has no manual aim or fire action - the only combat primitive is combat_hated_targets_around, which hands a radius to the engine's own combat AI and does not let him pick the helicopter (or anything else) as a specific target.",
+      "suggested_action": "Solve the helicopter with geometry, not ordnance: get under a roof. Do not build any plan around deliberately shooting the helicopter down - it is not an action the agent can direct. If combat_hated_targets_around happens to bring one down as a side effect while engaging other hostiles, treat it as pure chance, not a tactic to rely on.",
+      "avoid": "The intuitive 'remove the spotter' play as a deliberate tactic. It is not achievable with the actions available, and even if it happened it trades one helicopter for two and a higher star level.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "During scripted mission sequences the escalation rules may not apply the same way.",
+      "sources": [
+        "https://gta.wiki/w/Police_Maverick",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "noose_rappel_and_dropoff",
+      "category": "response_by_level",
+      "cue": "4+ stars, a helicopter hovering directly overhead or descending near the agent's position.",
+      "context": "Four to five stars, NOOSE TRU air deployment.",
+      "meaning": "NOOSE TRU can rappel from Police Mavericks on winches or be landed directly next to the player, which means a helicopter overhead is not just a spotter - it is a delivery mechanism for the best-armed units in the game.",
+      "suggested_action": "Treat a hovering (as opposed to circling) Maverick as an imminent ground contact and move immediately, ideally under a roof it cannot drop through.",
+      "avoid": "Holding a static defensive position in the open at four stars while a helicopter hovers. The agent will be flanked from above.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Winch/rappel behaviour is documented largely in an Online context on the vehicle page but is described for NOOSE TRU at four stars in story mode too.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Police_Maverick"
+      ]
+    },
+    {
+      "id": "empty_streets_at_five_stars",
+      "category": "pursuit_state",
+      "cue": "Five stars and almost no civilian traffic or pedestrians in view.",
+      "context": "Five stars only.",
+      "meaning": "One source describes civilian traffic thinning to almost nothing at five stars, leaving mostly hostile police vehicles in view. This is not confirmed as a firm game rule (no second source corroborates it, and it may be an artifact of that page conflating GTA V with an earlier title's escalation), so do not lean on it as a detector.",
+      "suggested_action": "Do not assume ordinary traffic will thin out at five stars, and do not use apparent street emptiness as confirmation of the star count - read wanted_stars directly instead. Plan any vehicle swap before stars reach five regardless, since parked (unoccupied) vehicles remain a fallback either way.",
+      "avoid": "A five-star escape plan that depends entirely on stealing a passing civilian car with no fallback, and treating empty-looking streets as proof of anything about the wanted level.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Parked (unoccupied) vehicles remain available regardless of whether moving traffic is present. If the show machine's real behaviour is measured and traffic genuinely does not thin, this item should be deleted.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "arrest_vs_flee_decision_at_one_star",
+      "category": "evasion",
+      "cue": "One star, cornered on foot, officer holding the agent at gunpoint, escape route poor.",
+      "context": "One star only; the arrest window closes fast as stars rise.",
+      "meaning": "At one star the police are genuinely trying to detain rather than kill. Complying ends the incident in seconds for bail money plus ammo and armour. Sprinting or resisting immediately makes it two stars and shooting starts.",
+      "suggested_action": "Score the choice explicitly: if not on a mission and cover is more than a few seconds away, take the arrest and move on. If on a mission, escape at almost any cost, because arrest is a hard mission failure.",
+      "avoid": "A blanket flee_police reflex at one star. It manufactures the two-star firefight the reflex was meant to avoid.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Motorcycle officers and security guards shoot rather than arrest, so the surrender option may simply not be on the table.",
+      "sources": [
+        "https://gta.wiki/w/Busted",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "never_drive_fast_forever",
+      "category": "evasion",
+      "cue": "Any wanted level that has lasted more than about 60 seconds with the agent still on public roads at speed.",
+      "context": "Top-level policy rule for the whole police domain; the summary of everything above.",
+      "meaning": "'Lose the cops' in GTA V means: break line of sight, then stay out of every search cone for the star-appropriate number of seconds, ideally having changed vehicle or left the described one behind. It never means outrunning them. A chase that lasts minutes on open road is a chase that is being played wrong and is heading for a bust, a wreck or a death.",
+      "suggested_action": "Put a hard timer on the escape policy: if stars have been solid for more than ~45 s, stop optimising for speed and route to the nearest overhead cover, tunnel, garage or LS Customs, even at the cost of a collision or a longer detour.",
+      "avoid": "Any policy where the response to police is a single unconditional flee_police or wander_drive that runs until the state changes on its own.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Brief bursts of speed to open a gap before turning out of sight are correct and necessary. The rule is about sustained fleeing as a strategy, not about using speed as a tool.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.grandtheftwiki.com/Wanted_Level_in_GTA_V",
+        "https://gurugamer.com/pc-console/gta-5-guide-how-to-escape-the-cops-at-max-wanted-level-17211"
+      ]
+    }
+  ],
+  "notes": "SOURCES USED (all fetched this session): gta.wiki (GTA Wiki mirror) pages Wanted_Level_in_GTA_V, Busted, Wasted, Los_Santos_Customs, Los_Santos_Police_Department_(HD_Universe), Police_Maverick, Fort_Zancudo, Safehouses_in_GTA_V; grandtheftwiki.com Wanted_Level_in_GTA_V; segmentnext.com wanted-levels guide; gurugamer.com 5-star escape guide; sportskeeda and gamefaqs/fictionhorizon via search snippets only. gta.fandom.com was skipped per instructions (HTTP 402). ign.com is blocked to this fetcher (400 - domain not accessible). neoseeker, vintageisthenewold and the GameFAQs answers page returned 403; the Steam wanted-levels guide returned a rate-limit page; sportskeeda direct fetch returned 405, so those contributed search-snippet text only. The web search budget for the session was exhausted partway through, so some verification passes could not be run.\n\nCOULD NOT VERIFY / DISAGREEMENTS:\n1. Per-star escape timers (30/45/60/75/90 s). Only grandtheftwiki gives the full table; gta.wiki says only \"depends on the severity\"; gurugamer independently confirms ~90 s at five stars. The ordering is safe, the exact constants are not. MEASURE THESE on the show machine - it is the single most valuable empirical number for the agent's escape policy.\n2. Busted inventory loss. gta.wiki says only ammo and body armour are confiscated (plus the weapon in hand); grandtheftwiki says all weapons. Do not write recovery logic that assumes a specific inventory state without testing.\n3. Safehouse rule. gurugamer says the safehouse escape method is unavailable at 3+ stars; gta.wiki's Safehouses page notes Trevor's trailer can still be ENTERED at two stars. Whether entry is blocked above 2 stars, or entry is allowed but does not clear stars, is unresolved.\n4. Appearance/mask reduction by one star is described mostly in a GTA Online context. Marked low confidence and flagged as possibly Online-only. Lester bribes are GTA Online only and are excluded from the usable set.\n5. No source consulted gives numeric vision-cone ranges or the underlying dispatch.meta constants; only the relative widths (foot narrow < car moderate < helicopter wide) are documented. Escalation thresholds (5/15/10/40 casualties) come from a single wiki and are approximate.\n6. Underwater/submerging as a line-of-sight break, and specific \"police never enter this garage\" spots, are player lore, not documented behaviour - included at medium/low confidence and flagged.\n7. The special-ability PC key binding (Caps Lock) and per-character ability details were NOT sourced this session; that item carries an empty sources array and must be checked in the game's own key-binding menu before any keypress is wired.\n8. Everything here is GTA V STORY MODE. Where a mechanic is Online-only it is either omitted or explicitly labelled (Lester, disguises). No GTA IV, GTA Online, RDR or GTA VI mechanics were carried over.\n\nREPAIR PASS (adversarial-critic fixes, this session): deleted special_ability_key (Caps Lock/special-ability policy) entirely - CAPABILITIES.md confirms no special-ability key, no raw keypresses, and press_prompt_key is contextual-only, so the item asked the agent to do something he structurally cannot do; added an explicit mission-objective override clause to restricted_zones_auto_stars and cannot_lose_stars_inside_restricted_zone so story missions that require entering Fort Zancudo/Humane Labs/the naval port/LSIA tarmac/etc. are no longer blocked by the free-roam geofence; removed the invented grey-radar-blip \"confirmation\" from vehicle_swap_while_unseen (no such HUD tell exists, replaced with \"no observable tell, judge by whether stars keep counting down\"); resolved the three-star/four-star overlap by removing NOOSE TRU from three_star_response (roadblocks/vests/one Maverick only) and making four_star_response the sole point where NOOSE TRU first deploys; rewrote five_star_response to drop the GTA IV/San-Andreas-style \"military vehicles and Rhino tanks\" claim for the open world (verified against grandtheftwiki.com: the army does not engage outside Fort Zancudo's own footprint at any star level) while keeping the Zancudo-specific tank/jet response in the separate fort_zancudo_military item; downgraded empty_streets_at_five_stars to low confidence/low urgency and removed the \"reliable signal\" framing since the traffic-clearing claim is only weakly corroborated; clarified shooting_down_helicopter_escalates and appearance_change_reduces_star so neither implies the agent can deliberately aim at a specific target or invoke a mask/clothing action that does not exist in the harness's action set. No items were deleted for factual reasons other than special_ability_key; all other fixes were in-place edits, ids preserved."
+}

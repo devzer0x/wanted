@@ -38,19 +38,34 @@ from .behavior.activities import (
     scenic_park_plan,
 )
 from .behavior.humanizer import BreakScheduler, IdlePicker, MoodModel, reaction_delay
-from .behavior.missions import MissionTracker
+from .behavior.missions import MissionFollower, MissionTracker
+from .behavior.planner import DayPlanner
 from .behavior.recovery import (
     ApiBackoff,
+    BlockingScreenWatchdog,
     BridgeDownTracker,
     BridgeStallTracker,
+    DamageTracker,
+    DeathArrestRecovery,
     GameRestartDetector,
+    OffLoopGrab,
     StrandedEscalator,
     StuckDetector,
+    TaskStallDetector,
+    ThreatLatch,
     classify_api_failure,
     flipped_action,
+    threat_action,
+)
+from .behavior.vehicle import (
+    MovementWheel,
+    VehicleController,
+    VehiclePhase,
 )
 from .brain.director import VISION_TRIGGERS, DirectorBrain, DirectorCadence
+from .brain.knowledge_base import mission_state_hint, render, select
 from .brain.memory import Memory
+from .brain.mission_knowledge import identify_mission, mission_card
 from .brain.prompts import director_static_prefix, tactical_static_prefix
 from .brain.schemas import ACTION_TYPES, BRIDGE_TASKS, DecisionModel
 from .brain.tactical import (
@@ -63,6 +78,7 @@ from .brain.tactical import (
     verify_model_ids,
     verify_prefix_cacheable,
 )
+from .brain.vision import MissionOutcome, read_mission_outcome, read_mission_title
 from .bridge_client import (
     UNKNOWN_EDITION,
     BridgeApiError,
@@ -73,7 +89,7 @@ from .bridge_client import (
     GameState,
     OnlineSessionActiveError,
 )
-from .budget import LEVEL_NOTES, BudgetGovernor, Pricing, cost_usd
+from .budget import LEVEL_NOTES, BudgetGovernor, Pricing, cost_of_usage, cost_usd
 from .commentary import Commentary
 from .events import SupabaseWriter
 from .logsetup import force_utf8_console, get_logger, setup_logging
@@ -88,12 +104,51 @@ from .perception import (
 )
 from .primitives import gamepad_status, session_diagnostics
 from .settings import ConfigError, Settings
+from .totals import LifetimeTotals
 
 log = get_logger("wasted.main")
 
-THINKING_TIMESCALE = 0.15
+#: Timescale held while the brain thinks. **1.0 = no dip at all**, and at 1.0
+#: `_think` never touches POST /timescale (no dip, no restore, no 503 path).
+#:
+#: It used to be 0.15. The idea was to buy the model time; what it actually
+#: bought was a show that drops to 15% speed for the two-to-four seconds of
+#: every tactical call and then snaps back — "goes slow for 3-4 seconds then
+#: normal speed", every clip looking broken — and a failure mode where a
+#: restore that 503s leaves the world in slow motion indefinitely (four
+#: occurrences in one session's logs). Normal speed during a think is exactly
+#: what a human player experiences: perception still runs at 3-4 Hz and the
+#: reflex layer, not the model, is what keeps him alive inside those seconds.
+THINKING_TIMESCALE = 1.0
+#: Anything at or above this counts as normal time; below it the world is in
+#: slow motion and, unless the GAME put it there, wants restoring.
+NORMAL_TIMESCALE = 1.0
+TIMESCALE_OK_ABOVE = 0.99
+#: POST /timescale is clamped to 0.1-1.0 bridge-side (CONTRACTS §1), so a value
+#: strictly below 0.1 cannot be one the harness set — it is the game's own
+#: effect (the death slow-motion sits around 0.075). Never fight that.
+TIMESCALE_GAME_FLOOR = 0.1
+#: Re-assert normal time at most this often, so a game that keeps overriding it
+#: gets one POST every few seconds instead of one per tick.
+TIMESCALE_REASSERT_INTERVAL_S = 5.0
+#: How old the last captured frame may be and still be an honest screenshot of
+#: "now" for an event. Beyond this the harness reports no screenshot rather
+#: than uploading a stale frame with a fresh event's name on it.
+FRAME_MAX_AGE_S = 2.0
 STATS_INTERVAL_S = 5.0
 FLUSH_INTERVAL_S = 2.0
+#: The goal shown to the brain fresh at startup, and again the moment he
+#: respawns from a death/arrest — a stale pre-death goal must not survive a
+#: respawn (WP-.../death recovery item 2: "clear stale task/goal state").
+#: Character budget for the retrieved-knowledge block in the dynamic context. The tactical
+#: prefix is ~15k cached tokens and a warm call costs ~$0.0026 at ~240 calls/hour; this block
+#: is NOT cached (it changes every tick), so every character is paid for at the full input
+#: rate on every decision. 1800 chars is roughly 450 tokens, about a dozen retrieved items -
+#: enough to answer "what should I know right now" without pushing the state snapshot and the
+#: mission card out of the model's attention, which is what a bigger budget actually costs.
+KNOWLEDGE_BUDGET_CHARS = 1800
+
+INITIAL_GOAL = "wake up, find wheels, see what the day wants"
 #: Events worth a replay-buffer clip. Kept to the banner moments so a clip is
 #: always something a viewer would actually want to see again.
 CLIP_EVENTS: frozenset[str] = frozenset({"death", "busted"})
@@ -305,7 +360,7 @@ def _check_screenshots(rep: _Report) -> None:
         rep.fail("screenshots", "screenshots", str(exc))
         return
     try:
-        frame = grabber.grab()
+        frame, _captured_at = grabber.grab()
         rep.ok("screenshots", f"dxcam captured {frame.width}x{frame.height}")
         jpeg = encode_jpeg(frame)
         rep.note(f"768px JPEG encode ok ({len(jpeg)} bytes)")
@@ -537,15 +592,29 @@ class Harness:
         self.commentary = Commentary(state_dir, self.rng)
         self.bus = OverlayBus()
 
-        self.governor = BudgetGovernor(
-            hourly_cap_usd=settings.hourly_cap_usd, on_change=self._on_governor_change
-        )
+        #: Counters, played time and the budget ledger that must survive a
+        #: restart (see totals.py for why they are lifetime, not per-session).
+        self.totals = LifetimeTotals.load(state_dir)
+        self._seed_totals_once()
+
+        # `on_change` is wired only AFTER seeding: adopting the previous
+        # process's spend is not a level TRANSITION and must not announce one on
+        # the feed. Everything after this point does announce, as §7 requires.
+        self.governor = BudgetGovernor(hourly_cap_usd=settings.hourly_cap_usd)
+        self.governor.seed(self.totals.budget_seed())
+        self.governor.on_change = self._on_governor_change
         # The brain is mandatory: fail loudly here, never a silent degraded mode.
         self.anthropic = make_client(settings)
-        verify_model_ids(self.anthropic, self.pricing)
+        verify_model_ids(self.anthropic, self.pricing, self.governor.record)
         verify_prefix_cacheable(self.anthropic, self.pricing)
-        self.tactical = TacticalBrain(self.anthropic, self.pricing)
-        self.director = DirectorBrain(self.anthropic, self.pricing)
+        # Every billed call reports its own cost, whether or not the caller can
+        # use the answer — a schema-rejected decision is still a decision
+        # Anthropic charged for.
+        self.tactical = TacticalBrain(self.anthropic, self.pricing, self.governor.record)
+        self.director = DirectorBrain(self.anthropic, self.pricing, self.governor.record)
+        #: The identified story mission (a missions.json entry) while one is active, else None.
+        #: Set at mission_start from the screen-read title (fallback: zone), cleared at end/fail.
+        self.current_mission: dict | None = None
         self.tactical_cadence = TacticalCadence(self.rng)
         self.director_cadence = DirectorCadence(self.rng)
 
@@ -557,18 +626,55 @@ class Harness:
         self.activities = ActivityPicker(self.rng)
         self.activity_runner = ActivityRunner(self.activities, self.rng)
         self.missions = MissionTracker()
+        self.mission_follower = MissionFollower()
+        #: Decides the SHAPE of the day: roam blocks and mission blocks, and
+        #: when to go and stand in a `mission.starts[]` marker. No model call.
+        self.planner = DayPlanner(self.rng)
         self.stuck = StuckDetector()
+        #: The on-foot half of "stuck": `StuckDetector` needs a vehicle and a
+        #: driving task, so a task that runs forever and pins him on foot was
+        #: invisible to every observer here (measured: 20 s of RUNNING combat,
+        #: 0.2 m of movement).
+        self.task_stall = TaskStallDetector()
         self.stranded = StrandedEscalator()
+        self.threat_latch = ThreatLatch()
+        #: Health across ticks. The relationship field in `nearby.peds` says
+        #: what the engine's relationship GROUPS are, not who is currently
+        #: swinging; losing HP is the signal that cannot lie (behavior.recovery).
+        self.damage = DamageTracker()
+        #: Getting into a car is the START of something. Nothing here used to
+        #: watch the window between `enter_nearest_vehicle -> done` and the car
+        #: actually moving, which is how he sat in a stolen convertible and let
+        #: the owner beat him to death through the open door (2026-09-02).
+        self.vehicle = VehicleController()
+        #: Exactly one owner of movement per tick, logged on every change. The
+        #: explicit successor to the `_threat_has_the_wheel` bool.
+        self.wheel = MovementWheel()
         self.bridge_down = BridgeDownTracker()
         self.bridge_stall = BridgeStallTracker()
         self.restart = GameRestartDetector()
         self.api_backoff = ApiBackoff(rng=self.rng)
+        self.death_recovery = DeathArrestRecovery()
+        self.blocking_screen_watchdog = BlockingScreenWatchdog()
 
         try:
             self.grabber: ScreenGrabber | None = ScreenGrabber()
         except ScreenshotUnavailableError as exc:
             log.warning("screenshots disabled", extra={"kv": {"reason": str(exc)[:140]}})
             self.grabber = None
+        #: Every dxcam touch in the running harness goes through this one
+        #: worker (see `_grab_frame_and_hash`): off the loop thread, deadlined,
+        #: and single-flight, because the capture device is not re-entrant.
+        self.grab_pump = OffLoopGrab(self._grab_frame_and_hash, name="screen-grab")
+        #: Latest real frame + when it was taken. Event screenshots read this
+        #: instead of grabbing again, so no code path outside the worker can
+        #: block the loop on a wedged capture device.
+        self._frame: Any = None
+        self._frame_at = 0.0
+        #: Set by `_on_game_restart`; consumed by the grab worker, so the dxcam
+        #: device rebuild also happens off the loop thread and never races a
+        #: grab that is already running.
+        self._grab_reset_wanted = False
         try:
             from .primitives import Primitives
 
@@ -586,8 +692,14 @@ class Harness:
         self.clips: Any = None
         self._clip_thread: threading.Thread | None = None
 
-        self.counters = {"deaths": 0, "busted": 0, "missions_passed": 0}
-        self.current_goal = "wake up, find wheels, see what the day wants"
+        #: LIFETIME totals, not this process's. The site renders these three
+        #: with no session qualifier and the character page calls the death
+        #: count "the counter on the front page", so a per-process counter
+        #: published 0/0/0 on every watchdog restart — an unlabelled number
+        #: that silently under-reports. `self.counters` is a live mirror of
+        #: `self.totals`; the totals file is the source of truth.
+        self.counters = self.totals.counters()
+        self.current_goal = INITIAL_GOAL
         self._pending_big_event: str | None = None
         self._pending_screenshot_trigger: str | None = None
         self._pending_park = False
@@ -598,12 +710,97 @@ class Harness:
         #: Deliberate stillness (the `wait` action) as a deadline rather than a
         #: blocking sleep, so perception keeps running through it.
         self._quiet_until = 0.0
+        #: Set from the latest /state each tick (`run()`); the single choke
+        #: point `_execute_action` reads before posting ANY bridge task, from
+        #: whichever source (reflex, activity, mission-follow, or the brain's
+        #: own decision) — the game ignores tasks during a cutscene, so none
+        #: get sent, rather than relying on every caller to remember to check.
+        self._cutscene_active = False
+        #: Set from the latest /state each tick, same idiom as
+        #: `_cutscene_active`: `_execute_action` refuses any bridge task while
+        #: this is true (dead/arrested — nothing productive to do until the
+        #: game's own respawn), rather than relying on every caller to
+        #: remember the check.
+        self._player_down = False
+        #: Set by `_reflex` from THIS tick's snapshot: the survival ladder
+        #: (`threat_action`) wants the wheel right now. `_drive_day_plan`,
+        #: `_drive_activities` and `_drive_mission_objective` run later in the
+        #: same tick and read it before posting navigation - their own
+        #: "someone else has the wheel" check reads `state.last_task`, which
+        #: predates the reflex's POST and therefore cannot see it. Without
+        #: this, a mission trip posts `walk_to` straight over the combat task
+        #: issued milliseconds earlier, and ThreatLatch's hold-down then
+        #: suppresses the re-post: the reflex is silently defeated.
+        #: `DayPlanner` has its own copy of this gate for the hostile case
+        #: (`_threat_close`), which by construction cannot see the
+        #: damage-driven path - `relationship` is exactly what that path
+        #: exists to stop depending on.
+        self._threat_has_the_wheel = False
+        self._under_attack = False
+        #: Set each tick from `BlockingScreenWatchdog.blocked`: the game is on
+        #: a modal screen (MISSION FAILED / a menu), the SHVDN script thread is
+        #: not ticking, and therefore every field in `state` is a frozen lie.
+        #: Read by `_execute_action` (nothing will run a task) and by
+        #: `_dynamic_context` (so the brain stops narrating a world it cannot
+        #: see - measured on the broadcast: "Alpha's right there. Staying on
+        #: his six." over a MISSION FAILED banner, for over a minute).
+        self._screen_blocked = False
+        #: True only while `_think` is holding a deliberate timescale dip, so
+        #: the tick-level guard below never fights the harness's own dip. At
+        #: THINKING_TIMESCALE == 1.0 there is no dip and this stays False.
+        self._thinking_dip_active = False
+        self._last_timescale_reassert = 0.0
         self._last_stats = 0.0
         self._last_flush = 0.0
         self._started = time.monotonic()
+        #: Monotonic time of the last tick whose /state we believed. Drives BOTH
+        #: the played-time accumulator and the heartbeat: `heartbeat_at` is the
+        #: site's only ON AIR signal (CONTRACTS §5), so it may only be refreshed
+        #: while there is recent evidence the agent is actually in the world.
+        self._last_live_state_at = 0.0
+        #: ISO timestamp of the current mission's start, and the decision tokens
+        #: spent inside it — the `missions` row's own fields, which nothing used
+        #: to write at all.
+        self._mission_started_iso: str | None = None
+        self._mission_tokens = 0
         self._stop = threading.Event()
 
     # -- infrastructure --------------------------------------------------------
+
+    def _seed_totals_once(self) -> None:
+        """Adopt previously published totals the first time lifetime.json exists.
+
+        One read, one time. If it fails the totals stay UNSEEDED (and start from
+        whatever is on disk, usually zero) and the next start tries again — a
+        seed that silently substituted zeros would freeze an under-reported
+        history onto the front page, which is the bug this whole file exists to
+        fix.
+        """
+        if self.totals.seeded:
+            return
+        seed = self.writer.fetch_lifetime_seed()
+        if seed is None:
+            log.warning(
+                "lifetime totals not seeded: previously published rows could not be "
+                "read. Counters run from what is on disk and the seed is retried "
+                "next start",
+                extra={"kv": {"path": str(self.totals.path)}},
+            )
+            return
+        self.totals.apply_seed(seed)
+        log.info(
+            "lifetime totals seeded from previously published rows",
+            extra={"kv": {**self.totals.counters(), "played_hours": round(self.totals.played_hours, 3)}},
+        )
+
+    def _record_api_usage(self, model_id: str, usage: object) -> None:
+        """Cost sink for the raw (non-decision) calls: the two vision reads.
+
+        They send an image and are billed like anything else; their `usage` used
+        to be read nowhere at all, so the governor throttled on a figure that
+        did not include them.
+        """
+        self.governor.record(cost_of_usage(self.pricing, model_id, usage))
 
     def _on_governor_change(self, old: int, new: int, reason: str) -> None:
         self.writer.record_event("governor_level", {"from": old, "to": new, "reason": reason})
@@ -663,7 +860,28 @@ class Harness:
             return
         self.clips = clips
 
-    def _capture_clip_async(self, event_type: str, caption: str) -> None:
+    def _record_big_event(
+        self, type_: str, payload: dict[str, Any], screenshot_url: str | None = None
+    ) -> int | None:
+        """Record a §4 event and return its row id when one can be known.
+
+        A clip has to point back at the event that triggered it
+        (`clips.event_id`, schema.sql:64), and a batched insert cannot report an
+        id — `returning="minimal"` is what makes the batch cheap. So the two
+        clip-worthy events get a single insert that returns their id, and ONLY
+        when the clip pipeline is actually connected: with OBS absent there is
+        no clip to link and no reason to pay for the extra round trip. `None`
+        means "not known" (offline, or clips off) and the clip row honestly
+        carries a null event_id rather than a made-up one.
+        """
+        if self.clips is not None and type_ in CLIP_EVENTS:
+            return self.writer.insert_event_now(type_, payload, screenshot_url)
+        self.writer.record_event(type_, payload, screenshot_url=screenshot_url)
+        return None
+
+    def _capture_clip_async(
+        self, event_type: str, caption: str, event_id: int | None = None
+    ) -> None:
         """Save + upload a replay off the loop thread. One clip at a time."""
         if self.clips is None or event_type not in CLIP_EVENTS:
             return
@@ -674,7 +892,7 @@ class Harness:
         def worker() -> None:
             try:
                 self.clips.capture_clip(
-                    event_id=None, event_type=event_type, caption=caption
+                    event_id=event_id, event_type=event_type, caption=caption
                 )
             except Exception as exc:  # the clip pipeline never kills the show
                 log.warning(
@@ -690,6 +908,23 @@ class Harness:
         self._clip_thread = threading.Thread(target=worker, name="clip", daemon=True)
         self._clip_thread.start()
 
+    def _clear_current_session(self) -> None:
+        """Remove state/current_session.json on the way out.
+
+        The watchdog's `tools/post_event` reads it to attribute out-of-process
+        events. It was never deleted, so after the harness died every
+        watchdog-posted `bridge_down` kept being stamped with the dead session's
+        id and appeared as a fresh feed item under an OFF AIR banner.
+        """
+        try:
+            (self.settings.state_dir / "current_session.json").unlink(missing_ok=True)
+        except OSError as exc:
+            log.warning(
+                "could not clear current_session.json; post-mortem events may be "
+                "attributed to this session",
+                extra={"kv": {"error": f"{type(exc).__name__}: {exc}"}},
+            )
+
     def _write_session_start(self) -> None:
         (self.settings.state_dir / "current_session.json").write_text(
             json.dumps({"session_id": self.session_id}), encoding="utf-8"
@@ -704,6 +939,13 @@ class Harness:
         self.writer.insert_session(
             {
                 "id": self.session_id,
+                # Explicit, not the column's `default now()`: a session row that
+                # has to wait in the offline queue is inserted whenever Supabase
+                # comes back, and the database would then stamp it with the
+                # RECONNECT time. That is exactly the 2-hour gap between
+                # sessions.started_at and this session's own session_start event
+                # visible in the published data.
+                "started_at": datetime.now(UTC).isoformat(),
                 "game_edition": edition,
                 "harness_version": __version__,
             }
@@ -715,22 +957,72 @@ class Harness:
 
     # -- reflex layer ----------------------------------------------------------
 
+    def _grab_frame_and_hash(self) -> tuple[Any, int, float] | None:
+        """The grab worker's whole body — the ONLY code that touches `grabber`.
+
+        Runs on `grab_pump`'s daemon thread. Keeping every dxcam call (grab AND
+        device rebuild) on that one thread is what makes the off-loop grab
+        safe: Desktop Duplication is not re-entrant, so a second concurrent
+        grab, or a rebuild racing a grab, is undefined behaviour. The objective
+        hash is computed here too, so no image work lands on the loop thread
+        either.
+        """
+        grabber = self.grabber
+        if grabber is None:
+            return None
+        if self._grab_reset_wanted:
+            self._grab_reset_wanted = False
+            grabber.reset()
+        img, captured_at = grabber.grab()
+        return img, objective_region_hash(img), captured_at
+
     def _capture_screenshot(self, name_hint: str) -> tuple[bytes | None, str | None]:
-        if self.grabber is None:
+        """Encode + upload the most recent real frame. Never grabs, never blocks.
+
+        The frame comes from `grab_pump`, which took it earlier in this same
+        tick. Grabbing again here would be a second, unbounded dxcam call on
+        the loop thread — the exact 172 s stall this file now exists to
+        prevent — and a second concurrent caller of a device that does not
+        allow one. If the newest frame is older than FRAME_MAX_AGE_S the event
+        gets no screenshot: a minutes-old picture filed as "this death" would
+        be a lie, and CONTRACTS §4 allows a screenshot to be absent.
+        """
+        if self.grabber is None or self._frame is None:
+            return None, None
+        age = time.monotonic() - self._frame_at
+        if age > FRAME_MAX_AGE_S:
+            log.warning(
+                "screenshot skipped: no fresh frame",
+                extra={"kv": {"hint": name_hint, "age_s": round(age, 1)}},
+            )
             return None, None
         try:
-            jpeg = encode_jpeg(self.grabber.grab())
-            url = self.writer.upload_screenshot(jpeg, name_hint)
-            return jpeg, url
-        except ScreenshotUnavailableError as exc:
-            log.warning("screenshot capture failed", extra={"kv": {"reason": str(exc)[:120]}})
+            jpeg = encode_jpeg(self._frame)
+        except (ScreenshotUnavailableError, OSError) as exc:
+            # PIL reports an unencodable frame as OSError; either way the event
+            # goes out without a picture rather than taking the loop with it.
+            log.warning("screenshot encode failed", extra={"kv": {"reason": str(exc)[:120]}})
             return None, None
+        url = self.writer.upload_screenshot(jpeg, name_hint)
+        return jpeg, url
 
     def _reflex(self, state: GameState, delta: Delta) -> None:
+        # Re-decided from scratch every tick: "the survival ladder wants the
+        # wheel right now". Read by `_drive_day_plan`, `_drive_activities` and
+        # `_drive_mission_objective`, which run later in the same tick and
+        # would otherwise post navigation straight over the combat/cover task
+        # issued a few milliseconds ago from this same snapshot (their own
+        # `last_task` check cannot see it yet - `state` predates the POST).
+        self._threat_has_the_wheel = False
+        self._under_attack = False
+        # One owner of movement per tick, decided here (the reflex layer runs
+        # first) and logged on every change, so a future "he just did nothing"
+        # is readable out of the log rather than guessed at.
+        self.wheel.begin_tick()
         if delta.died:
-            self.counters["deaths"] += 1
+            self.counters["deaths"] = self.totals.bump("deaths")
             _, url = self._capture_screenshot("death")
-            self.writer.record_event(
+            event_id = self._record_big_event(
                 "death",
                 {
                     "cause": "?",
@@ -752,12 +1044,12 @@ class Harness:
             self.memory.log_day("death", f"died on {state.location.street}: {line}")
             self._pending_big_event = "death"
             self._pending_screenshot_trigger = "death"
-            self._capture_clip_async("death", line)
+            self._capture_clip_async("death", line, event_id)
             self._end_activity_if_running("interrupted_by_death")
         if delta.busted:
-            self.counters["busted"] += 1
+            self.counters["busted"] = self.totals.bump("busted")
             _, url = self._capture_screenshot("busted")
-            self.writer.record_event(
+            event_id = self._record_big_event(
                 "busted",
                 {
                     "wanted_at_arrest": delta.wanted_from,
@@ -774,7 +1066,7 @@ class Harness:
             self.memory.log_day("busted", f"busted on {state.location.street}: {line}")
             self._pending_big_event = "busted"
             self._pending_screenshot_trigger = "busted"
-            self._capture_clip_async("busted", line)
+            self._capture_clip_async("busted", line, event_id)
             self._end_activity_if_running("interrupted_by_arrest")
         if delta.wanted_changed:
             url = None
@@ -790,50 +1082,453 @@ class Harness:
                 screenshot_url=url,
             )
 
+        self._handle_mission_events(state, delta)
+
+        # Dead/arrested: notice the game's own respawn and clear stale
+        # mission/goal state before normal behaviour resumes, and log loudly
+        # if "down" runs past a sane ceiling. Never simulates or hurries the
+        # respawn itself (CLAUDE.md rule 5) — only the game's own
+        # dead/arrested flag clearing counts. When a mission failure froze
+        # the script thread on a blocking screen, that respawn only happens
+        # once `_blocking_screen_watchdog` (run() wiring) has pressed it
+        # clear; this class does not know or care which — it only reacts
+        # once `dead`/`arrested` has actually gone back to false.
+        recovery = self.death_recovery.feed(state)
+        if recovery["respawned"]:
+            self.mission_follower.reset()
+            self.threat_latch.reset()
+            # A death is a 200 HP drop and the respawn is a 200 HP jump; either
+            # one left in the window would have him come back swinging at
+            # nobody.
+            self.damage.reset()
+            # He respawns on foot, and the car he died in is gone. Leaving the
+            # machine seated would have the drive-away reflex grade a vehicle
+            # that no longer exists.
+            self.vehicle.reset()
+            self.current_goal = INITIAL_GOAL
+            self._quiet_until = 0.0
+            log.info(
+                "respawn detected; stale mission/goal state cleared",
+                extra={"kv": {"cause": recovery["respawn_cause"]}},
+            )
+
+        if state.player.dead or state.player.arrested:
+            # Nothing physical to do but wait: every reflex below would
+            # either be a no-op on a corpse (StuckDetector's reverse_out) or
+            # actively wrong (exit_vehicle while dead, widening a vehicle
+            # search for cuffed hands). `_drive_activities` already returns
+            # early on this same condition; this is its `_reflex` counterpart.
+            pass
+        else:
+            # Survival ladder, highest priority: the threat reflex answers a
+            # firefight without a model call (CLAUDE.md rule 1's "survival
+            # outranks the mission and free-roam" at reflex speed).
+            #
+            # What it does NOT do any more is short-circuit the rest of this
+            # block. It used to: while any hostile stood within 40 m, the
+            # `else:` below never ran, so `self.stuck.check()` was never
+            # called — the unstick ladder could not fire at all during a
+            # firefight, which is exactly when a car ends up wedged on a kerb.
+            # A combat task and a stuck-car check are independent and both
+            # cheap, and the physical-recovery half posts primitives or
+            # /unstick, not tasks, so it cannot preempt the combat task.
+            #
+            # `flipped_action` is the one exception: it posts `exit_vehicle`,
+            # a real task, so it is computed FIRST and suppresses the threat
+            # post for this tick. Getting out of an upside-down car outranks
+            # shooting from inside one, and posting combat only to preempt it
+            # two lines later would waste the post and start the latch's
+            # hold-down for nothing.
+            flip = flipped_action(state)
+            # One call per tick, here and nowhere else: the tracker's window is
+            # keyed on wall-clock time, and feeding it twice in a tick would
+            # put two samples of the same HP reading in it.
+            under_attack = self.damage.feed(state)
+            # Kept for `_dynamic_context`: the knowledge retrieval wants to know he is
+            # being hit, and the tracker above must not be fed a second time to find out.
+            self._under_attack = under_attack
+
+            # A RUNNING task that has not moved him for 20 s has him pinned
+            # (measured live: `combat_hated_targets_around` against a cat that
+            # can never stop being a hated target). Checked BEFORE the threat
+            # post so a stall and a threat landing on the same tick produce
+            # one post, not two - and so the type that just deadlocked him is
+            # already refused when `threat_action` proposes it again.
+            stalled_type = self.task_stall.feed(
+                state,
+                under_attack=under_attack,
+                suspended=(
+                    self.governor.level >= 3  # L3 is asleep in a parked car (§7)
+                    or time.monotonic() < self._quiet_until  # a deliberate `wait`
+                    # A blocked screen freezes `state`, so "he has not moved"
+                    # is trivially true and means nothing. Exactly one of the
+                    # two interventions may be live at a time, and the
+                    # blocking-screen watchdog owns this one.
+                    or self._screen_blocked
+                ),
+            )
+
+            # The vehicle state machine. Fed EVERY tick, whoever ends up with
+            # the wheel, because its phase is what the threat ladder and the
+            # planners read: `vehicle_blocked` below is the only evidence there
+            # is that a car with healthy bodywork will not actually move
+            # (/state has no engine health, no `driveable`, no obstruction
+            # flag). Fed before `threat_action` for exactly that reason.
+            vehicle_intent = self.vehicle.feed(
+                state,
+                hold=self._vehicle_hold(state),
+                style=self.mood.driving_style(),
+            )
+            vehicle_blocked = self.vehicle.phase in (
+                VehiclePhase.BLOCKED,
+                VehiclePhase.STUCK,
+            )
+
+            threat = threat_action(
+                state, delta, under_attack, vehicle_blocked=vehicle_blocked
+            )
+            if threat is not None and self.task_stall.blocked(threat["type"]):
+                # This exact task type just pinned him. Dropping it here (and
+                # not merely at the POST) matters: `_threat_has_the_wheel`
+                # below must stay honest, or the day plan and the activity
+                # runner would stand down for a survival action that is never
+                # going to be issued.
+                threat = None
+            if stalled_type is not None:
+                self.wheel.claim("threat", f"{stalled_type} pinned him; clearing it")
+            elif threat is not None:
+                # Claimed even when ThreatLatch suppresses the POST: the latch
+                # only ever suppresses because the engine is ALREADY running
+                # exactly this task, so survival really does have the wheel.
+                self.wheel.claim("threat", f"survival: {threat['type']}")
+            if stalled_type is not None:
+                # `stop` only: CONTRACTS §1's own "clear current task -> idle".
+                # What to do INSTEAD is the day plan's / the activity runner's
+                # / the brain's call, and they all get this same tick.
+                self._execute_action("stop", {})
+            elif threat is not None and flip is None and self.threat_latch.should_issue(threat, state):
+                # ThreatLatch, not a fresh post per tick: every POST /task
+                # preempts the running task (CONTRACTS §1), so re-issuing the
+                # same combat order at 3 Hz restarted the engine's aim cycle
+                # three times a second — observed on stream as stuttering
+                # movement and shots that never landed.
+                task_id = self._execute_action(threat["type"], threat["params"])
+                if task_id is not None:
+                    # Only a post that actually reached the game starts the
+                    # hold-down. A task suppressed mid-cutscene or lost to a
+                    # bridge blip never happened, and he must be free to ask
+                    # again on the next tick.
+                    self.threat_latch.issued(threat)
+
+            # The vehicle reflex: drive away the moment he is seated with
+            # nobody steering, and grade whether a drive order actually moved
+            # the world. Strictly below survival — `claim` refuses if the
+            # threat ladder already took this tick — and strictly above every
+            # planner, which is what stops "he got in and sat there" from
+            # depending on a model call that costs seconds and money.
+            if vehicle_intent is not None and self.wheel.claim(
+                "vehicle", f"{vehicle_intent.kind}: {vehicle_intent.reason}"
+            ):
+                task_id = self._execute_action(
+                    vehicle_intent.action["type"], vehicle_intent.action["params"]
+                )
+                self.vehicle.bind_task(task_id)
+
+            stuck_action = self.stuck.check(state)
+            if stuck_action == "reverse_out" and self.primitives is not None:
+                # Through the single choke point rather than straight at
+                # SendInput: raw input that fights a running engine task is
+                # exactly the un-arbitrated case the movement wheel exists to
+                # make visible, and `_execute_action` is where every other
+                # refusal (cutscene, dead, blocking screen) already lives.
+                self.wheel.claim("physical", "stuck: reverse_out")
+                self._execute_action("reverse_out", {"ms": 1400})
+            elif stuck_action == "unstick":
+                moved = self.stuck.try_unstick(self.bridge)
+                if moved is not None:
+                    self.writer.record_event(
+                        "unstick",
+                        {
+                            "distance_m": moved,
+                            "stuck_for_s": state.vehicle.stopped_for_s if state.vehicle else 0.0,
+                        },
+                    )
+                    self._say("That was a legal nudge. Three meters. Judges allow it.")
+            if flip is not None:
+                self.wheel.claim("physical", "upside down: exit_vehicle")
+                self._execute_action(flip["type"], flip["params"])
+
+            if threat is None and vehicle_intent is None:
+                # Free-roam reflexes only when nothing is shooting at him:
+                # these DO post tasks, so running them under fire would
+                # preempt the survival action that was just issued.
+                #
+                # Stranded on foot with no task: widen the vehicle search,
+                # then give up and let the brain be creative about it. NOT
+                # while a mission is active (cutscene or objective phase):
+                # this is what used to widen a "find a vehicle" search (50m ->
+                # 90m -> 140m) while the agent stood inside a scripted cutscene —
+                # free-roam reflexes must not compete with
+                # `_drive_mission_objective`, which owns getting him a car for
+                # a mission on its own terms.
+                if self.missions.in_mission or self.planner.in_mission_block:
+                    # Same rule extended to the day plan's own mission block:
+                    # while the planner is walking him into a start marker it
+                    # owns getting him a car, and a second `enter_nearest_vehicle`
+                    # from here would preempt the first one every tick.
+                    self.stranded.reset()
+                else:
+                    strand = self.stranded.check(state)
+                    if strand is not None and self.wheel.claim(
+                        "stranded", f"on foot with no car: {strand['type']}"
+                    ):
+                        self._execute_action(strand["type"], strand["params"])
+                # Governor L2: reflex drives — keep a wander task alive with
+                # mood style. The activity runner is also reflex-layer
+                # behaviour and outranks this; posting a wander on top of a
+                # running activity step would preempt it. L2 ONLY: at L3 he
+                # is asleep in the car (§7), and a wander posted here would
+                # drive straight out of the scenic parking spot L3 just took
+                # him to — which is how L3 ended up meaning nothing at all.
+                # Also never while a mission is active: mission intent
+                # outranks free-roam intent (`_drive_mission_objective` is
+                # what should be steering).
+                if (
+                    2 <= self.governor.level < 3
+                    and self.activity_runner.current is None
+                    and not self.missions.in_mission
+                    and not self.planner.in_mission_block
+                    and state.player.in_vehicle
+                    and state.last_task.status in ("idle", "done", "failed")
+                ) and self.wheel.claim("governor", "L2: reflex drives"):
+                    self._execute_action("wander_drive", {"style": self.mood.driving_style()})
+
+        # The arbiter's answer, published under the name the three planners
+        # already read. It now means "a REFLEX has the wheel" rather than only
+        # "survival has the wheel": the vehicle reflex has exactly the same
+        # claim on the tick, and a day-plan or mission trip posted over the
+        # drive-away would put him straight back in the parked convertible.
+        self._threat_has_the_wheel = self.wheel.taken_by_reflex()
+
+    def _vehicle_hold(self, state: GameState) -> str | None:
+        """Why sitting still in a car is CORRECT right now — or None.
+
+        The vehicle reflex is deliberately aggressive: it starts him moving
+        within a couple of ticks of reaching a driver's seat. These are the
+        cases where that would be wrong, and every one of them is a real
+        condition rather than a preference. The value is the reason, and it is
+        logged on the phase transition so "why did he sit there" has an answer
+        in the log.
+
+        Not in this list, and deliberately: `mission.active`. During a mission
+        the drive-away half already stands down inside
+        :class:`behavior.vehicle.VehicleController` (mission navigation belongs
+        to `MissionFollower`), but the motion WATCHDOG must keep running — it
+        only ever grades a drive task that is already running, which is exactly
+        the "the mission told him to drive and the car never moved" case.
+        """
+        if state.mission.cutscene_active:
+            # The game owns control through a cutscene and discards ped tasks;
+            # `_execute_action` refuses them anyway. Posting here would also
+            # burn the drive-away hold-down on something that never happened.
+            return "cutscene"
+        if not state.player.control_enabled:
+            # The game has taken the controls for a scripted beat. Nothing
+            # posted now reaches the player, and pretending otherwise is how a
+            # reflex ends up "working" against a screen nobody is driving.
+            return "control_disabled"
+        if state.player.dead or state.player.arrested:
+            # Nothing productive a corpse or a cuffed man can do with a car
+            # (CLAUDE.md rule 5: recovery means waiting for the game's own
+            # respawn).
+            return "player_down"
+        if self._screen_blocked:
+            # The script thread is not ticking, so "stationary" is a frozen lie
+            # and no command would be applied.
+            return "blocking_screen"
+        if time.monotonic() < self._quiet_until:
+            # A deliberate `wait` from the brain. Sitting still IS the action;
+            # overriding it would make the brain's own choice meaningless.
+            return "deliberate_wait"
+        if self.governor.level >= 3:
+            # CONTRACTS §7 L3 is "asleep in the car, parked somewhere scenic".
+            # Driving out of the parking spot is precisely how L3 came to mean
+            # nothing before.
+            return "governor_l3"
+        if self.breaks.on_break:
+            # The humanizer's break: he is away from the wheel on purpose.
+            return "on_break"
+        if self.activity_runner.current is not None and not self.activity_runner.current.finished:
+            # An activity is mid-plan and `_drive_activities` posts its next
+            # step later in THIS tick. Several plans are deliberately still for
+            # a beat — `park_and_watch` is drive_to → stop → look_around →
+            # wait 25 — and the gap between `stop` completing and the `wait`
+            # that follows it is exactly the shape the drive-away fires on. An
+            # activity that has finished is NOT a hold: `steal_nicer_car`'s
+            # whole plan is one `enter_nearest_vehicle`, and driving away from
+            # the moment it declares victory is the entire point of this work.
+            return "activity_step"
+        return None
+
+    # -- decisions -------------------------------------------------------------
+
+    def _read_mission_title(self, jpeg: bytes) -> str | None:
+        """Seam for tests; production reads the title with one Haiku vision call."""
+        return read_mission_title(
+            self.anthropic, self.pricing.tactical.id, jpeg, self._record_api_usage
+        )
+
+    def _read_mission_outcome(self, jpeg: bytes) -> MissionOutcome:
+        """Seam for tests; production reads PASSED/FAILED/UNKNOWN (+ the screen's own reason
+        line) with one Haiku vision call. Called at most once per mission END — as rare as a
+        mission start — never on a tick timer; see brain/vision.py's own cost note."""
+        return read_mission_outcome(
+            self.anthropic, self.pricing.tactical.id, jpeg, self._record_api_usage
+        )
+
+    def _handle_mission_events(self, state: GameState, delta: Delta) -> None:
+        """Turn MissionTracker phase transitions into §4 events, and arm the director's
+        vision trigger for the ones the contract says carry a screenshot. Extracted from
+        `_reflex` so the wiring is unit-testable with a bare Harness."""
         for ev in self.missions.feed(
             state.mission.active,
             state.mission.cutscene_active,
             state.mission.random_event_active,
             delta,
+            state.player.dead,
+            state.player.arrested,
         ):
-            self.writer.record_event(ev.type, ev.payload)
+            url = None
+            if ev.type == "mission_start":
+                # CONTRACTS v1.3: mission_start carries a screenshot. This is the ONE moment the
+                # game draws the objective on screen; /state has no mission name and no objective
+                # text (the field does not exist), so the screen is the only honest source of
+                # "what does this job want". Captured now for the event row AND armed as the
+                # director's vision trigger so its next reaction call can actually read it.
+                # Before this, VISION_TRIGGERS listed mission_start but nothing ever set it, so
+                # v1.3 bought nothing (found by the dossier.txt dossier, 13.8).
+                jpeg, url = self._capture_screenshot("mission_start")
+                self._pending_screenshot_trigger = "mission_start"
+                # `missions.started_at` (§5). Stamped here rather than left to
+                # the database's now(), so a row written or replayed later still
+                # says when the job actually began.
+                self._mission_started_iso = datetime.now(UTC).isoformat()
+                self._mission_tokens = 0
+                # Mission knowledge: /state has no mission name, so read the title the game
+                # prints on screen (one cheap vision call), fall back to the zone, and hand the
+                # brain that mission's walkthrough card via _dynamic_context. None = no card.
+                title = self._read_mission_title(jpeg) if jpeg else None
+                self.current_mission = identify_mission(title, state.location.zone)
+                log.info(
+                    "mission identified" if self.current_mission else "mission not identified",
+                    extra={"kv": {"title_read": title, "zone": state.location.zone,
+                                  "mission": (self.current_mission or {}).get("name")}},
+                )
+            if ev.type == "mission_fail":
+                # CONTRACTS §4: mission_fail carries a screenshot, same as
+                # death/busted — captured now (the moment of failure), not
+                # confused with the SEPARATE vision-trigger screenshot the
+                # director's own reaction call takes later, after he is back
+                # up (`_pending_screenshot_trigger` below). Clearing the
+                # actual blocking screen this usually coincides with is
+                # `_blocking_screen_watchdog`'s job (wired in `run()`), not
+                # this loop's — see DeathArrestRecovery's docstring for why.
+                _, url = self._capture_screenshot("mission_fail")
+                self._pending_screenshot_trigger = "mission_fail"
+            if ev.type in ("mission_end", "mission_fail"):
+                self._write_mission_row(ev.type, ev.payload)
+                self.current_mission = None
+            # The day planner counts attempts and failures off these same
+            # events (back off after MAX_CONSECUTIVE_MISSION_FAILS, owe a roam
+            # block after any mission ends) — fed here so there is exactly one
+            # place mission events are interpreted.
+            self.planner.observe_mission_event(ev.type)
+            self.writer.record_event(ev.type, ev.payload, screenshot_url=url)
             self._pending_big_event = ev.type
 
-        # physical recovery
-        stuck_action = self.stuck.check(state)
-        if stuck_action == "reverse_out" and self.primitives is not None:
-            self.primitives.execute("reverse_out", {"ms": 1400})
-        elif stuck_action == "unstick":
-            moved = self.stuck.try_unstick(self.bridge)
-            if moved is not None:
-                self.writer.record_event(
-                    "unstick",
-                    {"distance_m": moved, "stuck_for_s": state.vehicle.stopped_for_s if state.vehicle else 0.0},
-                )
-                self._say("That was a legal nudge. Three meters. Judges allow it.")
-        flip = flipped_action(state)
-        if flip is not None:
-            self._execute_action(flip["type"], flip["params"])
-        # Stranded on foot with no task: widen the vehicle search, then give up
-        # and let the brain be creative about it.
-        strand = self.stranded.check(state)
-        if strand is not None:
-            self._execute_action(strand["type"], strand["params"])
-        # Governor L2: reflex drives — keep a wander task alive with mood style.
-        # The activity runner is also reflex-layer behaviour and outranks this;
-        # posting a wander on top of a running activity step would preempt it.
-        # L2 ONLY: at L3 he is asleep in the car (§7), and a wander posted here
-        # would drive straight out of the scenic parking spot L3 just took him
-        # to — which is how L3 ended up meaning nothing at all.
-        if (
-            2 <= self.governor.level < 3
-            and self.activity_runner.current is None
-            and state.player.in_vehicle
-            and state.last_task.status in ("idle", "done", "failed")
-        ):
-            self._execute_action("wander_drive", {"style": self.mood.driving_style()})
+        if getattr(self.missions, "pending_outcome_read", False):
+            # The one ending `MissionTracker.feed()` cannot call from flags
+            # alone: the mission ended with the player neither dead nor
+            # arrested — the most common failure in the whole game (a follow
+            # target driving away: "MISSION FAILED / Franklin lost Lamar")
+            # looks exactly like this, and used to go entirely unreported.
+            # Reuse the SAME screenshot path mission_start already uses (one
+            # dxcam grab already happened this tick — see `_capture_screenshot`'s
+            # own "never grabs, never blocks" rule) and read PASSED/FAILED/
+            # UNKNOWN off it. This is one vision call per mission END, exactly
+            # as rare as mission_start's own call — bounded the same way v1.3
+            # bounded that one; it must never run on a tick timer.
+            jpeg, url = self._capture_screenshot("mission_end")
+            result = self._read_mission_outcome(jpeg) if jpeg else MissionOutcome("unknown", None)
+            log.info(
+                "mission-end screen read",
+                extra={"kv": {"outcome": result.outcome, "reason_text": result.reason_text}},
+            )
+            resolved = self.missions.resolve_outcome(result.outcome, result.reason_text)
+            if resolved is not None:
+                if resolved.type == "mission_fail":
+                    self._pending_screenshot_trigger = "mission_fail"
+                else:
+                    # A CONFIRMED pass, from the screen itself — the only place
+                    # `missions_passed` may move (CLAUDE.md rule 1: never
+                    # guessed, never incremented on anything but this read).
+                    # The site's live counters and its opengraph image both
+                    # read this same counter.
+                    self.counters["missions_passed"] = self.totals.bump("missions_passed")
+                    self.bus.publish("counters", dict(self.counters))
+                    self._pending_screenshot_trigger = "mission_end"
+                # Same clearing the fast dead/arrested path already does for
+                # mission_end/mission_fail: the walkthrough card no longer
+                # applies once the job is over. `mission_follower` needs no
+                # explicit reset here — `MissionFollower.plan()` already
+                # resets itself the instant `state.mission.active` reads
+                # False, which it already does on THIS tick's state (mission_
+                # ended IS that transition). `current_goal` is deliberately
+                # left alone, matching the existing dead/arrested path below —
+                # only the respawn path resets it, because only a respawn
+                # leaves a genuinely stale pre-death goal behind.
+                self._write_mission_row(resolved.type, resolved.payload)
+                self.current_mission = None
+                self.planner.observe_mission_event(resolved.type)
+                self.writer.record_event(resolved.type, resolved.payload, screenshot_url=url)
+                self._pending_big_event = resolved.type
 
-    # -- decisions -------------------------------------------------------------
+    def _write_mission_row(self, event_type: str, payload: dict[str, Any]) -> None:
+        """One `missions` row per mission that ended with a KNOWN outcome (§5).
+
+        Nothing in this package ever wrote this table, so /missions could only
+        ever be empty while promising "every story mission the agent has attempted,
+        passed, or fumbled". Every field here is an observation, not an
+        inference: the outcome is the one `_handle_mission_events` already
+        reported to the events feed (a MISSION PASSED/FAILED banner read off the
+        screen, or the game's own dead/arrested flags), `tokens` is the real
+        decision-token spend inside the mission, and `summary` is the game's own
+        reason line when it printed one. A mission that ended with an
+        unreadable screen gets NO row — the same rule the counter follows,
+        because "ended somehow" is not an outcome anyone can publish.
+        """
+        if self._mission_started_iso is None:
+            # No observed start (the harness or the game restarted mid-mission):
+            # a row with a guessed started_at would put a false duration on the
+            # page, so nothing is written.
+            log.info("mission row skipped: this mission's start was never observed")
+            return
+        name = (self.current_mission or {}).get("name") or str(payload.get("name") or "unknown")
+        row: dict[str, Any] = {
+            "name": name,
+            "started_at": self._mission_started_iso,
+            "ended_at": datetime.now(UTC).isoformat(),
+            "outcome": "passed" if event_type == "mission_end" else "failed",
+            "attempts": int(payload.get("attempts") or payload.get("attempt") or 1),
+            "deaths": int(payload.get("deaths", self.missions.deaths_this_mission) or 0),
+            "tokens": self._mission_tokens,
+        }
+        reason = payload.get("reason_text")
+        if reason:
+            row["summary"] = str(reason)
+        self.writer.insert_mission(row)
+        self._mission_started_iso = None
+        self._mission_tokens = 0
 
     def _dynamic_context(self, state: GameState, delta: Delta, trigger: str, layer: str) -> str:
         parts = [
@@ -841,8 +1536,39 @@ class Harness:
             f"GOAL: {self.current_goal}",
             f"MOOD (tracker): {self.mood.mood}, held {self.mood.held_for_s():.0f}s",
             f"GOVERNOR: L{self.governor.level} ({LEVEL_NOTES[self.governor.level]})",
+            (
+                "BLOCKED: the game is on a modal screen - a mission has probably "
+                "failed and the retry prompt is up. The world snapshot below is "
+                "FROZEN and no longer true: do not narrate the world, you cannot "
+                "see it. Say something about being stuck on a menu, or say "
+                "nothing much at all."
+                if self._screen_blocked
+                else ""
+            ),
             self.missions.brain_note(),
+            self.mission_follower.note(),
+            self.planner.note(),
             self.activity_runner.note(),
+            (mission_card(self.current_mission) if self.current_mission else ""),
+            # Retrieved GTA V knowledge for THIS situation, not the whole encyclopedia:
+            # 651 researched items live on disk and `select` returns the handful that match
+            # the current state (wanted level, hostiles, vehicle type, mission phase). Kept
+            # in the DYNAMIC half deliberately - it changes every tick, so putting it in the
+            # cached prefix would invalidate the cache on every call.
+            render(
+                select(
+                    state,
+                    mission=self.current_mission,
+                    damage_taken=self._under_attack,
+                    budget_chars=KNOWLEDGE_BUDGET_CHARS,
+                ),
+                budget_chars=KNOWLEDGE_BUDGET_CHARS,
+            ),
+            (
+                mission_state_hint((self.current_mission or {}).get("name"), state) or ""
+                if self.current_mission
+                else ""
+            ),
             "STATE: " + state.model_dump_json(by_alias=True),
             "CHANGES: "
             + (
@@ -861,7 +1587,7 @@ class Harness:
                 f"COST: ${self.governor.hourly_spend_usd():.2f} this hour of "
                 f"${self.settings.hourly_cap_usd:.2f} cap"
             )
-        return "\n\n".join(parts)
+        return "\n\n".join(p for p in parts if p)
 
     def _think(self, layer: str, state: GameState, delta: Delta, trigger: str) -> DecisionResult | None:
         """One decision with the timescale dip; None when the call failed."""
@@ -869,13 +1595,20 @@ class Harness:
             return None
         dipped = False
         try:
-            try:
-                self.bridge.set_timescale(THINKING_TIMESCALE)
-                dipped = True
-            except BridgeError:
-                # Down, or up and not ready (v1.2 503): thinking is still
-                # allowed, the world just won't slow down for it.
-                pass
+            if THINKING_TIMESCALE < NORMAL_TIMESCALE:
+                # Only ever entered if someone deliberately re-enables the dip.
+                # At the shipped value (1.0) the world simply keeps running at
+                # normal speed while he thinks, exactly as it does for a human
+                # player, and POST /timescale is never called — which also
+                # removes the 503-on-restore path that left the game at 0.15x.
+                try:
+                    self.bridge.set_timescale(THINKING_TIMESCALE)
+                    dipped = True
+                    self._thinking_dip_active = True
+                except BridgeError:
+                    # Down, or up and not ready (v1.2 503): thinking is still
+                    # allowed, the world just won't slow down for it.
+                    pass
             context = self._dynamic_context(state, delta, trigger, layer)
             if layer == "tactical":
                 result = self.tactical.decide(context)
@@ -897,26 +1630,43 @@ class Harness:
                 "decision failed; reflex keeps control",
                 extra={"kv": {"layer": layer, "cause": cause, "error": str(exc)[:160]}},
             )
-            self.api_backoff.record_failure(cause, exc.__cause__ or exc)
+            if cause != "invalid_output":
+                # H2: a decision OUR schema rejected is not an API outage, and
+                # charging it to the outage backoff is what turned a run of
+                # pydantic rejections into an escalating 1.8 -> 4.1 -> 6.8 ->
+                # 16.5 s silence while the API was perfectly healthy — the
+                # "he just did nothing" stretches in the session logs. The
+                # brain already retried it once with the violation fed back;
+                # beyond that the reflex layer keeps control and the next
+                # cadence tick simply tries again at full speed.
+                self.api_backoff.record_failure(cause, exc.__cause__ or exc)
             return None
         finally:
             if dipped:
                 try:
-                    self.bridge.set_timescale(1.0)
+                    self.bridge.set_timescale(NORMAL_TIMESCALE)
                 except BridgeError as exc:
-                    # Leaving the world at 0.15x would be a visibly broken show,
-                    # so this is loud — but it must not raise out of `finally`
-                    # and take the loop with it.
+                    # Leaving the world in slow motion would be a visibly broken
+                    # show, so this is loud — but it must not raise out of
+                    # `finally` and take the loop with it. `_guard_timescale`
+                    # picks it up on a later tick; nothing used to.
                     log.warning(
-                        "could not restore timescale; watchdog will catch it",
+                        "could not restore timescale; the tick guard will re-assert it",
                         extra={"kv": {"error": str(exc)[:160]}},
                     )
+                finally:
+                    self._thinking_dip_active = False
 
     def _apply_decision(self, layer: str, result: DecisionResult) -> None:
         d: DecisionModel = result.decision
         if layer == "director":
             self.current_goal = d.goal
-        self.governor.record(result.cost_usd)
+        # NOT governor.record() here any more: the cost is recorded by the call
+        # that incurred it (brain.tactical.BilledCall), so a rejected or
+        # retried decision is billed to the governor exactly like a used one.
+        # Tokens spent inside a mission are that mission's `tokens` column.
+        if self.missions.in_mission:
+            self._mission_tokens += result.input_tokens + result.output_tokens
         self.writer.record_decision(
             {
                 "layer": layer,
@@ -924,7 +1674,7 @@ class Harness:
                 "say": d.say,
                 "mood": d.mood,
                 "goal": d.goal,
-                "action": d.action.model_dump(),
+                "action": {"type": d.action.type, "params": d.action.wire_params()},
                 "confidence": d.confidence,
                 "model": result.model,
                 "input_tokens": result.input_tokens,
@@ -943,13 +1693,51 @@ class Harness:
         if d.action.type in BRIDGE_TASKS:
             self._end_activity_if_running("preempted_by_decision")
         time.sleep(reaction_delay(self.rng))  # humanizer: 300-900 ms reaction
-        self._execute_action(d.action.type, d.action.params)
+        # Registered, not arbitrated: the brain has no stand-down rule against
+        # the reflex layer today and inventing one here would be a silent
+        # behaviour change. A collision is logged as a conflict instead, which
+        # is the diagnosis the old single bool could never produce.
+        self.wheel.force("brain", f"{layer} decision: {d.action.type}")
+        self._execute_action(d.action.type, d.action.wire_params())
 
     def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
         """Run one decision-schema action. Returns the bridge task id when the
         action posted a task (POST /task's `task_id` is authoritative — the
         caller must match on it, never on whatever id the next snapshot shows),
         and None for primitives, quiet periods and failures."""
+        if action_type in BRIDGE_TASKS and (self._cutscene_active or self._player_down):
+            # CONTRACTS §1 bridge tasks map to the engine's own ped-task
+            # natives; the engine ignores them while a cutscene owns control,
+            # so posting one would just be a wasted HTTP round trip (and, for
+            # a brain decision, wasted API spend on an action nobody applies).
+            # Dead/arrested is the same story: there is nothing productive a
+            # corpse or a cuffed man can do with a task, and posting one is a
+            # wasted call for no effect (CLAUDE.md rule 5 — recovery means
+            # waiting for the game's own respawn, never cheating death, so
+            # this never substitutes a fake action for that wait). One choke
+            # point catches every source — reflex, activity runner,
+            # mission-follow, and the brain's own decision — rather than
+            # relying on each caller to remember the check.
+            reason = "cutscene playing" if self._cutscene_active else "player down (dead/arrested)"
+            log.info(f"task suppressed: {reason}", extra={"kv": {"type": action_type}})
+            return None
+        if action_type in BRIDGE_TASKS and self._screen_blocked:
+            # The script thread is not ticking, so the game will not apply a
+            # queued command at all (that is the same `game_thread_stalled`
+            # condition CONTRACTS v1.2 names). Posting is pure noise, and the
+            # binding callers do would latch onto a task that never starts.
+            log.info(
+                "task suppressed: the game is on a modal/blocking screen",
+                extra={"kv": {"type": action_type}},
+            )
+            return None
+        if action_type in BRIDGE_TASKS and self.task_stall.blocked(action_type):
+            # The same choke point, for the same reason: a task type that has
+            # just been measured pinning him in place must not be re-posted by
+            # ANY layer for a short while, or he walks straight back into the
+            # identical deadlock on the next tick. `TaskStallDetector.blocked`
+            # logs this once per episode rather than at the poll rate.
+            return None
         try:
             if action_type == "wait":
                 # A long `wait` must NOT block the loop: perception has to keep
@@ -1018,6 +1806,11 @@ class Harness:
 
     def _end_activity_if_running(self, outcome: str) -> None:
         ended = self.activity_runner.finish(outcome)
+        # Always told, even when nothing was running: the planner's "is an
+        # activity still going" flag is what keeps a roam block from being cut
+        # short mid-set-piece, and a flag that only clears on the happy path is
+        # a flag that eventually sticks on.
+        self.planner.roam_activity_ended()
         if ended is None:
             return
         _, payload = ended
@@ -1032,6 +1825,12 @@ class Harness:
         """
         if self.governor.level >= 3 or self.breaks.on_break:
             return
+        if self._threat_has_the_wheel:
+            # Survival owns the tick; an activity step posted now would preempt
+            # the combat/cover task `_reflex` just issued. The activity is NOT
+            # ended - a firefight is seconds, and the runner already tolerates
+            # its step being preempted - it simply does not advance this tick.
+            return
         if state.player.dead or state.player.arrested:
             return
         if self.missions.in_mission or state.player.wanted > 0:
@@ -1039,6 +1838,15 @@ class Harness:
                 self._end_activity_if_running(
                     "mission" if self.missions.in_mission else "wanted"
                 )
+            return
+        if self.planner.in_mission_block:
+            # The day plan is walking him into a mission-start marker; a
+            # free-roam activity here would post a drive task straight over the
+            # top of that navigation. The roam block is over — end the activity
+            # honestly rather than letting the runner report progress on a plan
+            # that no longer has the wheel.
+            if self.activity_runner.current is not None:
+                self._end_activity_if_running("day_plan_mission_block")
             return
 
         if time.monotonic() < self._quiet_until:
@@ -1056,10 +1864,18 @@ class Harness:
 
         if not self.activity_runner.due():
             return
-        started = self.activity_runner.start(self.mood.mood, self.mood.driving_style())
+        # The day planner's roam block names the idea it fancies; the picker
+        # still owns cooldowns, the chaos budget and category variety, so this
+        # is a preference, not an order (ActivityPicker.peek).
+        started = self.activity_runner.start(
+            self.mood.mood, self.mood.driving_style(), self.planner.roam_preference
+        )
         if started is None:
             return
         activity, first = started
+        # Tell the planner what ACTUALLY started, so its note reports the real
+        # idea rather than the one it asked for.
+        self.planner.roam_activity_started(activity.name)
         self.writer.record_event(
             "activity_start", {"activity": activity.name, "params": dict(first["params"])}
         )
@@ -1073,6 +1889,7 @@ class Harness:
         `last_task.id` is what stops the runner from latching the PREVIOUS task
         (3 Hz poll vs a 60 Hz game thread) and skipping the step.
         """
+        self.wheel.force("activity", step["type"])
         task_id = self._execute_action(step["type"], step["params"])
         if step["type"] in BRIDGE_TASKS and task_id is None:
             # The step never reached the game (bridge down / not ready). Nothing
@@ -1081,6 +1898,72 @@ class Harness:
             self._end_activity_if_running("bridge_task_lost")
             return
         self.activity_runner.bind_step_task(task_id)
+
+    # -- the day plan ------------------------------------------------------------
+
+    def _drive_day_plan(self, state: GameState) -> None:
+        """Advance the day plan: roam blocks, and the trip to a mission-start marker.
+
+        Runs BEFORE `_drive_activities` so the block state the activity gate
+        reads is this tick's, not last tick's — otherwise the tick the planner
+        switches to a mission block is also a tick on which an activity can
+        start, only to be ended one tick later.
+
+        `update()` itself is called unconditionally (it is the state machine: a
+        death mid-trip has to abort the block and say so even though nothing
+        will be posted). Only the POST is gated, and only on the one condition
+        the planner cannot see: a deliberate `wait` the brain is still holding.
+        Everything else — dead, arrested, wanted, cutscene, someone else's task
+        already running — the planner refuses on its own.
+        """
+        if self.governor.level >= 3:
+            # L3 is "asleep in the car" (CONTRACTS §7). A day plan that drove
+            # off to a mission marker while he is meant to be parked and silent
+            # is the same bug the L2 wander reflex had: it makes L3 mean
+            # nothing. The plan wakes up when the hourly window resets.
+            return
+        outcome = self.planner.update(state, self.mood.mood, self.missions.in_mission)
+        for event_type, payload in outcome.events:
+            self.writer.record_event(event_type, payload)
+        if outcome.task is None:
+            return
+        if self._threat_has_the_wheel:
+            # The survival ladder claimed this tick a few milliseconds ago.
+            # `update()` above still ran (it is the state machine - a death
+            # mid-trip has to end the block honestly); only the POST is held.
+            return
+        if time.monotonic() < self._quiet_until:
+            return  # honour a deliberate `wait` from the brain
+        self.wheel.force("day_plan", outcome.task["type"])
+        task_id = self._execute_action(outcome.task["type"], outcome.task["params"])
+        self.planner.bind_task(task_id)
+
+    # -- mission following -------------------------------------------------------
+
+    def _drive_mission_objective(self, state: GameState) -> None:
+        """Structural pursuit of `mission.objective_blip` (WP-H item 1).
+
+        Called after the brain has had first refusal on the tick (same
+        ordering rule as `_drive_activities`), so a fresh decision is never
+        posted and then immediately preempted by this reflex a moment later.
+        `MissionFollower.plan` already returns None during a cutscene, when
+        there is no objective, when it has backed off a stuck objective, or
+        when something else already has the wheel — this method only has to
+        act on what comes back, and to respect a brain-issued `wait` the same
+        way `_drive_activities` does.
+        """
+        if state.player.dead or state.player.arrested:
+            return  # nothing to steer toward on a corpse or in a cell
+        if self._threat_has_the_wheel:
+            return  # survival outranks the objective; see `_threat_has_the_wheel`
+        if time.monotonic() < self._quiet_until:
+            return  # honour a deliberate `wait` from the brain
+        step = self.mission_follower.plan(state)
+        if step is None:
+            return
+        self.wheel.force("mission", step["type"])
+        task_id = self._execute_action(step["type"], step["params"])
+        self.mission_follower.bind_task(task_id)
 
     # -- governor L3 -----------------------------------------------------------
 
@@ -1148,6 +2031,113 @@ class Harness:
             "Parked. Engine off, meter running down. Back when the hour resets.", "chill"
         )
 
+    # -- screen capture --------------------------------------------------------
+
+    def _pump_screen_grab(self) -> int | None:
+        """One tick's worth of screen capture. Bounded; never blocks the loop.
+
+        Returns the HUD objective-region hash when a frame arrived, else None
+        (no frame this tick simply means no HUD-change signal this tick — the
+        perceptor keeps the previous hash and compares across the gap). The
+        newest frame is also kept for `_capture_screenshot`.
+
+        The grab used to be called straight from the loop. On the real server
+        the display flipped modes, dxcam entered its own 90-attempt recovery
+        INSIDE `grab()`, and the loop produced nothing at all for 172 s
+        (16:53:53 -> 16:56:45) and 76 s earlier the same session: no
+        perception, no reflexes, no decisions, no heartbeat. Screenshots are a
+        nice-to-have; the loop is the show.
+        """
+        if self.grabber is None:
+            return None
+        result = self.grab_pump.poll()
+        if self.grab_pump.dead:
+            # Ten failures inside a minute: this display is not coming back
+            # during this session. Say so once, loudly, and carry on without
+            # screenshots rather than paying for a dead device every tick.
+            log.error(
+                "screen capture disabled for the rest of this session; the show "
+                "continues without screenshots, and MISSIONS can no longer move "
+                "(a pass is only ever counted off a real MISSION PASSED banner)",
+                extra={"kv": {"reason": self.grab_pump.last_reason[:200]}},
+            )
+            # Said out loud, once, for the same reason the L3 park says its own
+            # honest note: from here on the mission counter can only under-count,
+            # and a counter that quietly stops moving looks exactly like a
+            # counter that has nothing to count.
+            self._say(
+                "Lost the screen feed. I can still play — I just can't prove a "
+                "mission passed any more.",
+                "bored",
+            )
+            self.grabber = None
+            self._frame = None
+            return None
+        if result is None:
+            return None
+        frame, objective_hash, captured_at = result
+        self._frame = frame
+        # The grabber's own capture time, NOT now: `grab()` hands back the
+        # cached frame when dxcam has nothing new, and stamping that "now" made
+        # FRAME_MAX_AGE_S measure "time since the pump last returned something"
+        # instead of "time since a new frame was captured". On this box the
+        # display stops producing frames whenever the game loses focus, so the
+        # difference is the everyday case, not a corner one: an unchanged
+        # screen now correctly reads as no fresh screenshot.
+        self._frame_at = captured_at
+        return objective_hash
+
+    # -- timescale guard -------------------------------------------------------
+
+    def _guard_timescale(self, state: GameState) -> None:
+        """Put the world back to normal speed if something left it slowed.
+
+        The observed failure: `_think` dipped the world to 0.15x, the restore
+        POST came back `503 game_thread_stalled`, and the code logged "watchdog
+        will catch it" — but there was no watchdog. Nothing anywhere re-read
+        `world.timescale`, so the game stayed at 15% speed for minutes at a
+        time (four such restores in one session's logs: 16:45:56, 17:14:10,
+        17:19:30, 17:26:23). That is the "slow motion" the stream showed.
+
+        `/state.world.timescale` is in every snapshot, so this is a free check
+        every tick. It is deliberately narrow:
+
+        * never while the harness is holding its own dip;
+        * never below TIMESCALE_GAME_FLOOR — POST /timescale is clamped to
+          0.1-1.0 bridge-side, so anything under 0.1 (the death slow-motion
+          sits near 0.075) is the GAME's effect and not ours to overrule;
+        * never while dead or in a cutscene, the two states the game slows
+          time for on purpose;
+        * at most one POST every TIMESCALE_REASSERT_INTERVAL_S.
+
+        Restoring 1.0 is putting the game back to the speed it ships at — it
+        is not a cheat and cannot be one: the bridge clamps at 1.0, so there
+        is no "faster than normal" to ask for (CLAUDE.md rule 5).
+        """
+        if self._thinking_dip_active:
+            return
+        timescale = state.world.timescale
+        if timescale >= TIMESCALE_OK_ABOVE or timescale < TIMESCALE_GAME_FLOOR:
+            return
+        if state.player.dead or state.mission.cutscene_active:
+            return
+        now = time.monotonic()
+        if now - self._last_timescale_reassert < TIMESCALE_REASSERT_INTERVAL_S:
+            return
+        self._last_timescale_reassert = now
+        try:
+            self.bridge.set_timescale(NORMAL_TIMESCALE)
+        except BridgeError as exc:
+            log.warning(
+                "world is in slow motion and the re-assert did not land",
+                extra={"kv": {"timescale": round(timescale, 3), "error": str(exc)[:160]}},
+            )
+            return
+        log.warning(
+            "world was left in slow motion; re-asserted normal time",
+            extra={"kv": {"timescale": round(timescale, 3)}},
+        )
+
     def _on_game_restart(self) -> None:
         """Wipe every observer that compares against a pre-crash snapshot.
 
@@ -1157,48 +2147,119 @@ class Harness:
         """
         self.perceptor = Perceptor()
         self.stuck = StuckDetector()
+        self.task_stall = TaskStallDetector()
         self.stranded = StrandedEscalator()
         self.missions = MissionTracker()
+        self.mission_follower = MissionFollower()
+        self.planner = DayPlanner(self.rng)
+        self.death_recovery = DeathArrestRecovery()
+        self.blocking_screen_watchdog = BlockingScreenWatchdog()
+        self._screen_blocked = False
+        self.threat_latch = ThreatLatch()
+        self.damage = DamageTracker()
+        # Vehicle handles are ephemeral by contract: the car he was in does not
+        # exist behind a new game process, so every timer keyed on its handle
+        # is void. Same reason the trackers above are rebuilt.
+        self.vehicle.reset()
+        self.wheel.reset()
+        self.current_mission = None
+        self.current_goal = INITIAL_GOAL
+        # A mission that was in flight when the game died has no honest ending
+        # to report, so its half-built row is dropped rather than closed with a
+        # guessed outcome. The lifetime counters are deliberately NOT reset:
+        # a relaunch does not un-die a death.
+        self._mission_started_iso = None
+        self._mission_tokens = 0
         self._end_activity_if_running("game_restarted")
         self._pending_screenshot_trigger = None
-        if self.grabber is not None:
-            try:
-                self.grabber.reset()
-            except ScreenshotUnavailableError as exc:
-                log.warning(
-                    "screen capture lost across the restart",
-                    extra={"kv": {"reason": str(exc)[:160]}},
-                )
-                self.grabber = None
+        # The dxcam device has to be rebuilt after a relaunch, but that rebuild
+        # blocks exactly like a grab does — so it is REQUESTED here and
+        # performed by the grab worker, which is the one thread allowed to
+        # touch the capture device. A rebuild that fails surfaces as a counted
+        # grab failure and, if it keeps failing, disables capture below.
+        self._grab_reset_wanted = self.grabber is not None
+        self._frame = None
+        self._frame_at = 0.0
         self._say("Something rebooted. It wasn't me. Where's my car.")
 
     # -- housekeeping ----------------------------------------------------------
 
+    def _believe_state(self, state: GameState | None) -> bool:
+        """Is THIS tick's snapshot one we are willing to publish as current?
+
+        No snapshot at all (the bridge is up but has none — a loading screen or
+        a stalled game) is not one. Neither is a snapshot taken while
+        `BlockingScreenWatchdog` says the script thread has stopped: the bridge
+        keeps answering 200 with the same frozen `tick`, so health, cash, street
+        and zone are last-known values, not current ones, and republishing them
+        under a fresh timestamp is publishing a number the game is not producing.
+        """
+        return state is not None and not self._screen_blocked
+
+    def _accrue_play_time(self, live: bool) -> None:
+        """Add this tick's elapsed time to `hours_alive` — only if it was played.
+
+        `hours_alive` used to be `now - process start`, which counted the entire
+        duration of a game crash (the gap reappeared as a jump the moment the
+        bridge answered again) and every second before the bridge had ever
+        answered at all. Accumulating per believed tick, capped at
+        PLAY_GAP_MAX_S, means the number can only ever be time this loop watched
+        the game be up.
+        """
+        now = time.monotonic()
+        if not live:
+            self._last_live_state_at = 0.0  # the streak is broken; start fresh
+            return
+        if self._last_live_state_at:
+            self.totals.add_play_seconds(now - self._last_live_state_at)
+        self._last_live_state_at = now
+
     def _heartbeat(self, state: GameState | None) -> None:
+        live = self._believe_state(state)
+        self._accrue_play_time(live)
         now = time.monotonic()
         if now - self._last_stats < STATS_INTERVAL_S:
             return
+        if not live:
+            # `heartbeat_at` is the site's ONLY liveness signal (CONTRACTS §5),
+            # so it may only be refreshed while we can vouch for the game being
+            # up. It used to be written on the no-snapshot path too, which put a
+            # fresh "ON THE AIR" next to an empty HUD for as long as the game
+            # was stuck. Nothing is written now: the last honest row simply ages
+            # out, and the site says OFF AIR after its own 60 s threshold — long
+            # enough that a normal loading screen never trips it.
+            log.info(
+                "heartbeat withheld: no current snapshot to publish",
+                extra={"kv": {"blocked_screen": self._screen_blocked, "state": state is not None}},
+            )
+            return
+        assert state is not None  # `live` implies it; keeps the type checker honest
         self._last_stats = now
-        hud: dict[str, Any] = {}
-        if state is not None:
-            hud = {
-                "health": state.player.health,
-                "armor": state.player.armor,
-                "wanted": state.player.wanted,
-                "cash": state.player.cash,
-                "vehicle": state.vehicle.display_name if state.vehicle else None,
-                "street": state.location.street,
-                "zone": state.location.zone,
-                "clock": state.world.clock,
-                "weather": state.world.weather,
-            }
+        hud: dict[str, Any] = {
+            "health": state.player.health,
+            "armor": state.player.armor,
+            "wanted": state.player.wanted,
+            "cash": state.player.cash,
+            "vehicle": state.vehicle.display_name if state.vehicle else None,
+            "street": state.location.street,
+            "zone": state.location.zone,
+            "clock": state.world.clock,
+            "weather": state.world.weather,
+        }
+        self.totals.adopt_budget(self.governor.snapshot())
+        self.totals.save()
         self.writer.upsert_stats(
             {
                 "deaths": self.counters["deaths"],
                 "busted": self.counters["busted"],
                 "missions_passed": self.counters["missions_passed"],
-                "hours_alive": round((now - self._started) / 3600.0, 3),
-                "cost_today_usd": round(self.governor.total_usd(), 4),
+                # Time the game was observed up and answering — not process
+                # uptime, and lifetime rather than per-process, like the
+                # counters beside it on the page.
+                "hours_alive": round(self.totals.played_hours, 3),
+                # Really today (UTC), and really the trailing hour: see
+                # BudgetGovernor.day_usd / cost_per_hour_usd.
+                "cost_today_usd": round(self.governor.day_usd(), 4),
                 "cost_per_hour_usd": round(self.governor.cost_per_hour_usd(), 4),
                 "governor_level": self.governor.level,
                 # drives the site's offline banner: stale > 60 s => offline (§5)
@@ -1311,11 +2372,47 @@ class Harness:
                     self._maybe_flush()
                     continue
 
-                objective_hash = None
-                if self.grabber is not None:
-                    # No frame this tick just means no HUD-hash signal this tick.
-                    with contextlib.suppress(ScreenshotUnavailableError):
-                        objective_hash = objective_region_hash(self.grabber.grab())
+                # Runs unconditionally, every tick, ahead of everything else:
+                # a frozen script thread (pause menu / MISSION FAILED / retry
+                # prompt) means `state` itself is stale, so this cannot wait
+                # its turn behind dead/arrested/cutscene gating built for a
+                # ticking game. Bridge tasks cannot help here — only a real
+                # SendInput keypress can (confirmed live: SendKeys does
+                # nothing, GTA V discards synthetic window messages).
+                stall_key = self.blocking_screen_watchdog.feed(state)
+                was_blocked, self._screen_blocked = (
+                    self._screen_blocked,
+                    self.blocking_screen_watchdog.blocked,
+                )
+                if self._screen_blocked and not was_blocked:
+                    # Entering the blocked state, once. Whatever mission he was
+                    # in is over or about to be retried, and the objective he
+                    # was chasing is stale - the measured failure was a tail of
+                    # a companion who was already gone. Drop both so nothing
+                    # resumes chasing a dead objective after the retry.
+                    self.current_mission = None
+                    self.mission_follower.reset()
+                    log.warning(
+                        "the game appears to be on a modal screen (a mission has "
+                        "probably failed); /state is frozen, so tasks are "
+                        "suppressed and stale mission context is cleared"
+                    )
+                if stall_key is not None:
+                    if self.primitives is not None:
+                        self.primitives.press_key(stall_key)
+                    else:
+                        log.error(
+                            "script thread appears stalled but SendInput is "
+                            "unavailable on this platform; cannot clear the "
+                            "blocking screen",
+                            extra={"kv": {"key": stall_key}},
+                        )
+
+                # Normal speed is the show's default; put it back if anything
+                # left the world slowed and the game is not the one doing it.
+                self._guard_timescale(state)
+
+                objective_hash = self._pump_screen_grab()
                 delta = self.perceptor.observe(state, objective_hash)
                 self.mood.observe("quiet")
 
@@ -1324,6 +2421,11 @@ class Harness:
                     self._maybe_flush()
                     self._stop.wait(5.0)
                     continue
+
+                # Read once per tick; `_execute_action` is the single choke
+                # point that refuses any bridge task while this is true.
+                self._cutscene_active = state.mission.cutscene_active
+                self._player_down = state.player.dead or state.player.arrested
 
                 self._reflex(state, delta)
 
@@ -1339,35 +2441,58 @@ class Harness:
 
                 now = time.monotonic()
                 level = self.governor.level
-                big_event, self._pending_big_event = self._pending_big_event, None
 
-                director_trigger = self.director_cadence.should_fire(now, big_event, level)
-                if director_trigger is not None:
-                    result = self._think("director", state, delta, director_trigger)
-                    self.director_cadence.fired(now)
-                    if result is not None:
-                        self._apply_decision("director", result)
+                if self._player_down:
+                    # Dead/arrested: there is nothing to decide (he cannot
+                    # move, fight or drive), so a decision now would just pay
+                    # for an action `_execute_action` suppresses anyway.
+                    # `_pending_big_event` is deliberately left set (not
+                    # popped here) — the first decision once he is back up
+                    # will still see it (e.g. the `death` itself) and react,
+                    # rather than losing the beat entirely.
+                    pass
                 else:
-                    tactical_trigger = self.tactical_cadence.should_fire(now, delta, level)
-                    if tactical_trigger is not None and not state.mission.cutscene_active:
-                        result = self._think("tactical", state, delta, tactical_trigger)
-                        self.tactical_cadence.fired(now, level, self.mood.mood)
-                        if result is not None:
-                            self._apply_decision("tactical", result)
-                    elif (
-                        level < 3
-                        and self.activity_runner.current is None
-                        and now >= self._quiet_until
-                        and state.last_task.status in ("idle", "done")
-                    ):
-                        idle = self.idle.pick(self.mood.mood)
-                        if idle is not None:
-                            self._execute_action(idle.action["type"], idle.action["params"])
+                    big_event, self._pending_big_event = self._pending_big_event, None
 
-                # After the brain, so a decision always gets first refusal on the
-                # tick and the runner never posts a task just to have it
-                # preempted a few milliseconds later.
+                    director_trigger = self.director_cadence.should_fire(now, big_event, level)
+                    if director_trigger is not None:
+                        result = self._think("director", state, delta, director_trigger)
+                        self.director_cadence.fired(now)
+                        if result is not None:
+                            self._apply_decision("director", result)
+                    else:
+                        tactical_trigger = self.tactical_cadence.should_fire(now, delta, level)
+                        if tactical_trigger is not None and not state.mission.cutscene_active:
+                            result = self._think("tactical", state, delta, tactical_trigger)
+                            self.tactical_cadence.fired(now, level, self.mood.mood)
+                            if result is not None:
+                                self._apply_decision("tactical", result)
+                        elif (
+                            level < 3
+                            and self.activity_runner.current is None
+                            and not self.planner.in_mission_block
+                            and now >= self._quiet_until
+                            and state.last_task.status in ("idle", "done")
+                        ):
+                            idle = self.idle.pick(self.mood.mood)
+                            if idle is not None:
+                                self.wheel.force("idle", idle.action["type"])
+                                self._execute_action(idle.action["type"], idle.action["params"])
+
+                # All three run AFTER the brain, so a decision always gets first
+                # refusal on the tick and nothing posts a task just to have it
+                # preempted a few milliseconds later. Among themselves the day
+                # plan goes first: it decides whether this is a roam block or a
+                # mission block, and `_drive_activities` gates on that answer —
+                # reading last tick's answer would let an activity start on the
+                # very tick the plan switched, only to be ended one tick later.
+                self._drive_day_plan(state)
                 self._drive_activities(state)
+                self._drive_mission_objective(state)
+                # Close the movement tick: a tick nobody claimed is the shape
+                # of the observed failure, so it is recorded rather than
+                # leaving the previous owner apparently still driving.
+                self.wheel.end_tick()
 
                 self._heartbeat(state)
                 self._maybe_flush()
@@ -1377,6 +2502,14 @@ class Harness:
             log.info("harness stopping")
             self._end_activity_if_running("shutdown")
             self.writer.record_event("session_end", {"reason": "shutdown"})
+            # `sessions.ended_at` (§5) was never written by anything, so every
+            # session that has ever run reads as still live and a crash was
+            # indistinguishable from a clean stop. Buffered before the single
+            # flush below, so a clean stop taken while Supabase is unreachable
+            # still closes the session out when the queue is replayed.
+            self.writer.update_session_end(self.session_id, datetime.now(UTC).isoformat())
+            self.totals.save()
+            self._clear_current_session()
             self.writer.flush()
             if self.clips is not None:
                 self.clips.close()

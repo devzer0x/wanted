@@ -1,0 +1,764 @@
+{
+  "domain": "combat",
+  "items": [
+    {
+      "id": "combat_priority_ladder",
+      "category": "priority_ladder",
+      "cue": "Any tick where at least one entry in nearby.peds has relationship \"hostile\", or health is dropping with no visible cause.",
+      "context": "GTA V Story Mode, free roam or mission. The agent issues high-level tasks, not trigger pulls.",
+      "meaning": "The whole combat decision is an ordered ladder, and every rung must be answered before the next: (1) IDENTIFY \u2014 is there an entry with relationship \"hostile\" in this tick's state? (2) ASSESS DANGER \u2014 how close, how many, is health falling, am I in the open? (3) COVER \u2014 if health is falling or hostiles are >1 and I am on foot in the open, seek_cover FIRST. (4) FACE/POSITION \u2014 am I even near the fight, or is it 60 m away and none of my business? (5) WEAPON \u2014 the agent cannot pick one; whatever is equipped is what he has, which caps how far he can reasonably engage. (6) CONFIRM TARGET \u2014 the hostile flag in THIS snapshot, not one remembered from two decisions ago. (7) FIRE \u2014 combat_hated_targets_around with a radius that covers the confirmed hostiles and nothing more. (8) REASSESS every decision \u2014 hostiles gone, health, new arrivals, stars. (9) BREAK OR HOLD \u2014 if hostiles remain and health is low, back to cover; if clear, disengage and move.",
+      "suggested_action": "Walk the ladder explicitly in the thought field before choosing a combat action. If any rung cannot be answered from the current state snapshot, the answer is seek_cover or stop \u2014 never combat_hated_targets_around.",
+      "avoid": "Skipping straight from 'I am armed and something is happening' to combat_hated_targets_around. That is the 'I have a gun therefore I shoot' failure and it kills missions and bystanders.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Cutscenes (mission.cutscene_active) and control_enabled false override everything \u2014 action is wait. In FREE ROAM (mission.active false), police are never a valid combat target regardless of the ladder \u2014 see never_initiate_with_police. In a MISSION where police/NOOSE are already hostile-flagged as part of the mission's own scripted state, that free-roam-only prohibition does not apply and they are fought like any other rung-6 confirmed hostile.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md",
+        "harness/wasted_harness/brain/prompts/rules.md",
+        "https://gta.wiki/w/Cover_System"
+      ]
+    },
+    {
+      "id": "target_confirmation_is_the_relationship_flag",
+      "category": "target_identification",
+      "cue": "nearby.peds[] entries each carrying relationship: hostile | friendly | neutral, plus pos.",
+      "context": "the agent has no reticle, no screen, no crosshair. He never sees who he is pointing at.",
+      "meaning": "The relationship field IS his target confirmation, and it is the only one he gets. \"hostile\" means the game's own relationship system has that ped set to hate the player group \u2014 those are people actively trying to kill him. \"neutral\" is a civilian. \"friendly\" is a crewmate the mission put there. There is no fourth category and no 'probably hostile'.",
+      "suggested_action": "Before any combat action, name in the thought how many hostile entries exist in THIS snapshot and roughly how far. If the count is zero, combat_hated_targets_around is not a legal choice \u2014 it will complete instantly having done nothing, or worse, be read as an unprovoked attack.",
+      "avoid": "Inferring hostility from gunfire audio, from 'it feels like a firefight', from a mission being active, or from a ped simply being nearby. Firing on an unconfirmed target is how a civilian dies on stream.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "combat_hated_targets_around only engages peds whose relationship group actually hates the player, so the engine itself will refuse most bad targets \u2014 but it will not refuse a hostile that is 40 m away behind a wall, and it will still put a gun in his hands in public, which is its own problem.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md",
+        "harness/wasted_harness/brain/prompts/situations.md"
+      ]
+    },
+    {
+      "id": "unexecutable_aimed_target_states_dont_loop",
+      "category": "capabilities",
+      "cue": "A mission objective that plainly requires shooting one specific unflagged thing \u2014 an object (a fence panel, an alarm box, a fuel pool, a plane engine) or one named ped in a crowd who never gets a relationship: hostile flag \u2014 with zero entries in nearby.peds actually flagged hostile.",
+      "context": "combat_hated_targets_around only ever engages peds the game itself has flagged relationship: hostile, and the agent has no aim_at/shoot_target primitive and no way to aim at an object, a specific unflagged ped, or a body part. Some Story Mode mission beats are built around exactly this kind of aimed shot. That primitive does not exist in the harness today.",
+      "meaning": "This class of mission state is currently unexecutable by design, not a puzzle to solve by getting cleverer about combat_hated_targets_around. Calling it with zero hostile-flagged entries present is illegal per target_confirmation_is_the_relationship_flag \u2014 it does nothing, or reads as an unprovoked attack if something nearby happens to be flagged. Standing on the marker re-issuing the same illegal or no-op call is a loop with no exit and will hold the session forever.",
+      "suggested_action": "Do not repeat combat_hated_targets_around when nearby.peds has zero hostile entries and the objective clearly needs an aimed shot at a specific thing. Try press_prompt_key once in case a contextual prompt is what the game is actually waiting on (some of these beats are prompted, not free-aimed). If that does not resolve it within a few ticks, treat the state as blocked: say so plainly in the thought, and hand off to the failure-recovery ladder (re-read the objective, then a checkpoint retry) rather than holding position indefinitely.",
+      "avoid": "Silently re-issuing the same combat action tick after tick hoping it eventually completes. Also avoid pretending the shot happened in commentary \u2014 narrate that this action is outside what the agent can currently execute.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "If the specific ped involved does carry relationship: hostile in the snapshot (some of these beats do flag the target once triggered), this is an ordinary confirmed-hostile case and combat_hated_targets_around with a tight radius is correct \u2014 this item only covers the object/unflagged-ped case where no such flag ever appears.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md",
+        "harness/wasted_harness/brain/prompts/rules.md",
+        "harness/wasted_harness/brain/prompts/decision_guide.md"
+      ]
+    },
+    {
+      "id": "gun_out_is_not_a_reason_to_shoot",
+      "category": "failure_modes",
+      "cue": "An armed protagonist, a loud scene, sirens, an explosion, a mission that 'feels' like a shootout \u2014 with no hostile entries in nearby.peds.",
+      "context": "Every tick. This is the single most expensive combat mistake available to an AI player.",
+      "meaning": "Carrying a weapon is a permanent state in GTA V \u2014 the protagonist holds every weapon he owns at all times and never puts them down. So 'I am armed' carries exactly zero information about whether shooting is correct right now. The trigger for combat is a confirmed hostile within range, never the availability of a weapon and never the atmosphere of the moment.",
+      "suggested_action": "Treat combat_hated_targets_around as an action that requires a named, counted, in-range hostile in the current state, the way drive_to requires real coordinates. No hostile named, no shooting.",
+      "avoid": "Opening fire to make the stream more interesting, to 'establish dominance', or because the previous decision was also combat. Shooting in public with no hostile present spawns a wanted level, kills civilians, and breaks the show's own content rules.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None. There is no situation where the correct response to 'no confirmed hostile' is to fire.",
+      "sources": [
+        "https://gta.wiki/w/Weapons_in_GTA_V",
+        "harness/wasted_harness/brain/prompts/rules.md"
+      ]
+    },
+    {
+      "id": "agent_cannot_aim_or_fire_manually",
+      "category": "capabilities",
+      "cue": "Any impulse to 'line up a shot', 'go for the head', 'switch to the rifle', or 'aim at the tyres'.",
+      "context": "Harness primitive set is closed: w/s/a/d/e/enter/esc scan codes only. No LMB, no RMB, no R, no Tab, no Caps Lock.",
+      "meaning": "the agent has no aim key, no fire key, no reload key, no weapon-wheel key and no special-ability key. All combat is delegated: combat_hated_targets_around hands the fight to the game's own combat AI, which selects targets, aims, fires, takes cover and reloads on its own. seek_cover puts him behind cover. That is the entire combat vocabulary.",
+      "suggested_action": "Choose combat at the level of engage / take cover / leave. Narrate marksmanship, never plan it. If a decision depends on picking a specific weapon or hitting a specific body part, the decision is not available to him.",
+      "avoid": "Commentary or goals that promise things he cannot do \u2014 'switching to the carbine', 'headshot incoming', 'popping his tyres'. The audience sees the screen; the promise will visibly not happen.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "press_prompt_key (E) exists for context prompts and can matter around mission triggers, not combat. The blocking-screen watchdog can send enter/esc, but that is infrastructure recovery, never a combat choice.",
+      "sources": [
+        "harness/wasted_harness/primitives.py",
+        "harness/wasted_harness/brain/prompts/action_catalog.md"
+      ]
+    },
+    {
+      "id": "assisted_aim_is_the_correct_targeting_mode",
+      "category": "aiming",
+      "cue": "Server/game setup, or any question about how the agent's shots actually land.",
+      "context": "Story Mode Settings > Controls > Targeting Mode, set from single player. Four options exist: Assisted Aim - Full, Assisted Aim - Partial, Free Aim - Assisted, Free Aim.",
+      "meaning": "Assisted Aim - Full does automatic target selection and holds a 'sticky' lock on the target's torso; Free Aim gives no help at all. An AI driving the game through high-level tasks and delegated combat AI should be on an assisted mode \u2014 free aim assumes a human wrist that the agent does not have.",
+      "suggested_action": "Set the game to an assisted targeting mode before the stream and record it in STATUS. Assume in all combat reasoning that a lock, not precision, is what lands shots.",
+      "avoid": "Assuming free-aim skill expressions (headshots at range, tyre shots, precision through gaps) are available. Also avoid claiming the game 'auto-aims for him' in commentary in a way that reads as cheating \u2014 assisted aim is a standard Story Mode setting available to any human player.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Targeting mode is a single-player/Creator setting and cannot be changed inside a session. Sources agree on the four modes but describe the lock-hold behaviour slightly differently (whether moving the reticle breaks lock under Partial vs Full); treat the fine detail as unverified.",
+      "sources": [
+        "https://www.vintageisthenewold.com/faq/what-is-the-difference-between-assisted-aim-and-free-aim-in-gta-5",
+        "https://www.gameskinny.com/tips/gta-5-online-how-to-change-targeting-mode/",
+        "https://gtaforums.com/topic/896174-targeting-modes-free-aimassisted-aim/"
+      ]
+    },
+    {
+      "id": "soft_lock_has_a_timer",
+      "category": "aiming",
+      "cue": "A prolonged engagement against several hostiles.",
+      "context": "GTA V removed GTA IV's hard lock; assisted aim is a soft lock with target switching.",
+      "meaning": "Locks are not permanent \u2014 they time out, and a human switches targets by flicking the stick. Practically, for the agent: engagements do not resolve as one clean lock-and-kill; the engine's combat AI will re-acquire repeatedly, so a fight against 3+ hostiles takes many seconds and multiple decision ticks.",
+      "suggested_action": "Budget several decision ticks for any fight with more than one hostile, and re-check health on every one of them rather than assuming the fight is 'handled' after issuing combat once.",
+      "avoid": "Issuing combat_hated_targets_around and then narrating for 30 seconds as if it were over. Reassess every tick.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Exact lock duration is not documented in any source found; the 'locks have a timer' claim comes from player forums rather than official docs.",
+      "sources": [
+        "https://www.cinemablend.com/games/GTA-5-Combat-Adds-Hip-Firing-Removes-Hard-Lock-57370.html",
+        "https://www.se7ensins.com/forums/threads/is-there-a-way-to-switch-targets-while-aiming-ps4.1530077/"
+      ]
+    },
+    {
+      "id": "cover_entry_and_pc_key",
+      "category": "cover",
+      "cue": "On foot, hostiles present, health falling, or seek_cover chosen.",
+      "context": "PC default binding; the engine picks the cover object.",
+      "meaning": "Cover is entered with Q on PC and the game automatically snaps the character to the nearest solid object \u2014 the player does not choose the cover point. Against a half-height object the character crouches automatically. The agent's seek_cover task is the same mechanic issued as a task, so where he ends up is the engine's choice, not his.",
+      "suggested_action": "Use seek_cover as 'get behind whatever is nearest', not as 'take that specific wall'. If the resulting position is bad (still being hit), the next decision is to move \u2014 walk_to a friendly's position, or into a vehicle \u2014 not to re-issue seek_cover in the same spot.",
+      "avoid": "Re-issuing seek_cover after it visibly failed to stop the damage. That is the 'repeat a failing action' trap.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Cover requires a solid object nearby; in genuinely open ground seek_cover has nothing to snap to and the duration is wasted standing in the open.",
+      "sources": [
+        "https://gta.wiki/w/Cover_System",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "cover_speeds_health_regen",
+      "category": "cover",
+      "cue": "player.health below ~50% with hostiles still active.",
+      "context": "Health regenerates only up to half; below that threshold, movement blocks regen.",
+      "meaning": "Standing still or driving regenerates health slowly, and being in cover makes it slightly faster. Cover is therefore not only protection, it is the healing action. Running and walking interrupt regeneration entirely.",
+      "suggested_action": "When health is under half and the fight is ongoing, seek_cover is doing two jobs at once \u2014 blocking bullets and refilling the bar. Prefer it over any movement action, and hold it for the full duration rather than cancelling after two seconds. This only applies where seek_cover actually broke line of sight \u2014 if hostiles still have a clear line on the cover object and health keeps dropping, the cover failed (see cover_is_directional_and_flankable) and the fix is to move, not to hold still longer waiting on regen that damage is currently outpacing.",
+      "avoid": "Sprinting between positions while wounded 'to regroup' \u2014 running is exactly what stops the regen, so it costs health twice. Equally avoid treating 'hold still to heal' as reason to stay in the open with no cover object at all; regen is a bonus once safe, never a reason to stop moving toward safety.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Regen stops at 50%. Below that it will never top him up; food, a health pickup, or a safehouse is the only way back to full. The stand-still/movement-interrupts-regen mechanic is corroborated on gta.wiki's Health page directly (verified 2026-09-02); confidence is high, not merely a common-knowledge claim.",
+      "sources": [
+        "https://gta.wiki/w/Health",
+        "https://www.grandtheftwiki.com/Health"
+      ]
+    },
+    {
+      "id": "blind_fire_has_no_reticle",
+      "category": "cover",
+      "cue": "Reasoning about how effective shooting from cover is.",
+      "context": "GTA V cover shooting.",
+      "meaning": "From cover a character can blind fire around the corner \u2014 barely exposed, but with reduced accuracy and no reticle displayed at all. To aim properly the character must peek out, which shows the reticle and exposes him to fire. Protection and accuracy are directly traded against each other.",
+      "suggested_action": "Treat 'in cover' as a survival state that trickles damage out slowly, not as a way to win a fight fast. If hostiles must actually die (a mission gate), expect the engine's combat AI to leave cover and expose him \u2014 that is normal, not a bug.",
+      "avoid": "Expecting to clear a group efficiently while glued to cover, or narrating pinpoint shots taken from behind a car.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Scoped weapons historically cannot blind fire; whether GTA V enforces this is not confirmed in the sources checked.",
+      "sources": [
+        "https://gta.wiki/w/Cover_System"
+      ]
+    },
+    {
+      "id": "cover_is_directional_and_flankable",
+      "category": "cover",
+      "cue": "Multiple hostile entries with positions spread on more than one bearing from player.pos.",
+      "context": "Any on-foot firefight against a group.",
+      "meaning": "Cover protects against one arc. Two hostiles approaching from different bearings means whatever object he snapped to protects against one of them and not the other. Hostile pos values are the data that reveals this before it becomes a health drop.",
+      "suggested_action": "Read the spread of hostile positions relative to player.pos. If hostiles are on opposite bearings, cover is a delay, not a solution \u2014 the answer is to break contact (get to a vehicle, put distance and buildings between) rather than settle in.",
+      "avoid": "Treating cover as safe by default and holding it while flanked. Health falling while in cover is the signal that the cover is worthless.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Derived from how the cover system works (nearest solid object, single arc) rather than from a source that states flanking explicitly; the mechanism is well documented, the tactical phrasing is mine.",
+      "sources": [
+        "https://gta.wiki/w/Cover_System"
+      ]
+    },
+    {
+      "id": "explosives_defeat_cover",
+      "category": "cover",
+      "cue": "An explosion nearby, hostiles with heavy weapons, or a burning vehicle near the cover object.",
+      "context": "Grenades reach ~30 m; sticky bombs have a large blast; vehicles explode.",
+      "meaning": "Blast damage does not respect a cover object the way bullets do, and taking cover behind a vehicle means taking cover behind something that can catch fire and explode. Cover next to a car is a timer.",
+      "suggested_action": "If the cover object is a vehicle and anything is burning or exploding nearby, move. Prefer walls and concrete over cars when the choice is implicit in where he walks before issuing seek_cover.",
+      "avoid": "Standing near a burning car to watch it. This has already been a repeated failure \u2014 the correct response to a car on fire is distance now, commentary after.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "seek_cover picks the object, so this is influence over positioning rather than control. Blast-vs-cover interaction is not stated explicitly in the sources; the grenade radius and vehicle explosion behaviour are.",
+      "sources": [
+        "https://gta.wiki/w/Grenade",
+        "https://gta.wiki/w/Vehicle_Damage",
+        "harness/wasted_harness/brain/prompts/situations.md"
+      ]
+    },
+    {
+      "id": "seek_cover_duration_then_reassess",
+      "category": "cover",
+      "cue": "seek_cover {\"duration_s\": 10.0} completing, or last_task showing it finished.",
+      "context": "Harness task semantics.",
+      "meaning": "seek_cover is time-boxed, typically 10 s, and then he is standing there again. It is a beat in a plan, not a plan. The decision that follows it is the one that actually matters: fight, move, or leave.",
+      "suggested_action": "Pair every seek_cover in the goal with what happens after it \u2014 'cover, then fight back' or 'cover ten seconds, then get to the car'. Have the follow-up ready before the timer runs out.",
+      "avoid": "Chaining seek_cover into seek_cover into seek_cover. That is a robot hiding behind a bin on a live stream.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "If health is still critically low and hostiles remain, a second cover cycle is defensible once \u2014 but the third means the position is wrong.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md"
+      ]
+    },
+    {
+      "id": "weapon_wheel_classes",
+      "category": "weapons",
+      "cue": "Reasoning about what the agent is carrying.",
+      "context": "GTA V weapon wheel, eight segments, Tab on PC.",
+      "meaning": "Eight classes: Handguns, Machine Guns (SMG/LMG), Assault Rifles, Sniper Rifles, Melee, Shotguns, Heavy Weapons, Throwables. The protagonist carries every weapon he owns simultaneously and cycles within a class. Opening the wheel slows time (it does not pause).",
+      "suggested_action": "Assume the agent's loadout is 'everything he has picked up or been given', and that in a mission the game may have handed him a specific loadout. Since he cannot open the wheel, whatever is currently equipped is what the combat AI will use.",
+      "avoid": "Planning around a weapon swap. Tab is not in his key set.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Missions can force a loadout (e.g. grenades issued during a heist), so the equipped weapon can change without him doing anything.",
+      "sources": [
+        "https://gta.wiki/w/Weapon_Wheel",
+        "https://gta.wiki/w/Weapons_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/"
+      ]
+    },
+    {
+      "id": "weapon_class_effective_ranges",
+      "category": "weapons",
+      "cue": "Distance between player.pos and the nearest hostile pos.",
+      "context": "gtabase publishes a 0-100 relative Range index per weapon, not metres. Values below are that index.",
+      "meaning": "Relative reach, verified per-weapon on gtabase: Sniper Rifle range 95 (damage 96, fire rate 25) \u2014 long range, slow, needs a scope; Assault Rifle range 45 (damage 30, fire rate 60, 30-round mag) \u2014 the reliable all-rounder; Pistol range 25 (damage 26, 10-round mag); Micro SMG range 25 (damage 21, fire rate 60, 20-round mag) \u2014 close, sprays; Pump Shotgun range 20 (damage 67, fire rate 20) \u2014 devastating up close, near-useless at distance because of projectile spread. Ordering matters more than the numbers: shotgun < pistol/SMG < assault rifle << sniper.",
+      "suggested_action": "Use the ordering to sanity-check engagement distance. A hostile 60+ m away is not a fight worth starting with typical carried weapons \u2014 that is a drive-away, not a combat_hated_targets_around.",
+      "avoid": "Reading the Range index as metres. It is a comparative stat bar, and no source found gives real-world metre falloff.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The index is gtabase's presentation of the game's stat bars; actual damage falloff curves are not published. Attachments (scopes, extended mags) change real performance.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/assault-rifle/",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/pump-shotgun/",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/sniper-rifle/",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/pistol/",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/micro-smg/"
+      ]
+    },
+    {
+      "id": "combat_radius_should_match_reality",
+      "category": "weapons",
+      "cue": "Choosing radius_m for combat_hated_targets_around.",
+      "context": "The task engages hostiles within the radius and completes when none remain in it.",
+      "meaning": "The radius is a commitment: too wide and he keeps fighting people he cannot reach or see, and the task never completes; too narrow and he ignores the man shooting him. Typical carried weapons are effective well inside 40 m.",
+      "suggested_action": "Set radius_m to just cover the confirmed hostiles you actually named \u2014 15-25 m for a street brawl or a room, up to 40 m if hostile positions genuinely sit that far out. Default 25.",
+      "avoid": "Large radii (60-100 m) 'to be safe'. That turns a 20-second fight into an unbounded task and pins him in the open.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Harness contract clamps and defaults may apply; the tactical range guidance is derived from weapon stats rather than measured in-game.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/assault-rifle/"
+      ]
+    },
+    {
+      "id": "sniper_is_not_an_ai_weapon",
+      "category": "weapons",
+      "cue": "A hostile at long range and a sniper rifle in the loadout.",
+      "context": "Sniper Rifle: range 95, fire rate 25, very slow reload, scoped.",
+      "meaning": "The sniper rifle's whole value is deliberate scoped aim at long range, plus a very low rate of fire. Both are things a delegated combat AI and a task-level controller handle badly, and the agent cannot scope or zoom at all.",
+      "suggested_action": "Treat long-range hostiles as a movement problem (leave, or close distance in a vehicle), not a shooting problem.",
+      "avoid": "Narrating a sniper duel. He has no zoom key and no reticle.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "If a mission hands him a sniper and the engine's combat AI equips it, it will use it \u2014 he just cannot choose or aim it. Whether the combat task prefers scoped weapons is unverified.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/sniper-rifle/",
+        "harness/wasted_harness/primitives.py"
+      ]
+    },
+    {
+      "id": "reload_is_automatic_under_delegation",
+      "category": "weapons",
+      "cue": "A long engagement; worrying about running dry.",
+      "context": "R reloads on PC; the engine's combat AI reloads on its own.",
+      "meaning": "Reloading is R for a human, and handled automatically by the game's combat AI when the agent delegates the fight. Magazine sizes are small enough to matter \u2014 Pistol 10, Micro SMG 20, Assault Rifle 30 (40 shown as clip size, 100 with extended) \u2014 so reload pauses are part of the rhythm of any fight, and the character is vulnerable during them.",
+      "suggested_action": "Assume brief lulls are reloads, not victory. Do not read 'he stopped shooting' as 'the fight is over' \u2014 read nearby.peds for remaining hostiles instead.",
+      "avoid": "Committing to a move (standing up, crossing open ground) on the assumption that the shooting stopped for a good reason.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources disagree slightly on Assault Rifle clip size (30 vs a 40 stat figure); ammo is retained across arrest and death and magazines are restored when ammo is replenished.",
+      "sources": [
+        "https://gta.wiki/w/Weapons_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/assault-rifle/",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "headshots_kill_peds_instantly",
+      "category": "weapons",
+      "cue": "Estimating how long a fight will take.",
+      "context": "Player-fired headshots on NPCs in single player.",
+      "meaning": "A shot to the head kills a ped outright in Story Mode. Enemy NPCs, by contrast, generally do not headshot the player for an instant kill \u2014 the asymmetry favours the player. Practically this means fights the agent delegates are usually winnable if he is not badly outnumbered.",
+      "suggested_action": "Do not over-flee a small fight. Two hostiles at close range with a decent weapon is a fight the engine's combat AI usually wins; four-plus with heavy weapons is not.",
+      "avoid": "Promising a headshot in commentary. He cannot aim, so it will be luck if it happens.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some mission enemies and armoured/helmeted enemies are tougher. The 'NPCs don't headshot you' claim comes from player discussion, not an official source \u2014 treat as a tendency, not a rule.",
+      "sources": [
+        "https://steamcommunity.com/app/271590/discussions/0/1814296273137321863/",
+        "https://steamcommunity.com/app/271590/discussions/0/611703999969322652/"
+      ]
+    },
+    {
+      "id": "melee_draws_less_heat",
+      "category": "melee",
+      "cue": "A fistfight that finds him \u2014 one or two neutral/hostile peds up close, no firearms visible.",
+      "context": "Melee weapons and fists in GTA V.",
+      "meaning": "Fists and melee weapons work best where no firearms are involved, and importantly they take longer to attract police attention than gunfire does. Brass knuckles increase damage while keeping fist speed and reach; blades are fast, clubs are slower with more reach and damage.",
+      "suggested_action": "For a small unarmed scuffle, a short combat_hated_targets_around with a small radius (10-15 m) is the right size of response, and then leave \u2014 brawls still attract stars eventually.",
+      "avoid": "Escalating a shoving match into a shooting. The heat cost is disproportionate to the entertainment.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "the agent cannot choose melee over firearms \u2014 the combat task uses what is equipped, and if a gun is equipped it will be used. This item guides whether to engage at all, not with what.",
+      "sources": [
+        "https://gta.wiki/w/Melee_Weapons"
+      ]
+    },
+    {
+      "id": "melee_dodge_and_counter",
+      "category": "melee",
+      "cue": "Documentation of unarmed defence; PC bindings.",
+      "context": "PC defaults: light melee R, heavy melee O (mouse buttons also used), dodge Spacebar.",
+      "meaning": "Unarmed combat has a light attack, a heavy attack and a dodge \u2014 the dodge is what makes counters possible in a hand-to-hand exchange. None of these keys are in the agent's primitive set, so he has no manual melee at all.",
+      "suggested_action": "Record the bindings for completeness, but decide melee only at the engage/disengage level.",
+      "avoid": "Building any plan that requires timing a dodge or a counter.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Control-guide sites list R as both reload and light melee (context-dependent) and O as heavy melee; these are third-party guides, not Rockstar documentation, and all PC bindings are user-rebindable. Counter mechanics specific to GTA V are not described on the wiki pages checked.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "melee_against_guns_is_death",
+      "category": "melee",
+      "cue": "Hostiles at 10-30 m with firearms while the agent is closing distance on foot.",
+      "context": "Any armed encounter.",
+      "meaning": "Crossing open ground toward armed hostiles removes cover, stops health regeneration (running blocks it) and puts him inside everyone's effective range at once. Melee only makes sense when the opposition is unarmed or already adjacent.",
+      "suggested_action": "Never use walk_to toward a hostile position. If he must fight, fight from where he is or from cover; if he must move, move away or to a vehicle.",
+      "avoid": "walk_to with a hostile ped's pos as the destination. The hostile positions in state exist so he knows where the shooting is coming from, not so he can walk into it.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Mission objectives that require reaching a location past hostiles \u2014 even then, cover-to-cover and the vehicle are better than a straight run.",
+      "sources": [
+        "https://gta.wiki/w/Health",
+        "https://gta.wiki/w/Melee_Weapons",
+        "harness/wasted_harness/brain/prompts/action_catalog.md"
+      ]
+    },
+    {
+      "id": "driveby_weapon_restrictions",
+      "category": "vehicle_combat",
+      "cue": "Hostiles present while the agent is in a vehicle.",
+      "context": "GTA V drive-by shooting from cars and bikes.",
+      "meaning": "Only some weapons work from inside a vehicle \u2014 pistols (Pistol, Combat Pistol, AP Pistol, Heavy Pistol), Micro SMG and similar compact SMGs, and from motorcycles the sawed-off/double-barrel/sweeper shotguns plus melee. Passengers in pickup beds and vans can use assault rifles. The AP Pistol is the standout car drive-by weapon: automatic, large magazine, decent accuracy.",
+      "suggested_action": "Expect vehicle combat to be weak and short-ranged. Being in a car during a firefight is mostly about mobility, not firepower.",
+      "avoid": "Treating 'I am in a car with a rifle' as a firing position. The rifle will not fire from the driver's seat.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Whether combat_hated_targets_around does anything useful while seated is unverified against the real game \u2014 this needs a live check on the server. Some weapons misbehave in first person inside vehicles (sniper rifles, rocket launchers, bullpup shotgun).",
+      "sources": [
+        "https://gta.wiki/w/Drive-By_Shooting",
+        "https://www.gameslearningsociety.org/wiki/what-guns-can-i-use-while-driving-gta/"
+      ]
+    },
+    {
+      "id": "driveby_can_shoot_forward",
+      "category": "vehicle_combat",
+      "cue": "A chase where the threat is directly ahead.",
+      "context": "GTA V changed drive-by from earlier games.",
+      "meaning": "In GTA V the driver or passenger can shoot forward through the windshield, not only sideways out of the window, and the camera zooms in slightly when the driver prepares to shoot. Franklin's Driving Focus can be used to slow time for drive-by precision.",
+      "suggested_action": "Useful for commentary accuracy about what is happening on screen during a chase; do not plan around it, since the agent has no fire key.",
+      "avoid": "Describing an old-GTA sideways hand-out-the-window drive-by if the screen shows a windshield shot.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Franklin's ability is not available to the agent (Caps Lock is not in his key set), and the ability only works for Franklin.",
+      "sources": [
+        "https://gta.wiki/w/Drive-By_Shooting",
+        "https://gta.wiki/w/Special_Ability"
+      ]
+    },
+    {
+      "id": "shoot_tyres_not_drivers",
+      "category": "vehicle_combat",
+      "cue": "A pursuing or fleeing vehicle that needs stopping.",
+      "context": "Vehicle damage model.",
+      "meaning": "Tyres puncture from gunfire, deflate and eventually disintegrate down to the rim, which sharply reduces traction and speed \u2014 this stops a car reliably. Killing the driver requires first shattering a window (the first shot breaks the glass, the next passes through) and hitting a small moving target inside. Tyres are the bigger, more forgiving target.",
+      "suggested_action": "Understand this as the reason a chase resolves the way it does, and narrate it correctly. The agent cannot aim, so he cannot elect to shoot tyres; the engine's combat AI decides.",
+      "avoid": "Claiming a tyre shot he did not take, or expecting a single bullet through a closed window to kill an occupant.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The 'first shot breaks glass, second passes through' description on the wiki is written for GTA IV and carried forward; not independently confirmed for GTA V.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage"
+      ]
+    },
+    {
+      "id": "burning_vehicle_means_leave_now",
+      "category": "vehicle_combat",
+      "cue": "Vehicle on fire, engine smoking heavily, or an explosion nearby.",
+      "context": "Vehicle destruction stages: smoke, burning engine or burning fuel tank, then explosion.",
+      "meaning": "A burning engine or burning fuel tank is the game announcing imminent destruction. The vehicle will explode, and a vehicle explosion will kill or nearly kill anyone beside it. There is no safe amount of time to stand next to it.",
+      "suggested_action": "Car on fire while he is inside: exit_vehicle immediately, then move away, then one line about it. Car on fire nearby: get distance first, comment second.",
+      "avoid": "Standing ten metres away to watch the explosion. This is a known, repeated live failure and it is a self-inflicted death.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "No source found gives an exact seconds-to-explosion figure; treat it as 'not long'.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage",
+        "harness/wasted_harness/brain/prompts/situations.md"
+      ]
+    },
+    {
+      "id": "fuel_trail_ignition",
+      "category": "explosives",
+      "cue": "A leaking, shot-up car on the road.",
+      "context": "Vehicle fuel tank mechanics.",
+      "meaning": "Shooting just ahead of the rear wheel punctures the fuel tank; fuel dribbles out and leaves a trail while the car drives. That trail can be ignited and will burn back to the tank and explode the car \u2014 unless the tank has already run dry, in which case the trail disappears and nothing explodes. Shooting a car body directly does not simply explode it.",
+      "suggested_action": "Use for accurate commentary about why a car did or did not blow up. Never as a plan, since it needs two aimed shots.",
+      "avoid": "Repeating the San Andreas-era myth that shooting any car makes it explode.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The exact hitbox for the fuel tank is described by players as small and hard to hit; no official documentation confirms it.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage",
+        "https://steamcommunity.com/app/271590/discussions/0/535152511363496520/"
+      ]
+    },
+    {
+      "id": "grenade_blast_and_self_harm",
+      "category": "explosives",
+      "cue": "Throwables equipped, hostiles clustered, tight space.",
+      "context": "Grenade: PC throw key G; ~30 m range figure; direct hit ~500 damage, edge ~75.",
+      "meaning": "Grenades are as dangerous to the thrower as to the target \u2014 they bounce off walls back toward you, and a cooked grenade held too long kills you outright, with a quiet beep that makes overcooking easy. Enemies notice incoming grenades and run, so a grenade often wounds rather than kills. Available at Ammu-Nation from the start for $150, and issued in some missions.",
+      "suggested_action": "Assume explosives near cover, near vehicles, or in enclosed spaces are a net negative for survival. The agent has no throw key, so this is context for reading the screen and for judging danger when hostiles use them.",
+      "avoid": "Treating an explosion in the middle of a firefight as good news. If something exploded and health dropped, the correct next action is cover or distance.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The ~30 m figure is the wiki's stated range and reads as maximum blast reach rather than lethal radius; fuse time is not documented in the sources checked.",
+      "sources": [
+        "https://gta.wiki/w/Grenade",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "sticky_bombs_are_remote_and_dangerous",
+      "category": "explosives",
+      "cue": "Sticky bombs in the loadout, usually during a heist mission.",
+      "context": "Unlocked after 'Friends Reunited', $400 in Story Mode; used scripted in The Merryweather Heist, Blitz Play, Derailed, The Big Score.",
+      "meaning": "Sticky bombs stick where thrown and detonate only on command, up to 20 placed at once in single player. They can be attached to vehicles. Critically: shooting a placed sticky bomb detonates it, and ramming a vehicle carrying one can set it off \u2014 so a stuck bomb is a hazard to whoever is nearest, including the agent.",
+      "suggested_action": "When a mission loadout includes sticky bombs, treat proximity to placed charges as a danger. Follow the mission's own instructions; do not improvise with explosives.",
+      "avoid": "Driving or walking toward a vehicle you know has a charge on it. Blast radius is large.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "the agent cannot throw or detonate \u2014 there is no G key and no detonate key in his set \u2014 so this is entirely situational awareness. gta.wiki gives a ~30 m blast radius; gtabase's 'range 10' stat is a different measure and the two are not comparable.",
+      "sources": [
+        "https://gta.wiki/w/Sticky_Bomb",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/sticky-bomb/"
+      ]
+    },
+    {
+      "id": "explosive_props_in_the_environment",
+      "category": "explosives",
+      "cue": "Fighting near a petrol station, propane tanks, or parked cars.",
+      "context": "Environmental hazards during firefights.",
+      "meaning": "Fuel pumps and gas/propane containers are destructible and explosive, and parked vehicles will burn and explode when shot up in a crossfire. A firefight at a petrol station is a chain reaction waiting to happen, and cover behind parked cars becomes a hazard once rounds start landing on them.",
+      "suggested_action": "If a fight starts near a fuel station or among parked cars, prioritise moving out of that area over holding position, even if the immediate cover looks good.",
+      "avoid": "Settling into a long cover fight surrounded by vehicles.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "The gta.wiki Explosion page was not reachable (404) and no second source was verified for petrol-pump chain reactions specifically; the vehicle explosion half is well documented, the prop half is common knowledge and unverified here.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage"
+      ]
+    },
+    {
+      "id": "health_regen_ceiling_is_half",
+      "category": "survival",
+      "cue": "player.health value on every tick during and after a fight.",
+      "context": "GTA V Story Mode health model.",
+      "meaning": "Health regenerates automatically only while below 50% and only up to 50%, and only while standing still, in cover, or driving \u2014 walking and running interrupt it. Above 50% and below full there is no regen at all; the rest requires a health pickup, food from a store/vendor, or a safehouse.",
+      "suggested_action": "Use 50% as the hard planning line. Below it, cover or sit in a car until it tops back to half before starting anything \u2014 but only where cover actually broke line of sight or the vehicle is stopped somewhere hostiles cannot reach; regen is worth waiting for only once safe, never a reason to stay put while still exposed. Under 35 stop taking risks; under 20 the goal is survival only.",
+      "avoid": "Waiting in cover expecting to be fully healed. It will stop at half and then he is just standing there. Also avoid holding a stationary position purely to regen while any hostile or police still has a clear line of sight on him \u2014 break contact first, regen second.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Max health values quoted in sources are for GTA Online ranks and do not apply to Story Mode. The movement-interrupts-regen mechanic is stated directly on gta.wiki's Health page (verified 2026-09-02), so it is treated as confirmed, not merely a common tendency.",
+      "sources": [
+        "https://gta.wiki/w/Health",
+        "https://www.grandtheftwiki.com/Health"
+      ]
+    },
+    {
+      "id": "armor_absorbs_before_health",
+      "category": "survival",
+      "cue": "An armour value in state, or picking up armour.",
+      "context": "Story Mode body armour, five tiers from Super Light (20%, $500) to Super Heavy (100%, $2,500) at Ammu-Nation, plus pickups around the map.",
+      "meaning": "Armour is a separate bar that depletes before health, roughly doubling resistance to gunfire and explosions at full tier. It does not protect against melee attacks and does not protect against headshots. Unlike health it does not regenerate.",
+      "suggested_action": "Treat armour as a consumable buffer: with it, a firefight is survivable; without it, the same fight is not. Never spend it casually, and note that once it is gone the next fight is materially more dangerous.",
+      "avoid": "Reading 'armour present' as 'safe'. Melee and headshots go straight through.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The 'does not protect from melee' and 'does not protect from headshots' claims come from a single wiki page and were not cross-checked against a second source.",
+      "sources": [
+        "https://gta.wiki/w/Body_Armor",
+        "https://gta.wiki/w/Health"
+      ]
+    },
+    {
+      "id": "special_ability_exists_but_not_for_the_agent",
+      "category": "capabilities",
+      "cue": "The yellow meter under the minimap, or an impulse to 'slow it down'.",
+      "context": "Caps Lock on PC. Michael: Area Kill, slows time on foot for accuracy, blue tint. Trevor: Red Mist, roughly doubles damage dealt and makes him effectively invincible, orange tint. Franklin: Driving Focus, slows time in land vehicles, green tint. 30 s each when fully upgraded; meters fill from kills, headshots, taking damage, and driving stunts.",
+      "meaning": "Two of the three abilities are combat abilities and would transform any firefight \u2014 but Caps Lock is not in the agent's primitive set, so he has none of them. Michael's and Trevor's work on foot only; Franklin's works in land vehicles only.",
+      "suggested_action": "Know what the meter is so commentary is accurate if it fills or the game triggers it, and know it is not a resource he can spend.",
+      "avoid": "Planning a fight around 'I'll pop the ability'. He cannot press the key.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "One source claimed the PC key is '+' while two others say Caps Lock; Caps Lock is the majority answer and matches the standard PC binding lists. Bindings are rebindable, and adding a key to the harness would be a contract change, not a brain choice.",
+      "sources": [
+        "https://gta.wiki/w/Special_Ability",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a",
+        "harness/wasted_harness/primitives.py"
+      ]
+    },
+    {
+      "id": "never_initiate_with_police",
+      "category": "target_identification",
+      "cue": "Police vehicles in nearby.vehicles, officers among nearby.peds, or wanted stars above zero.",
+      "context": "Show rule and survival logic both point the same way in FREE ROAM. Several Story Mode missions (e.g. a heist escape, an assault the game itself scripts you into surviving) put police or NOOSE in nearby.peds as relationship \"hostile\" and require fighting through them to complete the objective \u2014 that is a different situation from a free-roam wanted level and this item does not apply to it.",
+      "meaning": "Scope this rule by mission.active. FREE ROAM (mission.active false): police are not a combat target, ever. Wanted stars are a problem to shed, not fight. At 1-2 stars the answer is flee_police and driving; at 3+ it is sustained evasion with no stops. Shooting at police escalates the star level and converts a recoverable situation into a death \u2014 this is an absolute rule with no free-roam exception. MISSION (mission.active true) AND the mission's own scripted state has put hostile-flagged police/NOOSE in nearby.peds (a heist getaway under fire, an assault the mission requires surviving, friendly crew fighting alongside): that scripted hostility is the mission objective, not a free-roam police problem, and combat_hated_targets_around against those hostile-flagged entries is correct \u2014 see mission_firefight_fight_dont_flee.",
+      "suggested_action": "Check mission.active first, every time. If false: police are never a target \u2014 flee_police in a vehicle, or seek_cover if cornered on foot with no car. If true and police/NOOSE already carry relationship \"hostile\" in nearby.peds as part of the mission's own state (not a wanted level the agent triggered by shooting first): fight per the combat priority ladder, same as any other mission hostile.",
+      "avoid": "combat_hated_targets_around against police in FREE ROAM. That is the absolute rule and it has no carve-out. Equally, do not apply this free-roam rule to a scripted mission firefight and refuse to fight \u2014 that fails the mission as surely as dying does.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The only exception to the free-roam prohibition is mission.active true with police/NOOSE already hostile-flagged as part of the mission's own script. The agent never chooses to open fire on police himself in either case \u2014 combat_hated_targets_around only ever engages entries the game has already flagged hostile; the distinction that matters is whether mission.active is true, not any judgment call.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/rules.md",
+        "harness/wasted_harness/brain/prompts/situations.md"
+      ]
+    },
+    {
+      "id": "gunfire_in_public_creates_stars",
+      "category": "consequences",
+      "cue": "Considering combat in a populated street with no mission active.",
+      "context": "Free roam. Pedestrians call the police and film crimes as they happen.",
+      "meaning": "Discharging a firearm in view of civilians produces a wanted level, because civilians report it. So a two-second decision to shoot buys a multi-minute police chase. Melee attracts attention more slowly than gunfire.",
+      "suggested_action": "In free roam, weigh the star cost into the decision. Unless he is being shot at, the correct response to a street disturbance is to drive away.",
+      "avoid": "Starting free-roam fights for content. The cost is a chase, and per the show rules chases are a problem to solve, not a bit to farm.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Exact star thresholds for weapon discharge are a wanted-level topic, not verified here. Suppressors and being unobserved change the outcome.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians",
+        "https://gta.wiki/w/Melee_Weapons",
+        "harness/wasted_harness/brain/prompts/rules.md"
+      ]
+    },
+    {
+      "id": "hostile_ped_cap_of_three",
+      "category": "target_identification",
+      "cue": "A free-roam brawl or street fight that seems to be growing.",
+      "context": "Ambient pedestrian hostility in GTA V (not mission enemies).",
+      "meaning": "Per gta.wiki's Pedestrians page, no more than three ambient pedestrians can be hostile to the player at once \u2014 when a fourth turns hostile, one of the original three starts fleeing instead. Read this as a rough ceiling on ambient ped hostility, not a guaranteed safety net \u2014 it says nothing about gang members, mission enemies, or police, any of which can add hostiles on top of this ambient count.",
+      "suggested_action": "An ambient brawl with two or three ordinary pedestrians hostile is usually short-lived. Fight it briefly or walk away, but keep reassessing nearby.peds rather than assuming the count is capped once gang or armed peds are involved.",
+      "avoid": "Confusing this with a mission firefight, where the enemy count is scripted and can be much larger. Also avoid treating this as a hard guarantee that a free-roam fight cannot grow \u2014 it is one source's description of ambient-only behaviour, not a system-wide cap.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Confirmed present on gta.wiki's Pedestrians page (verified 2026-09-02, exact wording: \"No more than three pedestrians can be hostile to the player simultaneously. If a fourth pedestrian becomes hostile, one of the first three starts to flee.\") but not cross-checked against a second source, and does not apply to mission-spawned enemies, gang attacks, or police.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "peds_react_to_a_drawn_weapon",
+      "category": "target_identification",
+      "cue": "Neutral peds nearby suddenly running, ducking, or raising hands.",
+      "context": "Ambient behaviour when a weapon is aimed at a civilian.",
+      "meaning": "Aimed-at civilians surrender, duck, or flee. Armed gang members instead draw a gun \u2014 often visibly, as a warning \u2014 and then open fire. Armed civilians resisting a carjacking can pull the player out and shoot him on the ground.",
+      "suggested_action": "Peds scattering is a reliable early warning that a weapon is out and a fight is about to be legible on screen. Use it as a cue to check nearby.peds for a hostile flag before anything else.",
+      "avoid": "Reading fleeing civilians as 'the crowd is impressed'. It means someone has a gun out and the situation is one decision from a wanted level.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "the agent does not receive a 'weapon aimed' flag; he sees relationship and position only, so this is inference from movement, not a direct signal.",
+      "sources": [
+        "https://gta.wiki/w/Pedestrians"
+      ]
+    },
+    {
+      "id": "mission_firefight_fight_dont_flee",
+      "category": "priority_ladder",
+      "cue": "mission.active true, hostile peds nearby, friendly peds nearby.",
+      "context": "Observed live failure: twelve consecutive decisions of enter_vehicle / exit_vehicle / wait during a scripted shootout, ending in death and a failed mission.",
+      "meaning": "A scripted mission firefight is the objective. Driving away from it fails the mission as surely as dying does, and abandoning friendly crew mid-fight fails it too. combat_hated_targets_around hands the fight to the game's combat AI, which aims and shoots competently \u2014 he does not need a plan, he needs to start shooting.",
+      "suggested_action": "Mission active + hostiles present + crew present = combat_hated_targets_around, or seek_cover first if health is already low and then combat. Stay with the friendlies.",
+      "avoid": "Getting into a vehicle twice in a row while hostiles are still alive nearby. That specific pattern is the observed failure signature \u2014 if it happens, the correct correction is to shoot back.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Survival still outranks the mission \u2014 but survival means cover then fighting back, not an endless hunt for a working car under fire. flee_police is for free-roam chases, not for mission enemies.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/situations.md",
+        "harness/wasted_harness/brain/prompts/rules.md"
+      ]
+    },
+    {
+      "id": "reassess_every_tick_during_combat",
+      "category": "priority_ladder",
+      "cue": "A combat task already running from a previous decision.",
+      "context": "Tasks run for seconds to minutes; decisions come far more often.",
+      "meaning": "combat_hated_targets_around completes only when no hostiles remain in the radius, which can be a long time or never if the radius was too wide. The reassess rung of the ladder is not optional: every tick, re-read health, re-count hostiles, check for new arrivals and for stars.",
+      "suggested_action": "On each tick during a fight, answer three things in the thought: health trend, hostile count, and whether police have arrived. Any of those turning bad changes the action.",
+      "avoid": "Issuing combat once and then spending five decisions on commentary while the health bar empties.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "During a cutscene there is nothing to reassess \u2014 the action is wait.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md",
+        "harness/wasted_harness/brain/prompts/rules.md"
+      ]
+    },
+    {
+      "id": "disengage_thresholds",
+      "category": "survival",
+      "cue": "player.health falling across consecutive ticks while hostiles remain.",
+      "context": "Half-regen ceiling means damage taken is only half-recoverable in the field.",
+      "meaning": "There is a point where continuing a fight is arithmetic he loses. Health below ~35 with live hostiles means the next mistake is a death; below ~20 nothing matters except surviving. Because regen caps at 50%, a long fight is a one-way ratchet downward.",
+      "suggested_action": "Under 35 with hostiles alive: cover first, and prefer breaking contact (vehicle, distance, buildings) over trading more fire. Under 20: survival is the only goal, and in free roam that means leaving entirely.",
+      "avoid": "Fighting to the last sliver because the fight is nearly won. 'Nearly won' is not visible to him \u2014 hostile counts are, health is; trust those.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "The 35/20 numbers are the project's own operating thresholds, not game constants. In a mission, fleeing may fail it \u2014 cover and fight from cover is the compromise.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/situations.md",
+        "https://gta.wiki/w/Health"
+      ]
+    },
+    {
+      "id": "distance_and_line_of_sight_end_fights",
+      "category": "survival",
+      "cue": "A fight he should not be in, with a vehicle available.",
+      "context": "Free roam. flee_police and ordinary driving both work on the same principle.",
+      "meaning": "Fights in GTA V end by distance and broken line of sight far more reliably than by winning them. Alleys, tunnels and the LS River channel break sight lines. The vehicle is the strongest combat tool the agent actually controls, because it turns a firefight into a driving problem, and driving is what he is good at.",
+      "suggested_action": "When the fight is optional, the best combat action is enter_nearest_vehicle followed by drive_to or wander_drive. Prefer leaving over winning whenever the mission does not require the kill.",
+      "avoid": "Treating leaving as cowardice or as dead air. A getaway is better television than a lost gunfight and it keeps the session alive.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Not in a mission firefight, where leaving fails the objective. Not while a vehicle is on fire. Not if the hostiles are already adjacent \u2014 entering a vehicle in the open next to shooters is slower than taking cover.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md",
+        "harness/wasted_harness/brain/prompts/situations.md"
+      ]
+    },
+    {
+      "id": "stale_handles_and_stale_hostiles",
+      "category": "target_identification",
+      "cue": "A hostile ped handle or position remembered from an earlier decision.",
+      "context": "Handles are ephemeral; the state snapshot is the only truth.",
+      "meaning": "A handle seen two decisions ago may now refer to something else entirely, and a hostile that was 10 m away may be dead, fled, or behind him. Target confirmation must come from the CURRENT snapshot every single time.",
+      "suggested_action": "Re-read nearby.peds on every combat decision. Never carry a target forward in memory.",
+      "avoid": "follow_entity or any positional reasoning based on a handle from a previous tick during combat.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None for combat. For mission follows, the same rule applies but the friendly ped is usually persistent enough to re-find each tick.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/action_catalog.md"
+      ]
+    },
+    {
+      "id": "cutscene_and_locked_control_override_combat",
+      "category": "priority_ladder",
+      "cue": "mission.cutscene_active true, or player.control_enabled false.",
+      "context": "Scripted sequences and handovers.",
+      "meaning": "The game has taken the camera and the hands. Combat tasks issued during these do nothing at all \u2014 the decision is wasted and the reflex layer has nothing to do. Gunfire on screen during a cutscene is scripted, not his.",
+      "suggested_action": "Action is wait. Narrate what is on screen once, then be quiet until control returns rather than repeating 'I am waiting' every few seconds.",
+      "avoid": "Issuing combat_hated_targets_around because there are hostiles visible in a cutscene. Nothing will happen and he looks broken.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None.",
+      "sources": [
+        "harness/wasted_harness/brain/prompts/rules.md",
+        "harness/wasted_harness/brain/prompts/situations.md"
+      ]
+    },
+    {
+      "id": "no_cheats_in_combat",
+      "category": "consequences",
+      "cue": "Any wish for a weapon, ammo, invincibility, or a spawned vehicle mid-fight.",
+      "context": "Project non-negotiable: Story Mode, no cheats, no god mode, no weapon spawns.",
+      "meaning": "There is no way to acquire a weapon, ammo, armour or invincibility in the middle of a fight. What he is carrying and what his health bar says is the entire budget for that engagement. Ammu-Nation and pickups exist but require going there, out of combat.",
+      "suggested_action": "Plan combat as a fixed-resource problem: current health, current armour, current loadout, no resupply. That is the same constraint a human player has.",
+      "avoid": "Wishing aloud for a cheat, implying one exists, or framing the game's assisted aim as a cheat \u2014 assisted aim is a standard setting any player can use.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The bridge's logged unstick nudge is the only sanctioned deviation and it is a movement fix, never a combat advantage.",
+      "sources": [
+        "CLAUDE.md",
+        "harness/wasted_harness/brain/prompts/rules.md"
+      ]
+    },
+    {
+      "id": "ammo_survives_death_and_arrest",
+      "category": "weapons",
+      "cue": "After a wasted/busted screen.",
+      "context": "GTA V weapon retention.",
+      "meaning": "Weapons are kept through arrest and running out of ammunition \u2014 they stay in the inventory for when ammo is replenished, and magazines are restored across the class when ammo is resupplied. The agent does not lose his loadout by dying.",
+      "suggested_action": "After a death or arrest, assume the loadout is intact but health and armour are not. The next fight starts from a worse defensive position, not a worse offensive one.",
+      "avoid": "Narrating 'I lost all my guns' after a wasted screen.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Some story missions strip or force a loadout. Weapon retention on death versus arrest may differ in detail; only the arrest/out-of-ammo case is explicitly documented in the source.",
+      "sources": [
+        "https://gta.wiki/w/Weapons_in_GTA_V"
+      ]
+    },
+    {
+      "id": "pc_combat_bindings_reference",
+      "category": "controls",
+      "cue": "Any need to state or verify a PC key for combat.",
+      "context": "GTA V PC defaults, keyboard and mouse, all rebindable in Settings.",
+      "meaning": "Aim/lock-on RMB; Fire LMB; Reload R; Take cover Q; Light melee R; Heavy melee O; Melee dodge Spacebar; Throw grenade/sticky G; Weapon wheel Tab (slows time while open); cycle weapons mouse wheel; number keys 1-9 select weapon classes; toggle weapon accessory E; stealth mode Left Ctrl; special ability Caps Lock; camera/first-person toggle V; scope zoom mouse wheel or ]. Moving around a corner while staying in cover is the same key as jump (Space) on PC.",
+      "suggested_action": "Use as ground truth when describing what a human would press. None of these except E are in the agent's key set.",
+      "avoid": "Treating these as things the agent can do, and treating them as authoritative \u2014 they come from third-party control guides, not Rockstar documentation, and users can rebind everything.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Two independent guides agree on the core set (RMB/LMB/R/Q/Tab/G/Caps Lock/Left Ctrl). The R double-duty (reload and light melee) and O for heavy melee appear in both but are context-dependent in game. No Rockstar support page was reachable to confirm.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a",
+        "https://gta.wiki/w/Cover_System",
+        "https://gta.wiki/w/Weapon_Wheel"
+      ]
+    },
+    {
+      "id": "story_mode_weapon_set_is_frozen",
+      "category": "weapons",
+      "cue": "Any reference to a weapon the agent might carry.",
+      "context": "Story Mode stopped receiving new weapons after the Lowrides update, 20 October 2015.",
+      "meaning": "Single-player GTA V has a fixed weapon roster \u2014 roughly 59 weapons across the eight wheel classes. Everything added to GTA Online after October 2015 (and much added before) does not exist in Story Mode.",
+      "suggested_action": "When naming a weapon in commentary, stick to the Story Mode roster: pistols, SMGs/MGs, assault rifles, shotguns, sniper rifles, heavy weapons, throwables, melee. If unsure whether a weapon is single-player, do not name it.",
+      "avoid": "Naming any Online-only weapon (Oppressor-mounted anything, newer Online DLC guns). It is factually wrong on stream and it breaks the Story-Mode-only framing.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources give different totals (gta.wiki says 59 weapons across seven wheel categories in its table; gtabase describes eight wheel classes). The eight-class wheel is confirmed by two sources; the exact weapon count is not load-bearing and is left uncertain.",
+      "sources": [
+        "https://gta.wiki/w/Weapons_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/weapons/",
+        "https://gta.wiki/w/Weapon_Wheel"
+      ]
+    }
+  ],
+  "notes": "WHAT I COULD NOT VERIFY\n\n1. gta.fandom.com is blocked (HTTP 402) as stated in the brief, so the primary GTA Wiki was reached only through the gta.wiki mirror. Several pages on that mirror 404 (Melee, Explosion, Gangs_in_Grand_Theft_Auto_V), so explosive environmental props (petrol pumps, propane tanks) and GTA V-specific melee counter/dodge mechanics have no verified source \u2014 the one item covering props is marked confidence \"low\".\n\n2. WebSearch budget for the session was exhausted (200/200) partway through, so later verification was WebFetch-by-URL only. That limited cross-checking on: sticky bomb blast radius, grenade fuse time, and gang hostility behaviour.\n\n3. SOURCE DISAGREEMENTS\n- PC special-ability key: one source says \"+\", two say Caps Lock. I went with Caps Lock (majority, and consistent with standard PC binding lists). Moot for the agent either way \u2014 the key is not in his primitive set.\n- Assault Rifle magazine: gtabase lists \"Clip Size 40\" in its stat block but \"standard capacity 30 rounds, extended 100\" in prose. Flagged in the item.\n- Weapon count/classes: gta.wiki says 59 weapons across seven wheel categories in its table; gtabase and the gta.wiki Weapon Wheel page both say eight wheel classes. Eight is the cross-confirmed figure; the total count is left uncertain.\n- Targeting modes: sources agree the four modes exist but describe lock-hold behaviour under Assisted-Partial vs Assisted-Full inconsistently. Fine detail marked unverified.\n- Vehicle occupant shooting (\"first shot breaks the glass, second passes through\") is written on the wiki for GTA IV and carried forward without a GTA V-specific confirmation.\n- Headshot behaviour (player headshots kill peds instantly; NPCs generally don't headshot the player) comes from Steam community discussion, not an official or wiki source. Marked medium.\n- The three-simultaneous-hostile-pedestrian cap appears on exactly one page and is uncorroborated. Marked low.\n\n4. GTA-ONLINE CONTAMINATION AVOIDED\nThe Health page's max-health numbers (238 at rank 1-19 up to 328 at rank 100) are GTA Online rank scaling and are explicitly excluded from the health item. Targeting-mode lobby matchmaking rules are Online-only and excluded. Sticky bomb rank-19 unlock and $600 price are Online; the Story Mode figures (\"Friends Reunited\", $400) are what I recorded. Snacks-in-inventory healing is described by the source as an Online feature; the Story Mode healing item is limited to vending machines, food vendors, health pickups and safehouses.\n\n5. GROUNDING AGAINST THE ACTUAL HARNESS\nI read harness/wasted_harness/primitives.py and .../brain/prompts/{action_catalog,rules,situations}.md to make the \"cue\" fields match what the agent really receives. Two facts drove a lot of these items: his SCAN table is exactly {w, s, a, d, e, enter, esc} \u2014 no LMB, RMB, R, Tab, G or Caps Lock \u2014 so he has no manual aim, fire, reload, weapon-swap, grenade or special-ability capability at all; and his entire combat vocabulary is combat_hated_targets_around, seek_cover, flee_police. Items are therefore written as decision knowledge (engage / cover / leave) rather than as execution knowledge.\n\n6. NEEDS A LIVE CHECK ON THE SERVER (cannot be verified from documentation)\n- Whether combat_hated_targets_around does anything useful while the agent is seated in a vehicle, given GTA V's drive-by weapon restrictions.\n- Whether the combat task's radius_m behaves as I assume (task never completing when the radius is set very wide).\n- Whether the targeting mode is actually set to an assisted mode on the game install, and what that does to delegated combat effectiveness.\n- Time from \"vehicle on fire\" to explosion, which no source documents and which directly sets how urgent the exit_vehicle response must be.\n\n7. REPAIR PASS 2026-09-02 (adversarial critic review)\n- Fixed a real internal contradiction in never_initiate_with_police / combat_priority_ladder: the item's own 'meaning'/'avoid' fields said police are an absolute never-target while its 'exceptions' field already admitted scripted mission police shootouts exist, with no stated precedence \u2014 an agent honoring the absolute half would refuse scripted mission objectives (Prologue, Paleto Score, Blitz Play, etc. all script fights against police/NOOSE). Rewrote both items so the prohibition is explicitly scoped to mission.active == false (free roam), and mission-scripted hostile-flagged police are treated as an ordinary confirmed hostile per the ladder. The free-roam prohibition itself is unchanged and still absolute.\n- Added a new item, unexecutable_aimed_target_states_dont_loop, covering mission beats that need an aimed shot at a specific object or unflagged ped (a fence, an alarm box, a plane engine, one named guest) \u2014 combat_hated_targets_around cannot serve these (illegal with zero hostile-flagged entries) and the agent has no aim/fire primitive, so without this item the state had no exit and could hold the session forever. The fix does not invent a primitive that does not exist in the harness; it tells the brain to try press_prompt_key once, then declare the state blocked and defer to the failure-recovery ladder rather than loop.\n- health_regen_ceiling_is_half and cover_speeds_health_regen: a critic argued the 'must be stationary' regen gate was unverified and should be dropped. Verified directly against gta.wiki's Health page (fetched 2026-09-02) and against grandtheftwiki.com \u2014 the stand-still/movement-interrupts-regen mechanic is explicitly stated on gta.wiki, so the critic was wrong that it's shaky and I kept the fact. What I did change: added an explicit guard in both items so 'wait for regen' is never read as a reason to hold a position that is still exposed to hostile line of sight \u2014 cover/stillness is for regen only once it has actually provided safety, never a substitute for breaking contact.\n- hostile_ped_cap_of_three: a critic called the three-hostile-ambient-ped cap a hallucination. Re-verified the exact wording directly on gta.wiki's Pedestrians page (fetched 2026-09-02) and it is there verbatim, so the fact stands (kept at confidence low, single-source, as before). Softened the derived language ('will not snowball into a mob') so it reads as a rough ambient-only ceiling rather than a blanket safety guarantee that could make the agent under-react once gang or armed peds are involved.\n- Confirmed against primitives.py that agent_cannot_aim_or_fire_manually and special_ability_exists_but_not_for_the_agent are correct as written (SCAN table is exactly {w,s,a,d,e,enter,esc}; no LMB/RMB/R/Tab/G/Caps Lock) \u2014 these are the domain combat should be treated as authoritative for; other domains' Caps-Lock/number-key policies are out of scope for this file and are not this domain's error.\n- No items were deleted this pass."
+}

@@ -40,6 +40,7 @@ from postgrest.exceptions import APIError
 
 from .logsetup import get_logger
 from .settings import Settings
+from .totals import summarise_lifetime_seed
 
 log = get_logger("wasted.events")
 
@@ -78,13 +79,6 @@ UNPRODUCED_EVENT_REASONS: dict[str, str] = {
         "documented fields would be inventing the number it reports. Needs a "
         "bridge-side field (a contract change): Phase 3, harness/README.md."
     ),
-    "mission_end": (
-        "outcome detection (the passed/failed screen) is Phase 4; "
-        "behavior/missions.py is the flag-driven skeleton and emits only "
-        "mission_start, because emitting an outcome it cannot see would be a "
-        "fabrication."
-    ),
-    "mission_fail": "same as mission_end — Phase 4 outcome detection.",
 }
 UNPRODUCED_EVENT_TYPES: frozenset[str] = frozenset(UNPRODUCED_EVENT_REASONS)
 
@@ -225,13 +219,99 @@ class SupabaseWriter:
             self._buffer.append({"table": "decisions", "op": "insert", "row": row})
 
     def upsert_stats(self, row: dict[str, Any]) -> None:
+        """Buffer the heartbeat row. At most ONE per session is ever pending.
+
+        Every stats row carries the full absolute values, so an older pending
+        one has nothing in it the newer one does not. Appending them instead
+        cost ~720 dead rows per hour of outage, all replayed one HTTP round
+        trip at a time on the loop thread, and they ate the queue cap that
+        exists to protect the event history.
+        """
         row.setdefault("session_id", self.session_id)
+        entry = {"table": "stats", "op": "upsert", "row": row}
         with self._buffer_lock:
-            self._buffer.append({"table": "stats", "op": "upsert", "row": row})
+            for i, pending in enumerate(self._buffer):
+                if (
+                    pending["table"] == "stats"
+                    and pending["op"] == "upsert"
+                    and pending["row"].get("session_id") == row.get("session_id")
+                ):
+                    self._buffer[i] = entry
+                    return
+            self._buffer.append(entry)
 
     def insert_session(self, row: dict[str, Any]) -> None:
+        """Buffer the session row AT THE FRONT: every other table references
+        sessions(id), so anything already buffered for this session (a governor
+        level carried over from the last process, a startup event) would FK-fail
+        if it went out first, requeue the whole run, and only land a flush later.
+        """
         with self._buffer_lock:
-            self._buffer.append({"table": "sessions", "op": "insert", "row": row})
+            self._buffer.insert(0, {"table": "sessions", "op": "insert", "row": row})
+
+    def update_session_end(self, session_id: str, ended_at: str) -> None:
+        """Buffer `sessions.ended_at` for a clean shutdown (CONTRACTS §5).
+
+        Nothing ever wrote this column, so every session that has ever run reads
+        as still live — a crash and a clean stop were indistinguishable in the
+        one table designed to tell them apart. The timestamp is computed here
+        rather than left to the database's `now()` so a row replayed hours later
+        still carries the moment the show actually ended.
+        """
+        with self._buffer_lock:
+            self._buffer.append(
+                {
+                    "table": "sessions",
+                    "op": "update",
+                    "row": {"ended_at": ended_at},
+                    "match": {"id": session_id},
+                }
+            )
+
+    def insert_event_now(
+        self,
+        type_: str,
+        payload: dict[str, Any],
+        screenshot_url: str | None = None,
+    ) -> int | None:
+        """Insert ONE event immediately and return its id, or None when it could
+        not be written (it is then queued exactly like any other event).
+
+        Used only for the events a clip is cut from: `clips.event_id` was always
+        NULL because batched inserts use `returning="minimal"`, so no clip could
+        ever be linked back to the death or bust that produced it and the
+        `clips_event_idx` index was dead. Deaths and busts are rare, so the extra
+        round trip is bounded; the caller only takes this path when the clip
+        pipeline is actually connected.
+        """
+        if type_ not in EVENT_TYPES:
+            raise ValueError(
+                f"{type_!r} is not a CONTRACTS §4 event type (known: {sorted(EVENT_TYPES)})"
+            )
+        row: dict[str, Any] = {
+            "session_id": self.session_id,
+            "ts": _now_iso(),
+            "type": type_,
+            "payload": payload,
+        }
+        if screenshot_url is not None:
+            row["screenshot_url"] = screenshot_url
+        entry = {"table": "events", "op": "insert", "row": row}
+        if not self.configured or self.session_id is None:
+            self._enqueue([entry], reason="supabase not configured")
+            return None
+        try:
+            resp = self._get_client().table("events").insert(row).execute()
+            return int(resp.data[0]["id"])
+        except Exception as exc:  # broad by design: writer must never kill the loop
+            self._log_write_failure("events insert", exc)
+            self._enqueue([entry], reason=type(exc).__name__)
+            return None
+
+    def insert_mission(self, row: dict[str, Any]) -> None:
+        row.setdefault("session_id", self.session_id)
+        with self._buffer_lock:
+            self._buffer.append({"table": "missions", "op": "insert", "row": row})
 
     def insert_clip(self, row: dict[str, Any]) -> int | None:
         """Insert a clips row immediately; returns its id, or None when offline
@@ -262,7 +342,7 @@ class SupabaseWriter:
             buffered, self._buffer = self._buffer, []
         if not self.configured:
             if buffered:
-                self._enqueue(buffered, reason="supabase not configured")
+                self._enqueue(_coalesce_stats(buffered), reason="supabase not configured")
             return False
         still_pending: list[dict[str, Any]] = list(buffered)
         try:
@@ -272,7 +352,12 @@ class SupabaseWriter:
             # the rewrite.
             with _queue_file_lock(self.lock_path):
                 backlog = self._read_queue()
-                pending = backlog + buffered
+                # An outage accumulates one stats row per heartbeat; all but the
+                # newest per session are dead weight (each carries the full
+                # absolute counters), and replaying them costs one HTTP round
+                # trip each on this thread. Collapsing here also stops them
+                # crowding the event history out of the queue cap.
+                pending = _coalesce_stats(backlog + buffered)
                 if not pending:
                     return True
                 ok, still_pending = self._write_entries(pending)
@@ -299,9 +384,8 @@ class SupabaseWriter:
 
         remaining: list[dict[str, Any]] = []
         ok = True
-        for table, op in _grouping(entries):
-            group = [e for e in entries if e["table"] == table and e["op"] == op]
-            rows = []
+        for table, op, group in _runs(entries):
+            pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
             skipped = []
             for e in group:
                 row = dict(e["row"])
@@ -311,38 +395,79 @@ class SupabaseWriter:
                     else:
                         skipped.append(e)  # cannot satisfy NOT NULL honestly yet
                         continue
-                rows.append(row)
+                pairs.append((e, row))
             if skipped:
                 log.warning(
                     "rows kept queued: no session id known yet",
                     extra={"kv": {"table": table, "count": len(skipped)}},
                 )
                 remaining.extend(skipped)
-            if not rows:
+            if not pairs:
                 continue
+            # How many of this run actually landed. Requeueing the whole run on a
+            # late failure is what duplicated deaths and commentary lines on the
+            # public feed: events/decisions are `generated always as identity`
+            # with no natural key and no ON CONFLICT, so a re-inserted row is a
+            # genuinely new row, not an idempotent write.
+            written = 0
             try:
                 if op == "upsert":
                     # stats: one row per session, PK conflict target (§5)
-                    for row in rows:
+                    for _entry, row in pairs:
                         client.table(table).upsert(row, returning="minimal").execute()
+                        written += 1
+                elif op == "update":
+                    for entry, row in pairs:
+                        query = client.table(table).update(row, returning="minimal")
+                        for column, value in (entry.get("match") or {}).items():
+                            query = query.eq(column, value)
+                        query.execute()
+                        written += 1
                 else:
-                    for i in range(0, len(rows), MAX_BATCH):
-                        client.table(table).insert(rows[i : i + MAX_BATCH]).execute()
+                    for i in range(0, len(pairs), MAX_BATCH):
+                        chunk = pairs[i : i + MAX_BATCH]
+                        client.table(table).insert([row for _e, row in chunk]).execute()
+                        written += len(chunk)
                 log.info(
                     "flushed to supabase",
-                    extra={"kv": {"table": table, "op": op, "rows": len(rows)}},
+                    extra={"kv": {"table": table, "op": op, "rows": written}},
                 )
             except (httpx.HTTPError, APIError, OSError) as exc:
                 self._log_write_failure(f"{table} {op}", exc)
-                remaining.extend(
-                    e for e in group if e not in skipped
-                )
+                remaining.extend(entry for entry, _row in pairs[written:])
                 ok = False
             except Exception as exc:  # unexpected — still never kill the loop
                 self._log_write_failure(f"{table} {op} (unexpected)", exc)
-                remaining.extend(e for e in group if e not in skipped)
+                remaining.extend(entry for entry, _row in pairs[written:])
                 ok = False
         return ok, remaining
+
+    # -- reads -----------------------------------------------------------------
+
+    def fetch_lifetime_seed(self) -> dict[str, float] | None:
+        """Previously published totals, for the ONE-TIME seed of state/lifetime.json.
+
+        Returns None (never zeros) when the read cannot be made, so the caller
+        can leave the totals unseeded and try again next start rather than
+        freezing an under-reported history in place.
+        """
+        if not self.configured:
+            return None
+        try:
+            client = self._get_client()
+            stats = (
+                client.table("stats")
+                .select("session_id,deaths,busted,missions_passed,hours_alive")
+                .execute()
+                .data
+                or []
+            )
+            sessions = client.table("sessions").select("id,harness_version").execute().data or []
+        except Exception as exc:  # broad by design: a read must never kill startup
+            self._log_write_failure("lifetime seed read", exc)
+            return None
+        versions = {r.get("id"): r.get("harness_version") for r in sessions}
+        return summarise_lifetime_seed(stats, versions)
 
     # -- queue -----------------------------------------------------------------
 
@@ -394,7 +519,11 @@ class SupabaseWriter:
             return
         if size < MAX_QUEUE_BYTES:
             return
-        entries = self._read_queue()
+        # Redundant heartbeats first: they are the bulk of a long outage and
+        # dropping them costs nothing, whereas dropping events loses history.
+        raw = self._read_queue()
+        entries = _coalesce_stats(raw)
+        superseded = len(raw) - len(entries)
         keep: list[dict[str, Any]] = []
         budget = MAX_QUEUE_BYTES
         for entry in reversed(entries):  # newest first
@@ -405,13 +534,14 @@ class SupabaseWriter:
             keep.append(entry)
         keep.reverse()
         dropped = len(entries) - len(keep)
-        if dropped <= 0:
+        if dropped <= 0 and superseded <= 0:
             return
         log.error(
             "offline queue over cap; dropping oldest rows",
             extra={
                 "kv": {
                     "dropped": dropped,
+                    "superseded_stats": superseded,
                     "kept": len(keep),
                     "row_cap": MAX_QUEUED_ROWS,
                     "byte_cap": MAX_QUEUE_BYTES,
@@ -506,10 +636,44 @@ class SupabaseWriter:
         )
 
 
-def _grouping(entries: list[dict[str, Any]]) -> list[tuple[str, str]]:
-    seen: list[tuple[str, str]] = []
+def _runs(
+    entries: list[dict[str, Any]],
+) -> list[tuple[str, str, list[dict[str, Any]]]]:
+    """Consecutive entries sharing (table, op), in queue order.
+
+    Deliberately NOT a global group-by. Grouping globally re-ordered the whole
+    flush by table — every queued `events` row went in as one block, then every
+    `decisions` row — so identity ids stopped following chronology and a
+    `sessions` insert could land after the rows that reference it (an FK failure
+    for the whole run). Adjacent runs cost a few more round trips on an
+    interleaved backlog and buy ids that agree with time.
+    """
+    runs: list[tuple[str, str, list[dict[str, Any]]]] = []
     for e in entries:
-        key = (e["table"], e["op"])
-        if key not in seen:
-            seen.append(key)
-    return seen
+        table, op = e["table"], e["op"]
+        if runs and runs[-1][0] == table and runs[-1][1] == op:
+            runs[-1][2].append(e)
+        else:
+            runs.append((table, op, [e]))
+    return runs
+
+
+def _coalesce_stats(entries: list[dict[str, Any]]) -> list[dict[str, Any]]:
+    """Drop every stats upsert but the newest one per session, in place order.
+
+    Safe because a stats row carries absolute values, not deltas: the newest row
+    contains everything the ones before it said. Everything that is not a stats
+    upsert is passed through untouched, in its original position.
+    """
+    newest: dict[Any, int] = {}
+    for i, e in enumerate(entries):
+        if e["table"] == "stats" and e["op"] == "upsert":
+            newest[e["row"].get("session_id")] = i
+    if not newest:
+        return entries
+    keep = set(newest.values())
+    return [
+        e
+        for i, e in enumerate(entries)
+        if not (e["table"] == "stats" and e["op"] == "upsert") or i in keep
+    ]

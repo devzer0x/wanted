@@ -15,16 +15,23 @@ from __future__ import annotations
 import base64
 import random
 import time
+from collections.abc import Callable
+from typing import Any
 
 import anthropic
 import pydantic
 
-from ..budget import Pricing, cost_of_usage
+from ..budget import Pricing
 from ..events import UNPRODUCED_EVENT_TYPES
 from ..logsetup import get_logger
 from .prompts import director_static_prefix
-from .schemas import DecisionModel
-from .tactical import MAX_DECISION_TOKENS, DecisionFailedError, DecisionResult
+from .tactical import (
+    DIRECTOR_MAX_DECISION_TOKENS,
+    BilledCall,
+    DecisionFailedError,
+    DecisionResult,
+    _retry_correction,
+)
 
 log = get_logger("wasted.brain.director")
 
@@ -33,8 +40,22 @@ DIRECTOR_TIMER_RANGE_S = (60.0, 120.0)
 # §4 events with screenshot: yes — the contract's list, kept verbatim so the
 # copy can be checked against docs/CONTRACTS.md. wanted_change qualifies only
 # when `to` >= 3; the caller enforces that before naming it as a trigger.
+#
+# mission_start was added in CONTRACTS v1.3 after the first live session. /state carries no
+# mission name and no objective text (the field does not exist anywhere in the pipeline), so
+# the screen is the only honest source of what a mission actually wants. Without this the
+# director could only ever look AFTER something went wrong — death, busted, mission_fail —
+# never at the moment the game draws the objective.
 CONTRACT_VISION_EVENTS: frozenset[str] = frozenset(
-    {"death", "busted", "mission_end", "mission_fail", "stunt", "wanted_change"}
+    {
+        "death",
+        "busted",
+        "mission_start",  # v1.3
+        "mission_end",
+        "mission_fail",
+        "stunt",
+        "wanted_change",
+    }
 )
 
 # Events big enough to wake the director early (harness policy, not contract).
@@ -79,10 +100,18 @@ class DirectorCadence:
 
 
 class DirectorBrain:
-    def __init__(self, client: anthropic.Anthropic, pricing: Pricing) -> None:
+    def __init__(
+        self,
+        client: anthropic.Anthropic,
+        pricing: Pricing,
+        on_cost: Callable[[float], None] | None = None,
+    ) -> None:
         self._client = client
         self._pricing = pricing
         self._prefix = director_static_prefix()
+        # Same billed-call wrapper as the tactical tier: the cost of a response
+        # is recorded when it arrives, not when the caller manages to use it.
+        self._call_api = BilledCall(client, pricing, on_cost)
 
     def decide(
         self,
@@ -99,9 +128,10 @@ class DirectorBrain:
                 f"not a contracted vision trigger ({sorted(VISION_TRIGGERS)})"
             )
         last_exc: Exception | None = None
+        context = dynamic_context
         for attempt in (1, 2):
             try:
-                return self._call(dynamic_context, screenshot_jpeg)
+                return self._call(context, screenshot_jpeg)
             except (anthropic.APIError, pydantic.ValidationError, ValueError) as exc:
                 last_exc = exc
                 log.warning(
@@ -109,6 +139,9 @@ class DirectorBrain:
                     extra={"kv": {"attempt": attempt, "error": f"{type(exc).__name__}: {exc}"}},
                 )
                 if attempt == 1:
+                    # Same fix as the tactical tier: a blind retry repeats the same
+                    # schema violation. Feed the validator's complaint back.
+                    context = dynamic_context + _retry_correction(exc)
                     time.sleep(1.0)
         raise DecisionFailedError(
             f"director decision failed twice (last error: "
@@ -116,8 +149,7 @@ class DirectorBrain:
         ) from last_exc
 
     def _call(self, dynamic_context: str, screenshot_jpeg: bytes | None) -> DecisionResult:
-        mp = self._pricing.director
-        content: list[dict] = [{"type": "text", "text": dynamic_context}]
+        content: list[dict[str, Any]] = [{"type": "text", "text": dynamic_context}]
         if screenshot_jpeg is not None:
             content.append(
                 {
@@ -129,29 +161,7 @@ class DirectorBrain:
                     },
                 }
             )
-        response = self._client.messages.parse(
-            model=mp.id,
-            max_tokens=MAX_DECISION_TOKENS,
-            system=[
-                {
-                    "type": "text",
-                    "text": self._prefix,
-                    "cache_control": {"type": "ephemeral"},
-                }
-            ],
-            messages=[{"role": "user", "content": content}],
-            output_format=DecisionModel,
-        )
-        decision = response.parsed_output
-        if decision is None:
-            raise ValueError("model returned no parseable decision object")
-        usage = response.usage
-        return DecisionResult(
-            decision=decision,
-            model=mp.id,
-            input_tokens=usage.input_tokens or 0,
-            output_tokens=usage.output_tokens or 0,
-            cache_read_tokens=usage.cache_read_input_tokens or 0,
-            cache_creation_tokens=usage.cache_creation_input_tokens or 0,
-            cost_usd=cost_of_usage(self._pricing, mp.id, usage),
+        return self._call_api.run(
+            self._pricing.director.id, self._prefix, content,
+            max_tokens=DIRECTOR_MAX_DECISION_TOKENS,
         )

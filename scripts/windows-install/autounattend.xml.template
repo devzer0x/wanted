@@ -1,0 +1,276 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WANTED - unattended install of Windows 11 Enterprise Evaluation 25H2.
+
+  Placeholder tokens are substituted by install-windows.sh at build time, so that no password is
+  ever written into a tracked file. Never commit a rendered copy of this file. The renderer fails
+  closed: it aborts if any placeholder is missing from the template, or if any survives rendering.
+
+  Design notes:
+   * UEFI/GPT. The real machine boots UEFI (AMI firmware, efivars present), and the QEMU install
+     runs under OVMF so the firmware environment matches the hardware it will boot on.
+   * Only the target disk is attached to the VM, so DiskID 0 is unambiguous and the second NVMe
+     cannot be wiped by mistake.
+   * The LabConfig bypasses are required because this board's TPM/Secure Boot state cannot be
+     inspected without a KVM session. Windows 11 only enforces these checks during Setup; it runs
+     fine without them afterwards. We deliberately do NOT emulate a TPM: doing so would let Setup
+     succeed in the VM and then fail on real hardware that has no TPM.
+   * Networking is NOT configured here. Windows binds IP settings to a specific adapter, and the
+     adapter present during the VM install is not the adapter present on real hardware. The static
+     address is applied at boot by wasted-network.ps1, which targets the real NIC by MAC address.
+-->
+<unattend xmlns="urn:schemas-microsoft-com:unattend">
+
+  <settings pass="windowsPE">
+    <component name="Microsoft-Windows-International-Core-WinPE"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <SetupUILanguage><UILanguage>en-US</UILanguage></SetupUILanguage>
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+
+      <!-- Hardware requirement bypasses: Setup-only, no effect after install. -->
+      <RunSynchronous>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassTPMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassSecureBootCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassRAMCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>4</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassStorageCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+        <RunSynchronousCommand wcm:action="add">
+          <Order>5</Order>
+          <Path>reg add HKLM\SYSTEM\Setup\LabConfig /v BypassCPUCheck /t REG_DWORD /d 1 /f</Path>
+        </RunSynchronousCommand>
+      </RunSynchronous>
+
+      <!-- Belt and braces: Setup must never try to fetch anything online. The first install
+           attempt failed because Windows saw a half-working network, committed to online code
+           paths, and then timed out on every request (39 x 0x80072xxx, Downloads: 0). The VM now
+           has no NIC at all; this makes the intent explicit and survives any future NIC change. -->
+      <DynamicUpdate>
+        <Enable>false</Enable>
+        <WillShowUI>Never</WillShowUI>
+      </DynamicUpdate>
+
+      <DiskConfiguration>
+        <WillShowUI>OnError</WillShowUI>
+        <Disk wcm:action="add">
+          <DiskID>0</DiskID>
+          <WillWipeDisk>true</WillWipeDisk>
+          <CreatePartitions>
+            <CreatePartition wcm:action="add">
+              <Order>1</Order><Type>EFI</Type><Size>512</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>2</Order><Type>MSR</Type><Size>16</Size>
+            </CreatePartition>
+            <CreatePartition wcm:action="add">
+              <Order>3</Order><Type>Primary</Type><Extend>true</Extend>
+            </CreatePartition>
+          </CreatePartitions>
+          <ModifyPartitions>
+            <ModifyPartition wcm:action="add">
+              <Order>1</Order><PartitionID>1</PartitionID>
+              <Format>FAT32</Format><Label>System</Label>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>2</Order><PartitionID>2</PartitionID>
+            </ModifyPartition>
+            <ModifyPartition wcm:action="add">
+              <Order>3</Order><PartitionID>3</PartitionID>
+              <Format>NTFS</Format><Label>Windows</Label><Letter>C</Letter>
+            </ModifyPartition>
+          </ModifyPartitions>
+        </Disk>
+      </DiskConfiguration>
+
+      <ImageInstall>
+        <OSImage>
+          <InstallFrom>
+            <MetaData wcm:action="add">
+              <Key>/IMAGE/NAME</Key>
+              <Value>@@IMAGE_NAME@@</Value>
+            </MetaData>
+          </InstallFrom>
+          <InstallTo><DiskID>0</DiskID><PartitionID>3</PartitionID></InstallTo>
+          <WillShowUI>OnError</WillShowUI>
+        </OSImage>
+      </ImageInstall>
+
+      <UserData>
+        <AcceptEula>true</AcceptEula>
+        <FullName>WASTED</FullName>
+        <Organization>WASTED</Organization>
+      </UserData>
+    </component>
+  </settings>
+
+  <settings pass="specialize">
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <ComputerName>@@COMPUTERNAME@@</ComputerName>
+      <TimeZone>W. Europe Standard Time</TimeZone>
+    </component>
+
+    <!-- RDP on, with NLA. This box is internet-facing, so NLA stays enabled. -->
+    <component name="Microsoft-Windows-TerminalServices-LocalSessionManager"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <fDenyTSConnections>false</fDenyTSConnections>
+    </component>
+    <component name="Microsoft-Windows-TerminalServices-RDP-WinStationExtensions"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <UserAuthentication>1</UserAuthentication>
+      <SecurityLayer>2</SecurityLayer>
+    </component>
+    <component name="Networking-MPSSVC-Svc"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <FirewallGroups>
+        <FirewallGroup wcm:action="add" wcm:keyValue="RemoteDesktop">
+          <Active>true</Active>
+          <Group>@FirewallAPI.dll,-28752</Group>
+          <Profile>all</Profile>
+        </FirewallGroup>
+      </FirewallGroups>
+    </component>
+  </settings>
+
+  <settings pass="oobeSystem">
+    <!-- REQUIRED, and its absence is not obvious: without this component OOBE prompts
+         interactively for region and keyboard layout, and once it does that it runs the WHOLE
+         OOBE sequence interactively - no account is created from this file and
+         FirstLogonCommands never run. The International-Core-WinPE component in the windowsPE
+         pass only covers Setup itself; it does NOT cover OOBE. Microsoft's docs are explicit:
+         "During the OOBE phase, the setup prompts for the desired language, keyboard layout, or
+         region ... these settings can be automatically configured through the component
+         amd64_Microsoft-Windows-International-Core__neutral." -->
+    <component name="Microsoft-Windows-International-Core"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <InputLocale>en-US</InputLocale>
+      <SystemLocale>en-US</SystemLocale>
+      <UILanguage>en-US</UILanguage>
+      <UILanguageFallback>en-US</UILanguageFallback>
+      <UserLocale>en-US</UserLocale>
+    </component>
+
+    <component name="Microsoft-Windows-Shell-Setup"
+               processorArchitecture="amd64" publicKeyToken="31bf3856ad364e35"
+               language="neutral" versionScope="nonSxS"
+               xmlns:wcm="http://schemas.microsoft.com/WMIConfig/2002/State"
+               xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+      <OOBE>
+        <HideEULAPage>true</HideEULAPage>
+        <HideOEMRegistrationScreen>true</HideOEMRegistrationScreen>
+        <HideOnlineAccountScreens>true</HideOnlineAccountScreens>
+        <HideLocalAccountScreen>true</HideLocalAccountScreen>
+        <HideWirelessSetupInOOBE>true</HideWirelessSetupInOOBE>
+        <NetworkLocation>Work</NetworkLocation>
+        <ProtectYourPC>3</ProtectYourPC>
+      </OOBE>
+
+      <!-- Setting AdministratorPassword enables the BUILT-IN Administrator account (RID 500).
+           We log on as that rather than as a custom account, because on the previous attempt OOBE
+           created the custom account and then failed to add it to any group:
+
+             UserAccounts: created account 'wasted'
+             UserAccounts: failed to add 'wasted' to group 'Users' (0x8007056b)
+             UserAccounts: failed to add 'wasted' to group 'Administrators' (0x8007056b)
+
+           0x8007056b is ERROR_NO_SUCH_MEMBER - OOBE's group-add ran before the account was
+           visible to that API. The result was a machine whose only enabled account was a standard
+           user, so FirstLogonCommands could not even create C:\wasted, and every subsequent step
+           silently did nothing.
+
+           The built-in Administrator is permanently a member of Administrators, so no group-add
+           happens and there is nothing to race. It also carries a full token with no UAC
+           interception, which is what an unattended game/stream host needs.
+
+           The named account is still created (so OOBE never shows an account screen) but nothing
+           depends on its group membership any more. DisplayName is deliberately omitted - it
+           differing from Name is a plausible trigger for the group-add lookup failing. -->
+      <UserAccounts>
+        <AdministratorPassword>
+          <Value>@@ADMIN_PASSWORD@@</Value>
+          <PlainText>true</PlainText>
+        </AdministratorPassword>
+        <LocalAccounts>
+          <LocalAccount wcm:action="add">
+            <Name>@@ADMIN_USER@@</Name>
+            <Group>Administrators</Group>
+            <Description>WANTED show operator account</Description>
+            <Password>
+              <Value>@@ADMIN_PASSWORD@@</Value>
+              <PlainText>true</PlainText>
+            </Password>
+          </LocalAccount>
+        </LocalAccounts>
+      </UserAccounts>
+
+      <!-- The game must run in an interactive console session, so this logs on automatically at
+           boot and stays logged on across reboots. -->
+      <AutoLogon>
+        <Enabled>true</Enabled>
+        <Username>Administrator</Username>
+        <LogonCount>999999</LogonCount>
+        <Password>
+          <Value>@@ADMIN_PASSWORD@@</Value>
+          <PlainText>true</PlainText>
+        </Password>
+      </AutoLogon>
+
+      <FirstLogonCommands>
+        <SynchronousCommand wcm:action="add">
+          <Order>1</Order>
+          <Description>Create C:\wasted</Description>
+          <CommandLine>cmd.exe /c md C:\wasted C:\wasted\logs</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>2</Order>
+          <Description>Copy payload off the unattend media</Description>
+          <CommandLine>cmd.exe /c for %d in (D E F G H I J K L M) do @if exist %d:\wasted\wasted-firstboot.ps1 xcopy /E /I /Y %d:\wasted C:\wasted\</CommandLine>
+        </SynchronousCommand>
+        <SynchronousCommand wcm:action="add">
+          <Order>3</Order>
+          <Description>Run WASTED first-boot configuration</Description>
+          <CommandLine>powershell.exe -ExecutionPolicy Bypass -NoProfile -File C:\wasted\wasted-firstboot.ps1</CommandLine>
+        </SynchronousCommand>
+      </FirstLogonCommands>
+    </component>
+  </settings>
+
+</unattend>

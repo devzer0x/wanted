@@ -113,7 +113,7 @@ introduced in this working tree; against an older deployment they fail by design
 signal that a redeploy is due. To health-check a deployment on its own terms:
 
 ```bash
-PLAYWRIGHT_BASE_URL=https://wasted-lemon.vercel.app npx playwright test --grep-invert @current-build
+PLAYWRIGHT_BASE_URL=https://<production-domain> npx playwright test --grep-invert @current-build
 ```
 
 Realtime delivery still cannot be exercised here (no local Realtime service); it is measured

@@ -1,0 +1,807 @@
+{
+  "domain": "vehicles",
+  "items": [
+    {
+      "id": "class_taxonomy_recognition",
+      "category": "recognition",
+      "cue": "A vehicle model name / class field arrives in game state, or the agent sees a vehicle he is considering entering.",
+      "context": "Always. This is the root lookup that every other vehicle decision hangs off.",
+      "meaning": "GTA V sorts vehicles into stable classes: Compacts, Sedans, Coupes, Sports, Sports Classics, Super, Muscle, SUVs, Off-Road, Vans, Commercial (big rigs), Industrial, Service, Utility, Emergency, Military, Motorcycles, Cycles (bicycles), Boats, Helicopters, Planes. Class predicts handling, durability, seat count and top speed far better than looks do. Open-Wheel and Tuners exist in the game files but are Online-era additions and are not part of a normal Story Mode street population.",
+      "suggested_action": "Resolve the class first, then apply the class profile (speed band, grip character, durability, seats) before deciding whether to steal, drive fast, ram, or abandon it.",
+      "avoid": "Treating every four-wheeled thing as 'a car'. A Bison, a Dune Buggy and a Zentorno share nothing except wheel count.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Class membership occasionally surprises: the Blazer quad is Off-Road not Motorcycle; the Sanchez is a Motorcycle that races in Off-Road events. Do not infer class from silhouette alone when the state feed gives you the model name.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "no_car_assumptions_off_road_domain",
+      "category": "general_rule",
+      "cue": "the agent is about to issue drive_to / wander_drive and the vehicle he is in or heading for is a bike, boat, helicopter or plane.",
+      "context": "Cross-cutting. Applies the moment the controlled vehicle leaves the 'four wheels on tarmac' category.",
+      "meaning": "Car reflexes are actively harmful outside the car classes. Bikes have no cage and eject the rider on impact. Boats have no brakes and no grip — they slide, and steering only works with throttle. Helicopters need constant collective and will settle into terrain if left alone. Planes stall below flying speed and cannot stop in the air. A path a car could take is frequently lethal or impossible for these.",
+      "suggested_action": "Branch behaviour by domain before pathing: land-wheeled (normal driving), two-wheeled (slow entry into corners, never ram, never fight from the saddle), water (plan wide arcs, cut throttle early), rotary (hold altitude, approach landing zones slowly and vertically), fixed-wing (never let airspeed decay, plan a long straight for landing).",
+      "avoid": "Reusing a car's braking distance, turn radius, collision tolerance or 'ram the blocker' tactic on a bike, boat or aircraft.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Quads (Blazer) and buggies (Dune) are wheeled but have no cage — treat their occupant exposure like a bike even though the driving model is car-like.",
+      "sources": [
+        "https://gta.wiki/w/Motorcycles",
+        "https://gta.wiki/w/Jetmax",
+        "https://gta.wiki/w/Maverick",
+        "https://gta.wiki/w/Titan"
+      ]
+    },
+    {
+      "id": "compacts_profile",
+      "category": "class_profile",
+      "cue": "Small two-box hatchback with a short nose and tiny wheels — Blista, Panto, Issi, Dilettante, Prairie.",
+      "context": "Dense city streets, parking lots, alleys.",
+      "meaning": "Compacts are slow (low top speed, weak acceleration), light, and crumple quickly, but they are nimble, park anywhere and fit through gaps. Typically 2-4 seats. They are everywhere in Los Santos so one is nearly always within walking distance.",
+      "suggested_action": "Use as a disposable first-grab vehicle to get moving, or for tight alley routes. Upgrade to something faster at the first opportunity if a chase is likely.",
+      "avoid": "Choosing a compact as a getaway car, or ramming anything with it — it loses every collision including against a Bison or a Police Cruiser.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "The Dilettante is a hybrid and is unusually quiet, which is stylistically interesting but does not change its poor performance.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "sedans_profile",
+      "category": "class_profile",
+      "cue": "Four-door saloon with a boot — Stanier, Asea, Premier, Washington, Ingot, Tailgater, Fugitive.",
+      "context": "The default civilian traffic vehicle across the whole map.",
+      "meaning": "Sedans are the middle of the range: mediocre top speed, mediocre grip, four seats, average durability. Their real value is availability — traffic is thick with them, and they are the base for the Police Cruiser (Stanier), so they are stable and predictable to drive.",
+      "suggested_action": "Good default when the agent needs any working car right now, and the only sensible choice when he needs to carry three passengers without stealing something exotic.",
+      "avoid": "Expecting a sedan to outrun a 3-star police response. It cannot.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "A few sedans (Schafter, Tailgater) are noticeably quicker than the class average and are acceptable stopgap chase cars.",
+      "sources": [
+        "https://gta.wiki/w/Police_Cruiser",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "sports_profile",
+      "category": "class_profile",
+      "cue": "Low, wide two-door with big wheels and a visible spoiler or aggressive front splitter — Banshee, Elegy, Massacro, Comet, Jester, Feltzer, Carbonizzare, Turismo R.",
+      "context": "Choosing a chase or getaway vehicle on paved roads.",
+      "meaning": "The sweet spot class. High grip, strong acceleration, top speeds in the 115-123 mph band (Massacro ~122.75 mph, Turismo R ~122.5 mph). Usually 2 seats. Fast enough to break contact with police, forgiving enough not to spin on every corner the way Super class can.",
+      "suggested_action": "Prefer Sports over Super for actual driving competence, especially when the agent must corner, weave through traffic, or survive a mistake. This is the best all-round getaway class.",
+      "avoid": "Taking a Sports car off the tarmac — low ride height beaches them on kerbs, dirt and hillsides.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some 'Sports' entries (Ninef, Rapid GT) are noticeably slower than the class leaders; the class name is not a speed guarantee.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "super_profile",
+      "category": "class_profile",
+      "cue": "Extremely low wedge-shaped two-seater, scissor or exotic doors, huge rear intakes — Adder, Zentorno, Entity XF, Infernus, Cheetah, T20, Osiris, Voltic.",
+      "context": "Top-speed runs on freeways; showpiece moments for the stream.",
+      "meaning": "The fastest land class (Adder ~126.25 mph, T20 and Zentorno ~122.25-122.5 mph, Entity XF ~122.25 mph). Almost all are 2-seat and AWD-biased. They accelerate hard enough that reaction windows shrink; several are twitchy at the limit. They are also fragile in the sense that a hard hit ruins the wheels and geometry.",
+      "suggested_action": "Use Super for open freeway escapes and for spectacle. Reduce commanded speed sharply before any turn, and prefer long straight routes over the shortest route.",
+      "avoid": "Point-to-point pathing through city intersections at full throttle. A Super car at 120 mph in downtown Los Santos ends in a wall.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Voltic is electric and, per the wiki, does not explode when set on fire — the battery is destroyed and the car is disabled instead. That makes it unusually survivable but leaves the agent stranded.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list",
+        "https://gta.wiki/w/Entity_XF",
+        "https://gta.wiki/w/Infernus",
+        "https://gta.wiki/w/Voltic"
+      ]
+    },
+    {
+      "id": "infernus_handling_trap",
+      "category": "handling",
+      "cue": "the agent is driving a Pegassi Infernus (mid-engine wedge, scissor doors) and a corner is coming up.",
+      "context": "Any turn taken above roughly half throttle.",
+      "meaning": "The Infernus is unusually unstable for a Super car. It oversteers, and lifting off the throttle mid-corner without braking causes wild spinouts. It must be held on either the accelerator or the brake throughout the whole turn.",
+      "suggested_action": "When cornering an Infernus, stay on the brake into the turn and back on the throttle through it — never coast. If the harness cannot express that, command a lower approach speed instead.",
+      "avoid": "Coasting through a bend. That is the specific input that spins it.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "gta.wiki quotes an Infernus top speed of 150 km/h from the handling file, which is a data-file figure, not the measured in-game speed; treat class-relative ordering as reliable and absolute numbers as approximate.",
+      "sources": [
+        "https://gta.wiki/w/Infernus"
+      ]
+    },
+    {
+      "id": "entity_xf_profile",
+      "category": "handling",
+      "cue": "the agent is in or near an Overflod Entity XF — angular carbon wedge, very wide stance.",
+      "context": "High-speed pursuit or escape on road.",
+      "meaning": "One of the most planted Super cars: AWD with 80/20 rear bias and good weight distribution give it very high traction and strong acceleration for the class. In Story Mode it appears in the missions 'I Fought the Law...' and 'Pack Man', and is otherwise a Legendary Motorsport purchase.",
+      "suggested_action": "If an Entity XF is available and the route is paved, take it — it is one of the few Super cars the agent can drive near the limit without spinning.",
+      "avoid": "Assuming AWD means it can go off-road. Ground clearance still rules that out.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "gta.wiki reports a 193 mph speedometer reading, which is the in-car dial, not the game's measured top speed (gtabase measures ~122.25 mph). Do not use dial readings for planning.",
+      "sources": [
+        "https://gta.wiki/w/Entity_XF",
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list"
+      ]
+    },
+    {
+      "id": "adder_profile",
+      "category": "handling",
+      "cue": "Truffade Adder — wide low two-seater with a two-tone body split down the flanks; a unique one sits parked outside Ponsonbys in Rockford Hills.",
+      "context": "When the agent wants the fastest freely obtainable car in Story Mode.",
+      "meaning": "Top speed around 126.25 mph, the quickest of the Super class in single player, AWD, 2 seats, heavy (roughly 1,800 kg). Its handling is not its strength — it is a straight-line weapon. A free one spawns on the street outside Ponsonbys near Michael's house.",
+      "suggested_action": "Grab the Ponsonbys Adder when a long freeway run or a top-speed stunt is the goal. Announce the parked-spawn location as a viewer-pleasing bit of trivia.",
+      "avoid": "Using the Adder as a general-purpose city car; its mass plus speed makes it clumsy in traffic.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Truffade Z-Type (Sports Classics) is marginally faster at ~127 mph but is purchase-only at $10,000,000, so it is effectively unavailable to the agent early on.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list"
+      ]
+    },
+    {
+      "id": "muscle_profile",
+      "category": "class_profile",
+      "cue": "Long-bonnet American two-door, often with a bonnet scoop, raised rear — Dominator, Gauntlet, Buffalo, Sabre Turbo, Ruiner, Phoenix, Blade, Vigero.",
+      "context": "Straight roads, ramming, Blaine County.",
+      "meaning": "Rear-wheel drive, heavy front end, strong straight-line speed but poor grip — they break traction easily and understeer into corners then snap loose. Sturdier than Sports cars in a collision. The Pisswasser Dominator (unlocked after the third Stock Car Race) reaches ~125 mph, one of the fastest cars in single player.",
+      "suggested_action": "Pick Muscle when the route is straight and contact is likely — they survive trading paint. Brake earlier than a Sports car would.",
+      "avoid": "Throttling hard out of a corner. RWD Muscle cars spin their wheels and swap ends.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "A few Muscle cars (Ruiner, Blade) are much slower than the class leaders.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list"
+      ]
+    },
+    {
+      "id": "sports_classics_profile",
+      "category": "class_profile",
+      "cue": "Vintage or retro-styled two-seater — Monroe, Z-Type, Stinger, JB 700, Coquette Classic, Roosevelt.",
+      "context": "Rare street spawns; mostly bought.",
+      "meaning": "A mixed class. Some are extremely fast (Z-Type ~127 mph, Monroe ~123.25 mph) but they generally have period-appropriate handling: narrow grip envelope, twitchy, no modern stability. Mostly 2 seats, mostly fragile.",
+      "suggested_action": "Treat a Sports Classic as a Super car for speed and a Muscle car for grip: fast in a straight line, unforgiving in a corner.",
+      "avoid": "Assuming an old-looking car is slow. The Z-Type is the fastest car in Story Mode.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Most of this class is purchase-only in Story Mode and will rarely appear in street traffic, so the agent will seldom get the chance.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list"
+      ]
+    },
+    {
+      "id": "suv_profile",
+      "category": "class_profile",
+      "cue": "Tall boxy four-door with high ride height and roof rails — Baller, Cavalcade, Granger, Landstalker, Dubsta, Radius, Serrano, Huntley S.",
+      "context": "Mixed terrain, carrying a crew, rough roads to Blaine County.",
+      "meaning": "Heavy, 4-seat (some more), high centre of gravity, mediocre top speed but strong mass. They can leave the tarmac onto dirt without beaching, absorb impacts well, and win most collisions against cars. They roll over if cornered hard at speed.",
+      "suggested_action": "Best compromise vehicle when the route mixes road and dirt or when the agent needs seats. Keep cornering speed moderate to avoid tipping.",
+      "avoid": "Hard swerves at speed — the tall body rolls, and a rolled SUV costs far more time than the swerve saved.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Dubsta 6x6 and armoured variants are Online-era; a plain Story Mode Dubsta is a normal SUV.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "offroad_profile",
+      "category": "class_profile",
+      "cue": "Knobbly tyres, raised suspension, roll cage or open frame — Bifta, Dune Buggy, Rebel, Sandking, Bodhi, Injection, Blazer, Rancher.",
+      "context": "Mount Chiliad, Grand Senora Desert, riverbeds, any unpaved route.",
+      "meaning": "Built for terrain: high clearance, soft long-travel suspension, good grip on dirt, poor top speed and floaty handling on tarmac. Many are open-bodied, which leaves occupants exposed to gunfire.",
+      "suggested_action": "Choose Off-Road whenever the planned path leaves the road network, and prefer it for shortcuts across hills that would beach a car. Expect to be overtaken on freeways.",
+      "avoid": "Fighting or fleeing police in an open-frame Off-Road vehicle — no bodywork means no cover.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Sandking is tall and heavy enough to be a genuinely good rammer; most of the rest of the class is not.",
+      "sources": [
+        "https://gta.wiki/w/Dune_Buggy",
+        "https://gta.wiki/w/Blazer"
+      ]
+    },
+    {
+      "id": "dune_buggy_profile",
+      "category": "handling",
+      "cue": "BF Dune Buggy — skeletal tube frame, no doors, no windows, exposed engine at the back. Common around Stab City, Grand Senora Desert and Mount Chiliad trails.",
+      "context": "Desert and hill routes in Blaine County.",
+      "meaning": "Light and quick to accelerate, ~84 mph top speed, keeps decent grip even fast, and recovers well from jumps and rollovers. Two seats. The open cabin makes occupants heavily vulnerable to gunfire — there is literally nothing between the rider and a bullet.",
+      "suggested_action": "Excellent for cross-country traversal and stunt content. If a firefight starts, get out and take cover on foot rather than trying to drive it out.",
+      "avoid": "Using it as a getaway vehicle when police are already shooting — occupants are exposed and it cannot outrun a cruiser on tarmac.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "It handles jumps and rollovers unusually well, so a flip is recoverable where it would end the run in most vehicles.",
+      "sources": [
+        "https://gta.wiki/w/Dune_Buggy"
+      ]
+    },
+    {
+      "id": "blazer_quad_profile",
+      "category": "handling",
+      "cue": "Nagasaki Blazer — a four-wheel ATV quad, single rider straddling it, handlebars not a wheel. Common around Blaine County, two parked on Paleto Bay shoreline, one south of the Altruist Camp on Mount Chiliad.",
+      "context": "Trails, beaches, narrow alleys.",
+      "meaning": "One seat only. All-wheel drive (80% rear), ~74.5 mph top speed, quick acceleration and impressive braking, good off-road, with leaning that stabilises jumps. It has slight oversteer and a sensitive response. The rider is fully exposed and can be thrown off.",
+      "suggested_action": "Great for solo off-road traversal and for squeezing through gaps a car cannot take. Ride it like a bike, not like a car: gentle steering inputs, no ramming.",
+      "avoid": "Planning a passenger pickup with a Blazer — there is no second seat.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "It sits in the Off-Road class, not Motorcycles, so class-based filters may miss it; its exposure risk is motorcycle-grade regardless.",
+      "sources": [
+        "https://gta.wiki/w/Blazer"
+      ]
+    },
+    {
+      "id": "vans_profile",
+      "category": "class_profile",
+      "cue": "Boxy panel van or minivan — Burrito, Bison, Youga, Rumpo, Speedo, Minivan, Journey, Pony, Gang Burrito.",
+      "context": "Moving a crew, or needing an unremarkable vehicle.",
+      "meaning": "Slow, tall, understeery, but roomy (usually 4 seats, sometimes more) and reasonably tough. They blend into traffic completely, which matters when police are searching by line of sight. Poor acceleration means poor escapes.",
+      "suggested_action": "Use a van when the goal is carrying people or looking ordinary during a search-cone evasion, not when the goal is speed.",
+      "avoid": "Trying to outrun a helicopter in a van. Break line of sight instead and let the search expire.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "The Speedo and Gang Burrito are noticeably quicker than the rest of the class.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "bigrig_phantom_profile",
+      "category": "class_profile",
+      "cue": "Semi tractor unit, very tall cab, fifth-wheel coupling behind the cab — Phantom, Hauler, Packer. Spawns at Harmony Truck Stop on Joshua Road, around the Docks, and on Great Ocean Highway.",
+      "context": "Highways in Blaine County and the docks.",
+      "meaning": "Commercial class, 2 seats, ~76 mph, 12,000 kg. Excellent durability — it resists deformation and engine failure where almost every civilian car would die, and its mass lets it ram traffic hard enough to set other vehicles on fire. Acceleration is slow, it is top-heavy, and it is bad off-road and on slopes.",
+      "suggested_action": "Use a big rig as a battering ram or a rolling fortress on a straight highway. Give it enormous braking distance and never take it up a hillside.",
+      "avoid": "Treating it as a getaway vehicle. It is durable, not fast, and it cannot corner or hide.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Handling changes completely with a trailer attached — see the tanker item.",
+      "sources": [
+        "https://gta.wiki/w/Phantom"
+      ]
+    },
+    {
+      "id": "tanker_trailer_explosive",
+      "category": "hazard",
+      "cue": "A semi truck towing a cylindrical fuel tanker trailer, or a parked tanker in the state feed near the agent's line of fire.",
+      "context": "Any combat or driving near industrial traffic, refinery roads, the docks.",
+      "meaning": "The tanker trailer is explosive. Set alight, it detonates within a few seconds, usually taking the towing truck with it. Fuel visibly leaks from bullet holes, and a nearby explosion will either detonate it outright (close) or ignite it (further away). NPC-towed tankers detonate quickly under gunfire; a tanker the player is towing is much more resistant to being shot into exploding.",
+      "suggested_action": "Treat a tanker as a large area-denial bomb: never fight next to one, never shoot through one, and if one is burning, drive or run away from it immediately rather than past it.",
+      "avoid": "Using cover that happens to be a tanker, or ramming one during a chase.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Leaked fuel damage can seal itself if the shooting stops, so a lightly shot tanker is not certain to blow.",
+      "sources": [
+        "https://gta.wiki/w/Tanker"
+      ]
+    },
+    {
+      "id": "industrial_profile",
+      "category": "class_profile",
+      "cue": "Yellow or utilitarian construction machinery — Dozer, Dump, Tipper, Cutter, Mixer, Flatbed, Rubble, Handler.",
+      "context": "Construction sites, the docks, quarries.",
+      "meaning": "Extremely heavy and extremely slow. They are nearly unstoppable in a collision and shrug off gunfire, but top speeds are walking-pace by comparison and steering is glacial. Some (the Dock Handler) have a raised exhaust that lets them cross shallow water where a car would drown.",
+      "suggested_action": "Only use industrial vehicles for deliberate spectacle — crushing traffic, blocking a road, comedy — never for going anywhere. Announce the choice as a bit.",
+      "avoid": "Choosing industrial as transport. The agent will lose ten minutes of stream to a Dozer commute.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Their durability makes them a genuinely effective police roadblock breaker if the block is directly ahead and speed is irrelevant.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "service_profile",
+      "category": "class_profile",
+      "cue": "Livery-marked working vehicles — Taxi, Bus, Airport Bus, Trashmaster, Tourbus, Dashound, Rental Shuttle Bus.",
+      "context": "City streets and the airport.",
+      "meaning": "Large, slow, many seats (buses seat a lot), tough bodywork, terrible acceleration and terrible turning. A Taxi is the exception: it is a normal sedan chassis and drives like one, and hailing one is a legitimate non-criminal way to travel.",
+      "suggested_action": "Hail or steal a Taxi for ordinary point-to-point travel with zero police attention. Reserve buses for gags, not transport.",
+      "avoid": "Stealing a bus during a police pursuit — it cannot escape and its size guarantees line of sight is never broken.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Taking a taxi as a passenger skips the drive entirely, which can be the right call when the destination is far and nothing interesting is en route.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "police_cruiser_profile",
+      "category": "emergency",
+      "cue": "Black-and-white four-door with a lightbar; state feed shows hostile police peds nearby. Variants: Police Cruiser (Stanier-based), Police Interceptor, Sheriff Cruiser, Unmarked Cruiser.",
+      "context": "Any pursuit, and any moment the agent considers stealing a cop car.",
+      "meaning": "~90 mph, 4 seats, stiffened suspension that resists rollovers at the cost of some turn-in, good traction, and body-on-frame construction that makes it more durable than the Police Interceptor — it survives repeated high-speed impacts and hard front-axle hits. It is a genuinely good pursuit vehicle.",
+      "suggested_action": "A commandeered cruiser is one of the better all-round Story Mode cars: fast enough, tough, four seats. Take one when a fight or a long chase is expected and no Sports car is nearby.",
+      "avoid": "Assuming a stolen cruiser makes the agent invisible to police — it does not clear or prevent a wanted level.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Sheriff Cruiser replaces the LSPD cruiser in Blaine County; the Police Interceptor (SUV) is faster in a straight line but less crash-tolerant.",
+      "sources": [
+        "https://gta.wiki/w/Police_Cruiser",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "police_escalation_by_star",
+      "category": "emergency",
+      "cue": "Wanted level field in the state feed changes from 0 to 1, 2, 3, 4 or 5 stars.",
+      "context": "Any crime. Drives every flee_police decision.",
+      "meaning": "1 star: one or two police vehicles (LSPD cruisers in Los Santos, Sheriff cruisers in Blaine County), officers hold at gunpoint rather than shoot. 2 stars: at least three cars, officers shoot to kill and drive aggressively. 3 stars: at least four cars plus a police helicopter, roadblocks with spike strips, NOOSE TRU inserted by helicopter. 4 stars: up to three Police Mavericks (usually two active) and five-plus ground vehicles, NOOSE arriving in FIB Grangers or Sheriff SUVs. 5 stars: an indefinite number of police vehicles, up to three Police Mavericks (usually two active), and streets so saturated with police that civilian traffic almost disappears. There is NO military response anywhere in the open world at any star count — the army never pursues the player on the street. The only military engagement in the whole game is a separate, location-triggered response: entering Fort Zancudo's restricted area itself sets a four-star level and brings Rhino tanks, Barracks trucks/Crusaders and Lazer jets, regardless of what the player's open-world wanted level was beforehand.",
+      "suggested_action": "Choose the escape mode by star count: 1-2 stars, outdrive and break line of sight; 3+ stars, get out of the air unit's view — under a bridge, into a tunnel, into dense cover — because outrunning a helicopter on the road does not work; 4-5 stars, disengage entirely, expect spike strips and NOOSE. Do not plan for or narrate a military response unless the agent is physically at Fort Zancudo — that threat is a place, not a star level.",
+      "avoid": "Using the same 'drive fast in a straight line' plan at 3+ stars that works at 1 star. The helicopter is the difference. Also avoid ever describing tanks, soldiers or jets as part of an ordinary 5-star chase — that is GTA IV/San Andreas behaviour, not GTA V.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Response composition varies with location — Blaine County uses Sheriff units and rangers. Fort Zancudo's four-star military response is triggered by entering the base, independent of the player's pre-existing wanted level.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "losing_the_cops_line_of_sight",
+      "category": "emergency",
+      "cue": "Wanted stars start flashing (search-cone mode) instead of solid.",
+      "context": "Immediately after breaking direct pursuit.",
+      "meaning": "GTA V uses per-officer line of sight and a search cone rather than a fixed radius. Once the stars flash, the police are searching a projected area. Staying out of every officer's field of view until the stars expire is what clears the level. Changing appearance during search-cone mode (putting on or taking off a mask or sunglasses) drops the level by one star. Entering Los Santos Customs clears any wanted level — but the garage door will not open if police can see the agent approaching.",
+      "suggested_action": "When the stars flash, stop driving fast in the open. Get into a tunnel, an alley, a parking structure, or under the freeway, and hold still. Los Santos Customs is a hard reset if the agent can reach it unseen.",
+      "avoid": "Continuing to sprint across open freeway once the stars flash — the search cone projects ahead of last known heading, so running straight puts the agent inside it.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "A helicopter overhead maintains line of sight through most street-level cover, so the flashing stars will go solid again unless the agent gets under something.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Los_Santos_Customs"
+      ]
+    },
+    {
+      "id": "police_ram_bike_lethal",
+      "category": "emergency",
+      "cue": "the agent has a wanted level AND is on a motorcycle, quad, or bicycle.",
+      "context": "Any active pursuit on two wheels.",
+      "meaning": "Police can easily ram a rider off a motorcycle, and being knocked off a bike by LSPD or sheriffs results in death a good majority of the time. Riding two wheels with a wanted level is one of the most dangerous states in the game.",
+      "suggested_action": "If a wanted level appears while the agent is on a bike, prioritise switching to an enclosed vehicle or getting off-road where cruisers cannot follow. Keep other vehicles from getting alongside.",
+      "avoid": "Fleeing police in a straight line on tarmac on a bike, or letting a cruiser draw level. That is the ram setup.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "A dirt bike (Sanchez) escaping up a hillside or trail where cruisers cannot follow is a legitimate and often superior escape — the danger is specifically bike-versus-cruiser on shared road.",
+      "sources": [
+        "https://gta.wiki/w/Motorcycles",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "fire_truck_profile",
+      "category": "emergency",
+      "cue": "Large red truck with ladder and hose reels; fire stations at Paleto Bay, Davis, Rockford Hills, El Burro Heights and Fort Zancudo.",
+      "context": "Considering a fire truck as transport or as a toy.",
+      "meaning": "8 occupants (driver, front passenger, six more inside or hanging on the step), ~81 mph, 7,500 kg, good durability but lighter and worse at ramming than earlier games. The driver can operate a water cannon that tracks vehicles within roughly 15 metres, and firing it on people or cars in police view gives 1-2 stars — but that is a manual aim-and-fire action, and the agent has no aim primitive and no fire primitive for anything, the water cannon included.",
+      "suggested_action": "Treat the fire truck purely as an oversized, tough, roomy vehicle for transport or spectacle-by-presence — commentary can note the water cannon exists, but the agent has no way to trigger or aim it, so never plan around him using it.",
+      "avoid": "Any suggested_action that has the agent 'use', 'fire' or 'aim' the water cannon. That capability does not exist for him regardless of how good it would look on stream.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The cannon's tracking is short-ranged; beyond ~15 m it will not lock.",
+      "sources": [
+        "https://gta.wiki/w/Fire_Truck"
+      ]
+    },
+    {
+      "id": "ambulance_and_ranger_recognition",
+      "category": "emergency",
+      "cue": "Boxy white/red box-body van with light bar (Ambulance); dark green or tan SUV with sheriff or park ranger markings (Park Ranger / Sheriff SUV) in Blaine County.",
+      "context": "Rural and emergency-response scenes.",
+      "meaning": "The Ambulance is a tall, slow, heavy van-derived emergency vehicle — durable and roomy but a poor escape vehicle, and stealing one draws attention. The Park Ranger and Sheriff SUV are SUV-class police units that appear in Blaine County and are far better on dirt than city cruisers, so they will follow the agent off-road where an LSPD cruiser would not.",
+      "suggested_action": "In Blaine County, do not assume off-road escapes shake pursuit — ranger SUVs handle terrain. Prefer a dirt bike or a route with genuine obstacles instead.",
+      "avoid": "Reusing the 'go off-road to lose cops' plan learned in Los Santos while in Blaine County.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Exact off-road pursuit competence is a behaviour observation rather than a documented stat; treat this as a strong tendency, not a rule.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "motorcycle_general_profile",
+      "category": "motorcycle",
+      "cue": "Two-wheeled powered vehicle in state feed, or the agent is about to enter one — Bati, Akuma, Double-T, Hakuchou, PCJ 600, Ruffian, Sanchez, Faggio, Hexer, Nightblade.",
+      "context": "Any decision involving a motorcycle.",
+      "meaning": "Motorcycles have no protective cage. The rider is ejected on hard collisions and is fully exposed to gunfire. They are narrow enough to travel where cars cannot, and are much more nimble than cars. The character automatically puts on a helmet after a few idle seconds. Drive-bys are possible from a bike but limited to smaller weapons.",
+      "suggested_action": "Use bikes for speed through congested city traffic and for shortcuts through gaps. Reduce speed drastically before any contact — a bike loses every collision. Get off the bike before committing to a firefight.",
+      "avoid": "Any ramming, any pit manoeuvre, any 'push through the roadblock' plan on two wheels. Also avoid engaging combat_hated_targets_around while still mounted.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The Faggio scooter is slow enough to be safe but useless for escapes; heavier cruisers (Hexer, Nightblade) are more stable but still cageless.",
+      "sources": [
+        "https://gta.wiki/w/Motorcycles"
+      ]
+    },
+    {
+      "id": "bati_801_profile",
+      "category": "motorcycle",
+      "cue": "Bati 801 — sharp-nosed sportbike with a high tail, rider tucked forward. Common in La Puerta, always near the 7th parachute jump in Raton Canyon, parked at Sanders Motorcycles.",
+      "context": "Fast urban traversal.",
+      "meaning": "Among the fastest bikes in the game (~93 mph), excellent acceleration, very stable and nimble for a sportbike. But its light body means bumpy terrain can launch the rider — and being launched frequently kills.",
+      "suggested_action": "Use the Bati for fast, smooth, paved routes. Slow down before kerbs, ramps, potholes and unpaved sections.",
+      "avoid": "Taking a Bati off-road or over rough ground at speed. The light frame is exactly what makes that lethal.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "gta.wiki quotes 150 km/h as its handling-file top speed; use it for ranking within the bike class rather than as an absolute.",
+      "sources": [
+        "https://gta.wiki/w/Bati_801"
+      ]
+    },
+    {
+      "id": "sanchez_profile",
+      "category": "motorcycle",
+      "cue": "Maibatsu Sanchez — motocross dirt bike, knobbly tyres, high mudguard, long-travel forks. Common around Sandy Shores and Grapeseed, and in rural Border Patrol random events.",
+      "context": "Off-road escapes and hill traversal.",
+      "meaning": "2 seats, ~73 mph — slower than a sportbike but superbly agile with excellent cornering, smooth acceleration, and the ability to climb steep hills (though it struggles on near-vertical slopes). Wheelies come easily and carry extra risk of looping. It is fragile like all bikes.",
+      "suggested_action": "The Sanchez is the agent's best tool for escaping into terrain: up Mount Chiliad, along riverbeds, across the desert, where cruisers cannot follow. Prefer it over any car when the escape route is unpaved.",
+      "avoid": "Trying to win a straight-line freeway race on a Sanchez, and popping unintentional wheelies by flooring it from a stop.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "It is classed as a Motorcycle but competes in Off-Road races; class-based logic that excludes 'Motorcycles' from off-road plans would wrongly exclude the best off-road bike.",
+      "sources": [
+        "https://gta.wiki/w/Sanchez"
+      ]
+    },
+    {
+      "id": "bicycles_profile",
+      "category": "motorcycle",
+      "cue": "Pedal cycle — BMX, Cruiser, Scorcher, Fixter, Endurex Race Bike, Whippet Race Bike, Tri-Cycles Race Bike. Common off-road and around Vespucci and Del Perro beaches.",
+      "context": "Low-stakes traversal, trails, comedy content.",
+      "meaning": "Bicycles are silent, free to take, and go places nothing else does — trails, stairs, footpaths. The rider falls off on a hard enough collision, exactly like a motorcycle. The BMX in particular can be made to travel dramatically faster by repeatedly bunny-hopping side to side.",
+      "suggested_action": "Use a bicycle for hill trails, beach paths and character moments. The BMX bunny-hop is a good visible skill flex for the stream.",
+      "avoid": "Any bicycle plan involving police, combat, or crossing a freeway. A cyclist loses to everything.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The wiki page does not document a stamina drain for pedalling in GTA V; sprint-pedalling behaviour is unverified here, so do not build plans that depend on sustained sprint speed.",
+      "sources": [
+        "https://gta.wiki/w/Bicycles"
+      ]
+    },
+    {
+      "id": "boats_general_profile",
+      "category": "watercraft",
+      "cue": "the agent is at a dock, marina, beach, or on the Alamo Sea, and a boat is in the state feed — Dinghy, Speeder, Squalo, Jetmax, Marquis, Tug, Seashark, Suntrap, Tropic.",
+      "context": "Any water traversal decision.",
+      "meaning": "Boats have no brakes, no grip and no reverse authority worth planning around; they steer only while the propeller is driven, so cutting throttle removes steering. GTA V's water physics slow boats noticeably in waves. Boats do not follow roads and cannot be pursued by police cruisers, which makes water a strong escape domain. Seat counts are usually 2-4.",
+      "suggested_action": "Plan wide arcs, cut throttle far earlier than a car's braking point, and approach docks at walking speed. Consider water as an escape route when a wanted level is active and the coast or Alamo Sea is close.",
+      "avoid": "Issuing a car-style drive_to onto a boat path with tight turns, or expecting to stop at a waypoint. Also avoid driving a land vehicle into water — see the drowning-engine item.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Police do pursue on water at higher wanted levels using Predators and helicopters, so water is not a free pass at 3+ stars.",
+      "sources": [
+        "https://gta.wiki/w/Jetmax",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "jetmax_profile",
+      "category": "watercraft",
+      "cue": "Shitzu Jetmax — sleek low speedboat with a wraparound windscreen. In Story Mode one sits in a cave north of the Palmer-Taylor Power Station, usually alongside two Seasharks.",
+      "context": "Fast water escapes or crossings.",
+      "meaning": "One of the fastest boats in the game (~84 mph), 4 occupants, superior acceleration and top speed to most watercraft, and rarely flips — though waves still cut its speed.",
+      "suggested_action": "Pick the Jetmax when speed on water matters. Its stability makes it the safest fast boat for an autonomous driver.",
+      "avoid": "Assuming it will hold speed through chop — plan crossing times with a margin.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Purchase price and marina delivery are irrelevant to the agent; the cave spawn is the practical route to one.",
+      "sources": [
+        "https://gta.wiki/w/Jetmax"
+      ]
+    },
+    {
+      "id": "helicopters_general_profile",
+      "category": "aircraft",
+      "cue": "Rotary aircraft in the state feed or on a helipad — Maverick, Frogger, Swift, Buzzard, Cargobob, Police Maverick, Annihilator.",
+      "context": "Any air traversal or rooftop objective.",
+      "meaning": "Helicopters need constant collective input to hold altitude and will sink into terrain if left alone. They are far more vulnerable than their size suggests: high-speed impacts cause instant explosion, and the tail rotor is a weak point — clipping it on scenery costs control entirely. They cannot glide. But they ignore roads, ignore traffic, and reach rooftops and mountains nothing else can.",
+      "suggested_action": "Use helicopters for long cross-map traversal and unreachable objectives. Climb well above building height before transiting, descend slowly and vertically over an open landing zone, and never fly close to walls, cranes, wires or bridges.",
+      "avoid": "Flying fast at low altitude between buildings. That is the single most common way an AI pilot dies.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Landing precision is where autonomous pilots fail most; if the landing zone is tight, land somewhere open nearby and walk.",
+      "sources": [
+        "https://gta.wiki/w/Maverick",
+        "https://gta.wiki/w/Buzzard_Attack_Chopper"
+      ]
+    },
+    {
+      "id": "maverick_profile",
+      "category": "aircraft",
+      "cue": "Maverick — civilian light helicopter, bulbous cockpit, two-bladed rotor. Green Mavericks sit at parachute-jump locations such as La Puerta; others sit on hospital and building helipads.",
+      "context": "Getting into the air cheaply in Story Mode.",
+      "meaning": "4 occupants (pilot plus three). Handles rigidly and manoeuvres easily for its size, and is considerably more durable than in GTA IV — but a high-speed impact still explodes it instantly. A Maverick with an NPC pilot already aboard needs a hold-to-hijack interaction to take the controls, or the entrant becomes a passenger instead — and the agent's only entry action (enter_nearest_vehicle) has no way to specify which one happens.",
+      "suggested_action": "The Maverick is the default 'get airborne now' helicopter in Story Mode, but prefer an empty parked one over an occupied one — see pc_vehicle_keys and hijack_vs_enter for why the agent cannot reliably force a takeover of an occupied vehicle.",
+      "avoid": "Relying on entering an occupied Maverick to get airborne. Whether that yields control or leaves the agent as a passenger is not something he can choose.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some parachute-jump Mavericks are scripted props for the jump and may behave differently from free-roam spawns.",
+      "sources": [
+        "https://gta.wiki/w/Maverick"
+      ]
+    },
+    {
+      "id": "buzzard_profile",
+      "category": "aircraft",
+      "cue": "Buzzard Attack Chopper — small, sharp-nosed military helicopter with stub wings carrying rocket pods. Spawns at Fort Zancudo and at the NOOSE headquarters on Sustancia Road.",
+      "context": "Armed air support; high-risk acquisition.",
+      "meaning": "4 occupants, very fast for a helicopter (~135 knots), extremely manoeuvrable and able to land where larger helicopters cannot. It carries pilot-operated machine guns and missiles, but firing either is a manual aim-and-fire action that the agent has no primitive for — he cannot use the Buzzard as an armed aircraft, only as a very fast, agile one. It is also fragile: a single Homing Launcher, RPG or standard explosive destroys it, and the big cockpit glass leaves the pilot exposed to small-arms fire even though he cannot shoot back. The NOOSE HQ spawn is reachable without triggering a wanted level; Fort Zancudo is not.",
+      "suggested_action": "If the agent needs fast, agile air transport, the NOOSE HQ Buzzard is a low-risk acquisition — but plan it purely as transport. Never plan for him to engage anything with its guns or missiles, and fly away from hostiles rather than toward them, since he cannot fire back if they close in.",
+      "avoid": "Hovering low over hostiles in a Buzzard, or any suggested_action implying the agent fires its weapons. Ground fire through the canopy kills the pilot and one rocket kills the aircraft, with nothing he can do to shoot first.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Weapon damage numbers come from a single wiki source and are not cross-checked; the fragility and NOOSE spawn are the load-bearing facts.",
+      "sources": [
+        "https://gta.wiki/w/Buzzard_Attack_Chopper"
+      ]
+    },
+    {
+      "id": "planes_general_profile",
+      "category": "aircraft",
+      "cue": "Fixed-wing aircraft in the state feed or on a runway — Dodo, Duster, Mammatus, Cuban 800, Velum, Shamal, Luxor, Titan, Besra, Lazer.",
+      "context": "Long cross-map travel; airport and airstrip scenes.",
+      "meaning": "Planes need runway length to take off and land, need airspeed to stay flying (they stall and drop if too slow), cannot hover, and cannot stop in the air. Landing gear must be down for a runway landing. They are the fastest way to cross San Andreas but the least forgiving. Landing anywhere unplanned usually destroys the aircraft.",
+      "suggested_action": "Only launch a flight when the destination has a runway, a long straight road, or a flat field. Line up the landing from far out, keep the descent shallow, and keep airspeed up until the wheels are down.",
+      "avoid": "Turning steeply at low airspeed, and attempting to land on a city street. Also avoid planes when the objective is local — the takeoff and landing overhead is longer than driving.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Entering Fort Zancudo to reach a military aircraft triggers a four-star wanted level with tanks and jets — treat that as a deliberate stunt, not a transport plan.",
+      "sources": [
+        "https://gta.wiki/w/Titan",
+        "https://gta.wiki/w/Dodo"
+      ]
+    },
+    {
+      "id": "titan_profile",
+      "category": "aircraft",
+      "cue": "Titan — large four-engine turboprop military transport, high wing, up-swept tail. Up to four spawn on the Fort Zancudo tarmac.",
+      "context": "Moving a group, or a big-aircraft spectacle.",
+      "meaning": "10 occupants (pilot plus nine). Slow (~87 mph / 76 knots) and it drops fast if the engines are not at full power in flight — but it has a short takeoff distance for its size, superior braking, and handles remarkably well, including on makeshift strips such as deserts, fields and some wide bridges. Its size and speed make it an easy target. Acquiring one means entering Fort Zancudo, which triggers a four-star wanted level and brings Rhinos and jets.",
+      "suggested_action": "The Titan is the forgiving big plane — good for landing somewhere improvised. Keep throttle high at all times in the air. Only attempt the Zancudo grab as a deliberate, announced high-risk bit.",
+      "avoid": "Easing off the throttle while airborne, and entering Fort Zancudo casually.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some sources list the Titan's top speed in knots and some in mph; the practical point is that it is slow and stable, not fast.",
+      "sources": [
+        "https://gta.wiki/w/Titan"
+      ]
+    },
+    {
+      "id": "dodo_profile",
+      "category": "aircraft",
+      "cue": "Dodo — small high-wing seaplane on large pontoons. Becomes available after the 'Sea Plane' random event at Coveted Cove, then spawns at Lake Vinewood near Franklin's house and on the Alamo Sea near Galilee.",
+      "context": "Water-adjacent flying; Alamo Sea content.",
+      "meaning": "Amphibious: the pontoons carry wheels, so it can take off and land on water or on land. Short takeoff distance — shorter than the Titan or Cuban 800 — with good acceleration and a ~155 mph top speed, but the pontoons add drag and weight so manoeuvrability is limited. 4 occupants: pilot and co-pilot inside, two more clinging to the pontoons who can fire full-sized weapons.",
+      "suggested_action": "Use the Dodo when the route starts or ends at water, or for the novelty of a water landing. Fly it gently — it does not turn like a normal light plane.",
+      "avoid": "Aggressive manoeuvring. The pontoons make it sluggish and easy to depart controlled flight.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Water landings require a level attitude — the Elitas description hedges that it floats 'if you land it just right', so a botched water landing still destroys it.",
+      "sources": [
+        "https://gta.wiki/w/Dodo"
+      ]
+    },
+    {
+      "id": "rhino_tank_profile",
+      "category": "aircraft",
+      "cue": "Rhino — tracked armoured tank with a long 120 mm gun. Present at Fort Zancudo; purchasable in Story Mode from Warstock Cache & Carry and delivered to the hangar.",
+      "context": "Maximum-chaos content, or surviving a five-star response.",
+      "meaning": "60 tonnes, one usable seat, ~40 mph top speed. Handles surprisingly well for its size and crushes small vehicles outright by driving into them. The 120 mm gun fires every ~1.5 s out to ~190 m for ~3000 damage in principle, but firing it is a manual aim-and-fire action the agent has no primitive for — he can drive the Rhino but cannot shoot its cannon. It survives roughly 3-4 tank shells, 5-6 RPG hits, or 7-8 grenade-launcher rounds; rear armour is weaker and hits there risk a fuel-tank fire. Three sticky bombs destroy it. Hijacking one at Fort Zancudo triggers the base's four-star military response.",
+      "suggested_action": "Treat the Rhino as a set-piece purely for its driving presence: slow, indestructible-feeling, spectacular to ram with. Keep the front toward threats to use its armour passively, keep moving so RPGs miss, and never let anyone plant sticky bombs on it — do not plan around him firing the main gun back.",
+      "avoid": "Using it to go anywhere. At 40 mph a cross-city trip is dead stream time, and it cannot escape a helicopter.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The stated $3,000,000 Warstock price and the specific Fort Zancudo extraction glitch come from a single source and are not independently confirmed; the durability and speed figures are the useful part.",
+      "sources": [
+        "https://gta.wiki/w/Rhino_Tank"
+      ]
+    },
+    {
+      "id": "vehicle_fire_then_explosion",
+      "category": "hazard",
+      "cue": "Flames visible on the agent's vehicle, or heavy smoke plus a sharply dropping vehicle health value in the state feed.",
+      "context": "After a heavy crash, sustained gunfire, or an explosion nearby.",
+      "meaning": "GTA V's damage model is two-stage: enough engine damage sets the vehicle on fire, and a burning vehicle then explodes on its own after a short delay regardless of whether it takes more damage. Once it is burning, the vehicle is lost — the only question is whether the agent is inside when it goes.",
+      "suggested_action": "Treat 'on fire' as an immediate exit trigger with the highest priority: stop, exit vehicle, and move away from it before doing anything else. Do not try to reach a destination in a burning car.",
+      "avoid": "Continuing to drive a burning vehicle to finish a route, and standing next to it after exiting.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "The exact seconds between ignition and detonation could not be confirmed from a reliable source — treat it as short (a handful of seconds) and act immediately. The electric Voltic is documented as not exploding when set on fire; its battery is destroyed and it simply stops.",
+      "sources": [
+        "https://gta.wiki/w/APC",
+        "https://gta.wiki/w/Tanker",
+        "https://gta.wiki/w/Voltic"
+      ]
+    },
+    {
+      "id": "engine_drowns_in_water",
+      "category": "hazard",
+      "cue": "The planned route crosses a river, canal, flooded area, beach shallows, or the drive_to path runs along a waterline.",
+      "context": "Land vehicles only.",
+      "meaning": "Land vehicles stop working once their exhaust is fully submerged. Water is effectively a wall for cars, and driving into it strands or drowns the agent. A small number of vehicles with raised exhausts — the Dock Handler is the documented example, and the Duneloader's exhaust bone sits atop its snorkel — can cross shallow water safely.",
+      "suggested_action": "Treat water as impassable terrain for any land vehicle when planning routes; use bridges. If a vehicle stalls in water, issue exit_vehicle immediately rather than trying to restart it — the agent has no dedicated swim command, so getting to shore from there depends on walk_to and the game's own automatic swim behaviour rather than anything he directly controls.",
+      "avoid": "Shortcutting across a canal, beach shallows or the Alamo Sea edge in a car because the map looks flat there.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Snorkelled or high-exhaust vehicles are the documented exception; do not generalise that to lifted off-roaders without one.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "getaway_vehicle_selection",
+      "category": "getaway",
+      "cue": "the agent has just committed a crime, or the wanted level went from 0 to 1+, and he must choose a vehicle now.",
+      "context": "The first ten seconds of any pursuit.",
+      "meaning": "A good getaway vehicle in Story Mode needs four things: enough top speed to open a gap (Sports class is the best balance), an enclosed body so gunfire does not hit the driver, enough durability to survive contact, and ordinariness so the search cone loses it. Sports cars and a commandeered Police Cruiser both score well. Super cars are faster but harder to keep on the road. Bikes, open buggies and quads fail the body test. Vans, trucks and industrial fail the speed test.",
+      "suggested_action": "Rank candidates in the state feed by class: Sports > Police Cruiser / fast Muscle > SUV > Sedan > Super (only if the route is straight) > everything else. Take whatever is nearest that clears the bar rather than walking to a perfect car.",
+      "avoid": "Spending pursuit time walking to a better car, or picking a Super car for a route with corners.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "If the escape route is off-road, a Sanchez or an Off-Road vehicle beats every road car despite failing the enclosed-body test — police cruisers cannot follow.",
+      "sources": [
+        "https://gta.wiki/w/Police_Cruiser",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list"
+      ]
+    },
+    {
+      "id": "open_body_no_cover",
+      "category": "hazard",
+      "cue": "the agent is in a vehicle with no roof, no doors or no windows — Dune Buggy, Blazer, Bifta, motorcycle, bicycle, Dodo pontoon seats, Injection — and hostile peds appear in the state feed.",
+      "context": "Any transition from driving to combat.",
+      "meaning": "Bodywork is cover. Open-frame vehicles offer none: occupants are heavily vulnerable to gunfire, and on two wheels a knockdown is frequently fatal. Being in an open vehicle turns a survivable firefight into a lethal one.",
+      "suggested_action": "When hostiles are detected and the agent is in an open vehicle, prefer exit + seek_cover over combat_hated_targets_around from the vehicle, or drive out of the engagement entirely.",
+      "avoid": "Sitting still in an open vehicle to return fire.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Driving away at speed is fine — the vulnerability is to being stationary or slow within weapon range.",
+      "sources": [
+        "https://gta.wiki/w/Dune_Buggy",
+        "https://gta.wiki/w/Motorcycles"
+      ]
+    },
+    {
+      "id": "seat_capacity_planning",
+      "category": "recognition",
+      "cue": "the agent needs to move one or more NPCs (a follow_entity companion, a mission passenger) and is choosing a vehicle.",
+      "context": "Missions and escorts.",
+      "meaning": "Seat counts vary sharply by class and are decision-critical: Super and most Sports are 2; Blazer quad is 1; Rhino is 1 usable; motorcycles are 2; Sedans, SUVs, Vans, Police Cruiser, Maverick, Buzzard and Jetmax are 4; the Dodo is 4 (two of them clinging to pontoons); the Fire Truck is 8; the Titan is 10; buses more.",
+      "suggested_action": "Check required seats before selecting a vehicle. If a passenger must come along, exclude 1- and 2-seaters up front rather than discovering it at the door.",
+      "avoid": "Driving off in a two-seat supercar while an escort NPC is left standing, and then re-pathing back.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some vehicles have nominal seats that are inaccessible (the Rhino's second seat), so nominal capacity is not always usable capacity.",
+      "sources": [
+        "https://gta.wiki/w/Rhino_Tank",
+        "https://gta.wiki/w/Titan",
+        "https://gta.wiki/w/Fire_Truck",
+        "https://gta.wiki/w/Dodo",
+        "https://gta.wiki/w/Blazer"
+      ]
+    },
+    {
+      "id": "hijack_vs_enter",
+      "category": "general_rule",
+      "cue": "The target vehicle already has an NPC driver in it.",
+      "context": "Stealing occupied traffic vehicles, parked helicopters with pilots, boats with occupants.",
+      "meaning": "Entering an occupied vehicle can put the agent in as a passenger instead of taking control — the driver's seat normally requires a hold-to-hijack interaction (which drags the occupant out and, in police view, starts a wanted level) versus a quick tap that just climbs in as a passenger. The agent has no way to choose between the two: enter_nearest_vehicle is the only entry action available, with no hold-vs-tap parameter.",
+      "suggested_action": "Prefer empty parked vehicles whenever one is nearby, since occupied targets are a coin-flip the agent cannot control the outcome of. If enter_nearest_vehicle is issued against an occupied vehicle and the state feed then shows control_enabled false (or in_vehicle true with no ability to steer), treat it as a failed take-control attempt: issue exit_vehicle and route to a different, empty vehicle rather than continuing as a stuck passenger.",
+      "avoid": "Assuming enter_nearest_vehicle will always hijack an occupied vehicle rather than seat the agent as a passenger — it may do either, and he cannot pick which.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Documented explicitly for parked Mavericks; the same hold-to-hijack pattern applies broadly but the wiki only confirms it for that case.",
+      "sources": [
+        "https://gta.wiki/w/Maverick"
+      ]
+    },
+    {
+      "id": "ramming_mass_hierarchy",
+      "category": "handling",
+      "cue": "the agent considers ramming a roadblock, a pursuing vehicle, or blocking traffic.",
+      "context": "Chases and deliberate destruction.",
+      "meaning": "Collisions resolve roughly by mass and construction. A Phantom at 12,000 kg or a Fire Truck at 7,500 kg wins against anything civilian and can hit hard enough to ignite the other vehicle. Industrial machinery wins everything. A Police Cruiser's body-on-frame build survives repeated hard impacts. Compacts, Sports and Super cars lose, and a hard side impact easily wrecks a supercar's wheel geometry.",
+      "suggested_action": "Only ram when the agent's vehicle is clearly heavier and tougher. Otherwise route around a roadblock, or exit and go on foot or on two wheels through a gap.",
+      "avoid": "Ramming a police roadblock in a Sports or Super car. The car loses and the pursuit continues on foot.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Speed partly substitutes for mass, but a high-speed impact in a light car destroys the light car too — winning the collision and surviving it are different questions.",
+      "sources": [
+        "https://gta.wiki/w/Phantom",
+        "https://gta.wiki/w/Fire_Truck",
+        "https://gta.wiki/w/Police_Cruiser",
+        "https://gta.wiki/w/Infernus"
+      ]
+    },
+    {
+      "id": "protagonist_switch_repairs",
+      "category": "general_rule",
+      "cue": "the agent's current vehicle is dented, dirty, scratched or has burst tyres but is not on fire.",
+      "context": "Cosmetic and tyre damage accumulating over a long session.",
+      "meaning": "Almost all forms of vehicle damage — dents, scratches, dirt, burst tyres — are restored when switching between protagonists. Damage is not necessarily permanent.",
+      "suggested_action": "Do not abandon a good vehicle purely for cosmetic damage or burst tyres. The agent cannot trigger a protagonist switch himself — it only happens automatically around missions — so judge the vehicle on whether it still drives now, not on a reset he cannot ask for.",
+      "avoid": "Wasting stream time hunting a replacement car for damage that a future mission-triggered switch might reset anyway.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "This restores damage state, not the vehicle's presence — a destroyed vehicle is gone. Protagonist switching is entirely outside the agent's control; nothing here should be read as him being able to invoke one.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "burst_tyres_handling",
+      "category": "handling",
+      "cue": "Sparks from a wheel, a pronounced pull to one side, or spike strips reported in the pursuit.",
+      "context": "3+ star chases (police deploy spike strips) and after heavy kerb strikes or gunfire at the wheels.",
+      "meaning": "Burst tyres severely reduce grip and top speed and make the vehicle pull toward the flat side. A car on rims cannot outrun police and will not hold a line at speed. Spike strips at roadblocks are the deliberate police tool for causing this.",
+      "suggested_action": "On detecting a blown tyre during a pursuit, stop trying to outrun and switch to breaking line of sight, or swap vehicles at the first opportunity. Approach roadblocks off the road surface where possible to avoid the strips.",
+      "avoid": "Continuing a top-speed escape on flats, and driving straight through the middle of a roadblock where the strip is laid.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Tyre damage is one of the things restored on a protagonist switch, but that switch is automatic and mission-triggered — not something the agent can invoke — so plan for the flats as they are rather than waiting on one.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "pc_vehicle_keys",
+      "category": "general_rule",
+      "cue": "the agent needs to get into, out of, or manoeuvre a vehicle, and there is no dedicated bridge task for the specific motion he wants (e.g. a handbrake turn, a burst of throttle, a precise steering line).",
+      "context": "Always. This is the ground truth for what vehicle control actually consists of for this harness.",
+      "meaning": "the agent has no raw keyboard/controller access and no per-key bindings at all — there is no F-to-enter, no W/A/S/D, no handbrake key he can press. Entry and exit are the bridge tasks enter_nearest_vehicle and exit_vehicle; ongoing movement is drive_to (with speed_mps and style) or wander_drive, both of which the engine's own driving AI executes, not the agent pressing pedals. The only fine-grained manoeuvring available on top of that are the harness primitives brake_tap, swerve(direction) and reverse_out(ms), plus press_prompt_key for whatever contextual prompt the game is currently showing (he cannot choose which key it maps to). There is no explicit handbrake action — a tight in-place turn is not something the agent can command directly.",
+      "suggested_action": "Express every vehicle-control decision as one of: enter_nearest_vehicle, exit_vehicle, drive_to/wander_drive (choosing speed_mps and style to express caution or aggression), brake_tap, swerve, or reverse_out. Never phrase a plan as 'press F' or 'hold Space' or any other key — those do not exist for him.",
+      "avoid": "Writing or accepting any suggested_action anywhere in this knowledge base that names a keyboard key, a hold-vs-tap distinction, or a manual pedal/steering input. If a desired manoeuvre (e.g. a handbrake turn) has no matching bridge task or primitive, say plainly that it is not available rather than inventing a keypress for it.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None — this mapping is fixed by the harness's frozen action catalog, not by the game's own (remappable) key bindings, which are irrelevant to the agent regardless of what they are set to.",
+      "sources": []
+    },
+    {
+      "id": "vehicle_choice_for_stream_value",
+      "category": "general_rule",
+      "cue": "No urgent objective; the agent is choosing what to do or what to drive during downtime.",
+      "context": "wander_drive and filler segments on stream.",
+      "meaning": "Some vehicles carry disproportionate viewer recognition and story value even without any combat capability behind them: the Adder parked outside Ponsonbys, the Rhino tank rumbling through traffic, the Buzzard as a fast agile helicopter, the Dodo seaplane landing on the Alamo Sea, a Blazer quad down a Chiliad trail, a Bati through downtown traffic, a fire truck simply being driven, a big rig on the Great Ocean Highway. These are recognisable set-pieces rather than merely fast cars — none of it depends on the agent firing anything, which he cannot do from any of them.",
+      "suggested_action": "During downtime, prefer a vehicle with a story over a marginally faster one, and have the agent say what it is and where he found it. Chiliad on a Sanchez or a Dodo water landing beats another freeway run.",
+      "avoid": "Defaulting to the same generic sedan every idle period, and doing long slow commutes in industrial vehicles where nothing happens.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Spectacle must not override the safety rules above — a Rhino is great content but a terrible way to travel, and Fort Zancudo aircraft cost a four-star military response.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/fastest-cars-in-gta-5-story-mode-best-gta-cars-ranked-list",
+        "https://gta.wiki/w/Rhino_Tank",
+        "https://gta.wiki/w/Dodo",
+        "https://gta.wiki/w/Fire_Truck"
+      ]
+    },
+    {
+      "id": "online_only_vehicles_excluded",
+      "category": "recognition",
+      "cue": "A vehicle name appears in a guide or in the agent's own knowledge that he cannot find anywhere in the world.",
+      "context": "Planning to acquire a specific named vehicle.",
+      "meaning": "A large share of the GTA V vehicle roster — Arena War contenders, most weaponised and armoured vehicles, Open-Wheel racers, Tuners-class cars, and many post-launch supercars — are GTA Online additions and are either absent from Story Mode or purchase-only through websites at prices the agent will not have. Story Mode's street population is the base-game roster.",
+      "suggested_action": "Plan around vehicles confirmed to spawn in the Story Mode world (street spawns, mission spawns, random-event rewards like the Dodo). Treat any vehicle the agent cannot name a Story Mode spawn point for as unavailable.",
+      "avoid": "Sending the agent on a long fruitless drive to find an Online-only vehicle, or citing Online prices and stats on stream as if they applied.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some Online vehicles were later added to Story Mode website catalogues in the Enhanced edition; availability differs between Legacy and Enhanced builds, so verify against the installed version before promising a vehicle exists.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    }
+  ],
+  "notes": "WHAT I COULD NOT VERIFY\n\n1. PC key bindings are moot for this harness. The pc_vehicle_keys item originally guessed at F/W/S/A/D/Space raw keybindings, but the harness has no raw-keypress capability at all (per CAPABILITIES.md, only press_prompt_key exists and it takes no key parameter) — so a knowledge item built on 'which key to press' was unusable regardless of whether the bindings were verified. Its content (same id, id preserved) has been replaced entirely: it now maps vehicle control onto the real bridge tasks and primitives (enter_nearest_vehicle, exit_vehicle, drive_to, wander_drive, brake_tap, swerve, reverse_out) and states plainly that there is no handbrake action and no way to command a raw key.\n\n2. Burning-vehicle explosion timing. I could confirm the two-stage model (damage -> fire -> self-detonation without further damage) from gta.wiki's APC and Tanker pages, but no source gave a number of seconds between ignition and explosion. The item says \"a handful of seconds\" and is marked medium confidence. Worth measuring directly once the game is running.\n\n3. Bicycle stamina/sprint mechanic. gta.wiki's Bicycles page says nothing about pedalling stamina in GTA V, so I recorded no claim about it and flagged it as unverified in that item's exceptions.\n\n4. Park Ranger / Sheriff SUV off-road pursuit competence. This is an observed behaviour, not a documented stat. Marked medium confidence; treat as a tendency.\n\n5. Prices. Where a price appeared in a single source I mostly left it out, because prices are not decision-relevant to the agent and several looked like GTA Online figures reused on shared wiki pages (the Buzzard and Maverick prices in particular). The Rhino's $3,000,000 Warstock price and the Fort Zancudo extraction glitch come from one source only and are flagged as such.\n\nSOURCE DISAGREEMENTS\n\nA. Top speed figures disagree systematically between the two source families, and this matters. gta.wiki quotes values taken from the game's handling.meta data file (e.g. Infernus 150 km/h, Bati 801 150 km/h, Jetmax 135 km/h), while gtabase.com quotes independently measured in-game top speeds (Adder 126.25 mph, Massacro 122.75 mph, Entity XF 122.25 mph). These are different quantities and are not reconcilable. Separately, gta.wiki's Entity XF page cites a 193 mph in-car speedometer reading, which is a third, larger, and non-comparable number. Throughout the KB I have used gtabase's measured figures for cross-vehicle ranking and treated gta.wiki's numbers as class-relative only. The agent should never plan on absolute mph.\n\nB. Fastest car in Story Mode. gtabase ranks the Truffade Z-Type (127 mph, Sports Classics) above the Adder (126.25 mph, Super). The Z-Type is $10,000,000 purchase-only, so the Adder is the practical answer and is what the KB recommends. Other aggregator sites disagree on this ordering; I used gtabase because it publishes the methodology.\n\nC. Los Santos Customs and wanted levels. gta.wiki states plainly that entering Los Santos Customs removes any wanted level, with the caveat that the door will not open if police have spotted the approach. gta.wiki's Wanted Level in GTA V page does not mention respraying as an evasion method at all. I recorded the LSC door behaviour (it is the stronger and more specific claim) and did NOT record any claim that a respray alone clears stars, since only one source addresses it.\n\nSCOPE DISCIPLINE\n\nEverything here is GTA V Story Mode. I excluded GTA Online-only content rather than including it with a low-confidence flag, with one deliberate exception: the online_only_vehicles_excluded item exists specifically so the agent does not waste stream time hunting vehicles that are not in his world. Note that Legacy vs Enhanced edition changes which vehicles appear in Story Mode website catalogues, so vehicle availability should be re-checked against the build actually installed on the server. Armour-upgrade percentages mentioned on wiki vehicle pages (Entity XF, Sanchez) are Los Santos Customs modification options, not Online-only, but the agent is unlikely to have the money early; I did not build any item around them.\n\nREPAIR PASS (this pass): Fixed police_escalation_by_star — removed the incorrect claim of an open-world 'military' response at 5 stars (that is GTA IV/San Andreas behaviour; GTA V's only military engagement is the separate, location-triggered Fort Zancudo response, already correctly described elsewhere in this file). Rewrote pc_vehicle_keys (id preserved) to stop prescribing raw keyboard input (F/W/S/A/D/Space, hold-vs-tap) that the harness cannot issue, replacing it with the real bridge-task/primitive mapping. Rewrote hijack_vs_enter and maverick_profile so neither asks the agent to choose 'hold-to-hijack' vs 'tap-to-enter' — he has no such control, so both now say to prefer empty vehicles and detect a failed takeover via control_enabled instead. Rewrote fire_truck_profile and buzzard_profile so neither implies the agent can aim or fire a water cannon, machine gun or missile — no aim/fire primitive exists for him on any vehicle; also added an equivalent clarification to rhino_tank_profile's cannon and softened vehicle_choice_for_stream_value's fire-truck line so it no longer reads as him using the cannon. Removed the 'swim' verb from engine_drowns_in_water (no swim primitive exists) in favour of exit_vehicle plus walk_to. Softened protagonist_switch_repairs and burst_tyres_handling so neither implies the agent can invoke a protagonist switch himself (it is mission-automatic only). No items deleted; all 51 ids preserved; item count unchanged at 51."
+}

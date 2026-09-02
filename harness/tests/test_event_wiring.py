@@ -43,10 +43,15 @@ def _event_types_the_code_actually_emits() -> set[str]:
     """Every literal event type this package hands to an emitter.
 
     `record_event(...)` is the Supabase writer; `_emit(...)` is MissionTracker's
-    queue, which main forwards to record_event verbatim.
+    queue, which main forwards to record_event verbatim. `_record_big_event(...)`
+    and `insert_event_now(...)` are the same write for the two clip-worthy
+    events (death, busted) — they go in singly so the row id is known and
+    `clips.event_id` can point back at them.
     """
     found: set[str] = set()
-    pattern = re.compile(r"""(?:record_event|_emit)\(\s*["'](\w+)["']""")
+    pattern = re.compile(
+        r"""(?:record_event|_record_big_event|insert_event_now|_emit)\(\s*["'](\w+)["']"""
+    )
     for path in PACKAGE.rglob("*.py"):
         found |= set(pattern.findall(path.read_text(encoding="utf-8")))
     return found

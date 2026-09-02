@@ -21,7 +21,7 @@ from __future__ import annotations
 from typing import Any, Literal
 
 import httpx
-from pydantic import BaseModel, ConfigDict, Field
+from pydantic import BaseModel, ConfigDict, Field, field_validator
 
 from .logsetup import get_logger
 
@@ -71,6 +71,15 @@ TRANSIENT_BRIDGE_ERRORS: frozenset[str] = frozenset(
 #: value before edition detection completes, so nothing may assume `legacy`.
 KNOWN_EDITIONS: frozenset[str] = frozenset({"legacy", "enhanced", "unknown"})
 UNKNOWN_EDITION = "unknown"
+
+#: CONTRACTS v1.7 `player.protagonist` / `mission.starts[].protagonist`. Kept as
+#: a plain `str` on the models (same reasoning as `bridge.edition`): a value a
+#: later bridge invents must be tolerated, not crash the show. This set is what
+#: the harness knows how to act on; anything else behaves like `unknown`.
+KNOWN_PROTAGONISTS: frozenset[str] = frozenset(
+    {"michael", "franklin", "trevor", "unknown"}
+)
+UNKNOWN_PROTAGONIST = "unknown"
 
 
 class BridgeError(RuntimeError):
@@ -175,6 +184,12 @@ class PlayerState(BaseModel):
     arrested: bool
     in_vehicle: bool
     control_enabled: bool
+    #: v1.7: which of the three protagonists is being played right now
+    #: (`michael|franklin|trevor|unknown`). Optional with the contract's own
+    #: default so a pre-v1.7 bridge still parses — the same widening rule
+    #: v1.5's `friendly` and v1.6's `pos` went through before the bridge
+    #: started emitting them.
+    protagonist: str = UNKNOWN_PROTAGONIST
 
 
 class VehicleState(BaseModel):
@@ -210,12 +225,65 @@ class ObjectiveBlip(BaseModel):
     handle: int
 
 
+class RouteBlip(BaseModel):
+    """CONTRACTS v1.8 `mission.route_blips[]`: one blip the game has plotted a GPS route to.
+
+    This is the yellow line on the minimap, made readable as data. `objective_blip`
+    is the bridge's single best pick out of this same set; the list is here so a
+    wrong pick is recoverable instead of invisible, and so the case with two live
+    routes (a follow target plus a drop-off) can be reasoned about at all.
+
+    `kind == "entity"` means the route points at something that MOVES, and `handle`
+    can be handed straight to `follow_entity` — which is the whole point: on a
+    follow mission the game draws a route to the car you are tailing and never
+    draws a destination marker, so this is the only structured evidence that the
+    objective is a moving thing rather than a place.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    pos: Vec3
+    kind: Literal["coord", "entity"]
+    handle: int
+    #: SHVDN BlipColor member name, e.g. "Yellow". Plain `str`, not a Literal: the
+    #: bridge serializes an enum index with no name as its integer rendered as a
+    #: string, and CONTRACTS v1.8 requires consumers to tolerate that. A closed
+    #: Literal here would reject the whole /state over a cosmetic field.
+    color: str = ""
+
+
+class MissionStart(BaseModel):
+    """CONTRACTS v1.7 `mission.starts[]`: one mission-start marker on the map.
+
+    These are the game's own per-protagonist letter blips (M/F/T), identified
+    bridge-side by the blip colours the game assigns them. Walking or driving
+    into the corona at `pos` is what starts that job — there is no keypress and
+    no harness-side "start mission" call, which is exactly why this is Story
+    Mode legal: it is the thing a human does with the same two hands.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    pos: Vec3
+    #: michael | franklin | trevor | unknown. Plain `str` for the same reason
+    #: `player.protagonist` is: an unknown value degrades, it never crashes.
+    protagonist: str = UNKNOWN_PROTAGONIST
+
+
 class MissionState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     active: bool
     random_event_active: bool
     cutscene_active: bool
     objective_blip: ObjectiveBlip | None = None
+    #: v1.7: the mission-start markers currently on the map. Optional (default
+    #: `[]`) so a pre-v1.7 bridge still parses; an empty list and an absent
+    #: field mean the same honest thing — no job markers are known right now.
+    starts: list[MissionStart] = []
+    #: v1.8: blips the game has an active GPS route to, nearest first, at most 5.
+    #: Optional (default `[]`) so a pre-v1.8 bridge still parses. The bridge has
+    #: emitted this since 2026-09-02; nothing on the harness side read it until
+    #: now, so the agent was blind to the one piece of state that says "the game has
+    #: already worked out where you are supposed to go".
+    route_blips: list[RouteBlip] = []
 
 
 class NearbyVehicle(BaseModel):
@@ -226,6 +294,8 @@ class NearbyVehicle(BaseModel):
     vehicle_class: str = Field(alias="class")
     distance: float
     driver: Literal["player", "npc", "empty"]
+    #: v1.6: world position of the vehicle. Optional so a pre-v1.6 bridge still parses.
+    pos: Vec3 | None = None
 
 
 class NearbyPed(BaseModel):
@@ -233,13 +303,46 @@ class NearbyPed(BaseModel):
     handle: int
     model: str
     distance: float
-    relationship: Literal["neutral", "hostile"]
+    #: v1.5 adds "friendly" (mission crew / companions). Widened here BEFORE the bridge emits it:
+    #: a closed Literal would otherwise reject every /state the moment a crewmate is nearby.
+    relationship: Literal["neutral", "hostile", "friendly"]
+    #: v1.6: world position of the ped - the minimap dot as data (red = hostile, blue = friendly).
+    #: Optional so a pre-v1.6 bridge still parses.
+    pos: Vec3 | None = None
+
+
+#: Animal ped models. In this engine animals ARE peds, so `World.GetNearbyPeds` returns cats,
+#: dogs, coyotes and the rest, and the engine reports a stray cat's relationship to the player as
+#: `hostile`. Observed live 2026-09-02: a cat 29 m away was the ONLY hostile in the snapshot, the
+#: threat reflex issued `combat_hated_targets_around`, that task never completes while the cat is
+#: alive and nearby, and the agent stood in a hedge "fighting" it for minutes with a story mission
+#: waiting — moving 0.2 m in 20 s. Filtering them here keeps them out of BOTH the brain's context
+#: and the threat reflex. Names are the model strings the bridge emits (lowercase).
+ANIMAL_PED_MODELS: frozenset[str] = frozenset(
+    {
+        "cat", "chop", "chimp", "cow", "coyote", "deer", "dolphin", "fish", "hen", "humpback",
+        "husky", "killerwhale", "mtlion", "pig", "poodle", "pug", "rabbit", "retriever",
+        "rottweiler", "seagull", "shepherd", "stingray", "tigershark", "westy", "boar", "crow",
+        "hammerhead", "rat", "pigeon",
+    }
+)
+
+
+def is_animal_model(model: str | None) -> bool:
+    """True when this ped model is an animal rather than a person."""
+    return (model or "").strip().lower() in ANIMAL_PED_MODELS
 
 
 class Nearby(BaseModel):
     model_config = ConfigDict(extra="ignore")
     vehicles: list[NearbyVehicle] = []
     peds: list[NearbyPed] = []
+
+    @field_validator("peds", mode="after")
+    @classmethod
+    def _drop_animals(cls, peds: list[NearbyPed]) -> list[NearbyPed]:
+        """Animals are peds in this engine and arrive flagged `hostile`; see ANIMAL_PED_MODELS."""
+        return [p for p in peds if not is_animal_model(p.model)]
 
 
 class LastTask(BaseModel):

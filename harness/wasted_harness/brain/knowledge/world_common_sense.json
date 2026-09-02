@@ -1,0 +1,976 @@
+{
+  "domain": "world_common_sense",
+  "items": [
+    {
+      "id": "enter_vehicle_correct_side",
+      "category": "vehicles_ground",
+      "cue": "A drive task is queued and the agent is on foot beside a car; the enter-vehicle action is about to fire.",
+      "context": "Any time the agent needs to DRIVE rather than ride. The enter-vehicle primitive normally targets the nearest free door, which is often the passenger door if he approached from the kerb.",
+      "meaning": "GTA V puts the character into whichever seat the door he used belongs to. Entering the passenger side means he is now a passenger with no control, and on a mission car it can mean he sits doing nothing while the timer runs.",
+      "suggested_action": "Before entering, walk to the driver's side (left side of the vehicle, since San Andreas drives on the right) so the enter-vehicle primitive's nearest-door targeting lands on the driver door. There is no seat parameter to request directly — after entering, verify state reports the agent as the driver; if not, exit_vehicle and re-enter from the other side.",
+      "avoid": "Firing a blind 'enter nearest vehicle' and then issuing drive_to without checking which seat he landed in.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Mission scripts sometimes force a specific seat (the agent is meant to be the passenger/gunner). If the mission dialogue or objective says 'get in', let the script decide and do not fight it. Motorcycles have only one usable side-agnostic entry.",
+      "sources": [
+        "https://gta.wiki/wiki/Vehicles_in_GTA_V",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "do_not_abandon_mission_vehicle",
+      "category": "mission_flow",
+      "cue": "A mission is active, the agent is in or near a vehicle the mission gave him, and a route looks blocked or a faster car is nearby.",
+      "context": "Missions that hand you a specific vehicle (a getaway car, a tow truck, a stolen van with cargo).",
+      "meaning": "Mission-critical vehicles are usually flagged. Leaving them behind, or getting too far from them, triggers 'you abandoned the vehicle' style failure, and destroying them fails outright.",
+      "suggested_action": "Treat the given vehicle as part of the objective. If it is stuck, free it (reverse, reposition) rather than switching cars. If the agent is on foot and the mission vehicle is behind him, walk back to it before continuing.",
+      "avoid": "Carjacking a faster car mid-mission, or bailing out and running the last stretch on foot.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some missions explicitly tell you to ditch the vehicle (e.g. swap cars, burn the getaway car). The objective text overrides this rule.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission"
+      ]
+    },
+    {
+      "id": "do_not_kill_protected_npcs",
+      "category": "mission_flow",
+      "cue": "A mission is active and a friendly/neutral NPC is inside the blast or fire cone of a planned attack.",
+      "context": "Any mission with a companion, hostage, escort, or named contact present.",
+      "meaning": "Killing an important character is a standard, immediate mission-failure condition in GTA V. So is killing a target you were told to capture or follow.",
+      "suggested_action": "Before calling combat_hated_targets_around, check nearby-ped classification. If a friendly is within roughly 10 m of a hostile or between the agent and the hostiles, do not call combat_hated_targets_around there — reposition first (seek_cover on a flank, or follow_entity to pull away) so the engagement radius no longer catches the friendly, since combat_hated_targets_around hands targeting to the engine's own combat AI and the agent has no way to pick weapon, target, or hold fire once it is called.",
+      "avoid": "Calling combat_hated_targets_around with any radius that would catch a friendly, hostage, or 'follow this guy' target — the agent cannot choose what happens inside that radius once it fires.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some missions specifically want a named character dead — read the objective, not the friend/foe tag, which can lag behind script state.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission"
+      ]
+    },
+    {
+      "id": "escort_pace_match",
+      "category": "mission_flow",
+      "cue": "Objective reads 'follow', 'escort', 'take X to Y', or a friendly NPC is walking/driving and there is an objective blip on him.",
+      "context": "On-foot follows and convoy drives during story missions.",
+      "meaning": "Escorted and followed NPCs move on a script. Outrunning them either stalls the mission (the next trigger never fires) or fails it ('you lost him' / 'wait for X').",
+      "suggested_action": "Use follow_entity rather than drive_to/walk_to a coordinate, and keep a modest gap — close enough that the NPC keeps moving, far enough not to ram him. If the NPC stops, stop too.",
+      "avoid": "drive_to on the destination coordinate at full speed, leaving the escort behind, or ramming the NPC's car to hurry him.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "A minority of chase missions genuinely want you to get ahead and cut the target off; the objective text will say so.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "dialogue_gate_waiting_is_action",
+      "category": "mission_flow",
+      "cue": "Mission is active, no objective blip is present or the blip is on a stationary friendly, and characters are talking. No hostiles nearby.",
+      "context": "Very common in the first 30-90 seconds of a GTA V mission and between mission beats — driving conversations especially.",
+      "meaning": "GTA V gates the next objective behind dialogue lines finishing. There is nothing to do but keep driving/standing until the script advances. An idle harness reads this as 'stuck' and starts thrashing.",
+      "suggested_action": "Explicitly choose 'wait' or 'keep driving the current route' as the action. Narrate the conversation for the stream. Set a generous stall timer (60-90 s) before treating it as a real stall.",
+      "avoid": "Interpreting 'no objective' as a bug and issuing wander_drive, getting out of the car, or shooting to make something happen — all of which can fail the mission.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "If more than ~2 minutes pass with no dialogue, no blip and no cutscene flag, it probably IS a genuine stall — then try repositioning slightly or re-entering the vehicle.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "objective_blip_vertical_arrow",
+      "category": "navigation",
+      "cue": "the agent is at or very near the objective's map coordinates but the objective is not completing, and the blip shows a small arrow inside/above/below it.",
+      "context": "Car parks, multi-storey buildings, freeway overpasses, tunnels, rooftops, the Vinewood hills.",
+      "meaning": "The arrow on a blip means the target is at a different height, not a different XY position. The agent is directly under or over it. Horizontal pathing will never reach it.",
+      "suggested_action": "Solve for height, not distance: find the ramp, stairwell, lift, or the road that climbs. For a car park, drive the spiral ramp. For a rooftop, look for a fire escape or interior stairs. For a target below a freeway, take the off-ramp.",
+      "avoid": "Repeatedly re-issuing drive_to/walk_to on the same XY coordinate and concluding the objective is broken.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "On foot the arrow can also mean the target is a short drop away and jumping down is correct — but fall damage applies above roughly two storeys.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "gps_dies_in_tunnels",
+      "category": "navigation",
+      "cue": "The GPS route line disappears from the minimap while the agent is underground or in a tunnel.",
+      "context": "The Los Santos storm-drain tunnels, freeway underpasses, the LS metro tunnels, parking structures.",
+      "meaning": "GTA V drops the GPS connection in tunnels and restores it on exit. The route is not cancelled, only hidden.",
+      "suggested_action": "Keep the current heading and speed until the tunnel exits, then re-read the route. Do not re-issue the destination while underground.",
+      "avoid": "Treating the vanished route as 'destination unreachable' and cancelling the drive task mid-tunnel.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None known for story mode.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "gps_route_appears_only_after_correct_vehicle",
+      "category": "mission_flow",
+      "cue": "A mission objective names a destination but no route line is drawn, and the agent is on foot or in the wrong vehicle.",
+      "context": "Missions that require a specific vehicle (a truck, a boat, a helicopter, a mission-supplied car).",
+      "meaning": "Some mission scripts only set the GPS waypoint once you are in the vehicle the script expects. No route means 'you are not yet in the right thing', not 'no destination'.",
+      "suggested_action": "Resolve the vehicle objective first — get into the flagged vehicle — then re-read the minimap for the route before planning the drive.",
+      "avoid": "Planning a manual route to a guessed destination, or walking the whole way, because no GPS line appeared.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Unverified against a source in this session; behaviour varies mission to mission. Some missions never draw a route and only use a blip.",
+      "sources": [
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "chase_target_must_be_tracked",
+      "category": "navigation",
+      "cue": "Objective is 'chase', 'don't lose him', or a red/enemy blip is moving on the minimap.",
+      "context": "Car chases and foot pursuits, which GTA V uses heavily in story missions.",
+      "meaning": "A chase target is a moving entity on a script, not a fixed destination. Its blip position at the moment you plan a route is already stale. Losing line of sight for long enough fails the mission.",
+      "suggested_action": "Use follow_entity / continuous re-targeting on the entity, re-evaluating every second or two. Cut corners toward where the target is heading, keep it on screen, and prefer staying behind it over overtaking.",
+      "avoid": "Snapshotting the target's coordinate into a one-shot drive_to and then driving to an empty street.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "A few chases are scripted so the target cannot actually escape until a set point — but you still fail if you fall far enough behind.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "wedged_vehicle_reverse_out",
+      "category": "vehicles_ground",
+      "cue": "Vehicle speed is near zero while throttle is applied, position has barely changed for several seconds, engine is revving.",
+      "context": "Alleys, kerbs, lamp posts, hedges, between two parked cars, nose-into-a-wall after a crash.",
+      "meaning": "GTA V vehicles do not push through world geometry. Continued forward throttle just burns time and can catch the car on fire against a wall.",
+      "suggested_action": "Reverse for 1-2 seconds with steering held to one side, straighten, then go. If two reverse attempts fail, exit the vehicle, walk clear, and take a different vehicle.",
+      "avoid": "Flooring forward throttle repeatedly, or steering harder into the obstruction.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "If the vehicle is a mission vehicle, exhaust the reverse attempts before abandoning it — abandoning can fail the mission (see do_not_abandon_mission_vehicle).",
+      "sources": [
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "stuck_on_geometry_exit_and_walk",
+      "category": "vehicles_ground",
+      "cue": "Reverse and forward both produce no position change; the vehicle is on its roof, on a rock, or hanging on a fence.",
+      "context": "Off-road in Blaine County, Mount Chiliad trails, construction sites.",
+      "meaning": "The car is beached. No throttle input will recover it; a human would get out.",
+      "suggested_action": "Exit the vehicle, walk to the nearest road, and take another vehicle. If a mission vehicle is beached, this is usually a mission restart, not a recovery.",
+      "avoid": "Burning minutes of stream time alternating forward and reverse.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The CLAUDE.md 'unstick nudge' exception applies here and must be announced in commentary if used.",
+      "sources": [
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "water_stalls_the_engine",
+      "category": "vehicles_ground",
+      "cue": "Route crosses the ocean, a canal with standing water, or a flooded section of the Los Santos River.",
+      "context": "Driving near the Port, the LS River south of Cypress Flats, beaches, the Alamo Sea shoreline.",
+      "meaning": "Land vehicles in GTA V keep running through shallow water but cut out once the exhaust is submerged — the car dies mid-water and the agent must swim.",
+      "suggested_action": "Prefer routes on dry surface. Cross water only in a boat, or drive the LS River only in its shallow northern concrete section.",
+      "avoid": "Driving into the sea as a shortcut or an escape route; the car dies and the agent is a swimming target.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Vehicles with raised exhausts or snorkels (some off-roaders) tolerate deeper water. Michael and Franklin can swim; nobody can swim while carrying most heavy weapons effectively.",
+      "sources": [
+        "https://gta.wiki/wiki/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "river_aqueduct_escape_route",
+      "category": "navigation",
+      "cue": "Wanted level is active in central/east Los Santos and a fast, straight, low-traffic corridor is needed.",
+      "context": "The concrete Los Santos River channel running north-south through East Vinewood, past Downtown/Textile City, down to the Port.",
+      "meaning": "The channel is drivable for most of its length, has no traffic, no junctions, and walls that hide you from street-level police. It is the classic escape corridor and the game itself uses it that way in the Jewel Store Heist getaway.",
+      "suggested_action": "When fleeing police in the city core, find a river access ramp and run the channel, then exit at a distant access point and go quiet in a side street.",
+      "avoid": "Riding it all the way south past Cypress Flats, where the water deepens and will stall the car; also avoid it against a police helicopter, which sees straight down into an open channel.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "With 3+ stars a Maverick is overhead and the open channel becomes a shooting gallery — prefer covered tunnels instead.",
+      "sources": [
+        "https://gta.wiki/wiki/Los_Santos_River_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "tunnels_and_garages_break_line_of_sight",
+      "category": "police_evasion",
+      "cue": "Wanted level active, search cones visible on the minimap, and a tunnel, underpass, or multi-storey car park is within reach.",
+      "context": "GTA V police search by line of sight across the whole map, not within a fixed radius.",
+      "meaning": "Because evasion depends on staying out of police sight, any roof over your head is worth more than raw speed. Tunnels and parking structures break sight instantly and let the search cones drift off.",
+      "suggested_action": "On losing sight of the chasers, immediately get under cover (tunnel, garage, dense alley), stop the engine, and wait until the stars stop flashing. Movement is what re-acquires you.",
+      "avoid": "Continuing to drive fast in the open once you have already broken contact — speed generates new sightings.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Air units at 3+ stars can re-acquire you on exit; check for a helicopter blip before leaving the tunnel.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "police_search_is_line_of_sight_not_radius",
+      "category": "police_evasion",
+      "cue": "Stars are flashing/greyed and cone shapes appear on police blips on the minimap.",
+      "context": "Any active wanted level in GTA V story mode.",
+      "meaning": "Flashing stars mean the police have lost you and are searching. The cones are literally their fields of vision. Sitting still inside a cone re-triggers the chase; sitting still outside one runs the clock down.",
+      "suggested_action": "Read the cones as no-go zones. Move perpendicular to them, or hold position where no cone touches the agent, until the stars clear.",
+      "avoid": "Just driving fast in a straight line — GTA V has no 'outrun the radius' mechanic, so distance alone does not clear stars.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None; this is the core GTA V evasion mechanic.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "railway_tracks_evade_police",
+      "category": "police_evasion",
+      "cue": "Wanted level active and a rail line or rail tunnel is nearby.",
+      "context": "The freight line loops most of the map; the LS metro runs underground through the city.",
+      "meaning": "Police pathing handles rail corridors badly, so tracks are unusually effective for shaking a chase.",
+      "suggested_action": "Where a track is drivable and clear, use it to break pursuit, then leave it at a crossing.",
+      "avoid": "Staying on the tracks longer than needed — a freight train will kill the agent and destroy the vehicle on contact.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Wiki asserts the tactic is effective; train-collision lethality is player consensus and unverified here. Never use tracks during a mission with a mission vehicle.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "train_will_kill_you",
+      "category": "world_hazards",
+      "cue": "the agent is on or crossing railway tracks, or a train horn/large moving entity is on the rail corridor.",
+      "context": "Level crossings all over Blaine County and the industrial south of Los Santos.",
+      "meaning": "The freight train is effectively unstoppable and does not brake for the player. Contact is a near-certain death or a destroyed vehicle.",
+      "suggested_action": "Treat rail corridors as a hazard lane: cross perpendicular, quickly, and never park, idle, or fight on tracks.",
+      "avoid": "Stopping on a crossing to plan, or using the tracks as a straight-line route without checking for an approaching train.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Player-consensus; not verified against a second source in this session. Trains are only player-drivable during specific scripted missions. When the active mission objective explicitly requires boarding, riding, or jumping onto a moving train (e.g. The Paleto Score's board-train stage, Derailed's jump-onto-train stage), the objective overrides this hazard rule — follow the objective, do not route around the train as if it were still a no-go hazard.",
+      "sources": [
+        "https://gta.wiki/wiki/Trains",
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "mount_chiliad_road_and_cliffs",
+      "category": "world_hazards",
+      "cue": "Route planner sends the agent up Mount Chiliad, into the Vinewood Hills, or along Great Ocean Highway cliff sections.",
+      "context": "North Blaine County; the mountain has narrow trails and one winding road, plus a cable car.",
+      "meaning": "There are no guardrails on most of it. A small steering error at speed is a long fall — near-certain death on foot, destroyed vehicle otherwise, and a total loss of stream continuity.",
+      "suggested_action": "Cut speed hard on mountain and cliff roads, favour the inside of bends, and prefer a 4x4/bike over a sports car. If a mission does not require the summit, route around the mountain.",
+      "avoid": "Full-throttle drive_to across mountain terrain, and off-road shortcuts down a slope you cannot see the bottom of.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some Strangers-and-Freaks content and stunt jumps deliberately require the mountain.",
+      "sources": [
+        "https://gta.wiki/wiki/Mount_Chiliad",
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "shoot_tyres_to_stop_a_car",
+      "category": "combat",
+      "cue": "Objective is to stop, disable, or catch a fleeing vehicle rather than destroy it.",
+      "context": "Chase missions where the target must survive, and stopping a car without an explosion.",
+      "meaning": "GTA V models per-wheel tyre bursting, and a car on burst tyres slows sharply and steers badly. But the agent has no aim primitive and no fire primitive — combat_hated_targets_around hands targeting to the engine's own combat AI over a radius, and it cannot be told to hit tyres specifically, spare the driver, or avoid the engine. There is no way to execute 'shoot out the tyres' as a deliberate action.",
+      "suggested_action": "The game exposes nothing usable here for a precision disable. Do not plan around disabling the vehicle by gunfire. Instead pursue with follow_entity/drive_to and let the objective resolve by catching up, boxing in, or waiting for a scripted stop; if the mission needs the target alive, avoid combat_hated_targets_around near that vehicle entirely rather than trying to aim around it.",
+      "avoid": "Planning a 'shoot the tyres' or 'shoot the driver, not the engine' sequence — neither is executable, and calling combat_hated_targets_around near a capture target or friendly risks the engine AI killing them instead.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some scripted chase vehicles are made bulletproof/invincible until a story beat regardless.",
+      "sources": [
+        "https://gta.wiki/wiki/Vehicles_in_GTA_V",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "vehicles_explode_do_not_hug_them",
+      "category": "combat",
+      "cue": "A nearby vehicle is smoking, on fire, or has been shot repeatedly, and the agent is in cover behind or beside it.",
+      "context": "Street firefights where cars are the obvious cover.",
+      "meaning": "Damaged cars in GTA V catch fire and then explode. Using a burning car as cover is a self-inflicted death.",
+      "suggested_action": "Break cover and move at the first sign of smoke or flame from the car you are behind, and put 15+ m between the agent and it. The agent has no way to deliberately shoot a specific car to detonate it near hostiles — combat_hated_targets_around hands targeting to the engine's combat AI over a radius rather than a chosen object — so treat a burning car near hostiles as a hazard to stay clear of, not a tool to aim.",
+      "avoid": "seek_cover on a vehicle that is already taking fire, and standing next to any burning vehicle to recover.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Not usable when a friendly or protected NPC is near the car (see do_not_kill_protected_npcs).",
+      "sources": [
+        "https://gta.wiki/wiki/Vehicles_in_GTA_V",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "red_barrels_and_fuel",
+      "category": "combat",
+      "cue": "Red barrels, jerry cans, propane tanks, or petrol pumps are visible in the fight area.",
+      "context": "Industrial yards, docks, construction sites, gas stations, Sandy Shores.",
+      "meaning": "These are scripted explosive props. One bullet detonates them with a wide blast — but the agent has no aim or fire primitive to hit a specific prop; combat_hated_targets_around hands targeting to the engine's own combat AI over a radius and cannot be pointed at an object, so deliberately popping a barrel to clear hostiles is not something the agent can execute.",
+      "suggested_action": "The game exposes nothing usable here for a targeted detonation. Treat red barrels and fuel props purely as a hazard: if the agent is standing near one, move away first, since incidental fire (his own engine-AI-directed fire, or enemy fire) can set it off.",
+      "avoid": "Taking cover behind a red barrel or beside a fuel pump — enemy fire will detonate it — and planning any action around 'shoot the barrel' as a deliberate step.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Blast radius harms friendlies too, which is one more reason not to fight near one. Player-consensus, not verified against a second source in this session.",
+      "sources": [
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "cover_is_destructible_and_temporary",
+      "category": "combat",
+      "cue": "the agent is in cover, health is dropping, or debris/wood/glass is breaking around him.",
+      "context": "Sustained firefights, especially against enemies with rifles or shotguns.",
+      "meaning": "Cover in GTA V degrades under fire and does not make you safe indefinitely. Enemies also move to angles the cover no longer protects.",
+      "suggested_action": "Treat cover as a place to recover health and reload for a few seconds, then relocate to a new cover point — ideally one that changes the angle on the enemy.",
+      "avoid": "Camping one cover spot for a whole fight and re-issuing seek_cover on the same object.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Concrete and vehicle-engine-block cover lasts far longer than wooden fences or drywall.",
+      "sources": [
+        "https://gta.wiki/wiki/Cover_System",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "enemies_flank_you",
+      "category": "combat",
+      "cue": "Hostile positions in the state feed are spreading laterally rather than closing head-on, or a hostile disappears from the front arc.",
+      "context": "GTA V enemy AI in mission firefights advances in pairs and works around cover.",
+      "meaning": "If the agent holds one static cover point, the enemy AI will eventually get an angle on him and he will take damage from a direction his cover does not face.",
+      "suggested_action": "Watch the spread of hostile bearings each tick. When the bearing spread exceeds roughly 90 degrees, break cover and reposition so all hostiles are again in front.",
+      "avoid": "Focusing only on the closest hostile while a flanker walks around.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Player-consensus about GTA V enemy behaviour; not verified against a second source in this session.",
+      "sources": [
+        "https://gta.wiki/wiki/Cover_System",
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "blind_fire_tradeoff",
+      "category": "combat",
+      "cue": "the agent is in cover, health is low, and enemies are suppressing his position.",
+      "context": "Cover shooting in GTA V.",
+      "meaning": "Blind fire keeps a player behind cover and much safer than peeking to aim, but accuracy is poor; peeking out shows the reticle and lets a player hit, at the cost of exposure. The agent has no aim primitive and no fire primitive to choose between these, though — seek_cover and combat_hated_targets_around are all he has, and whether the engine's combat AI blind-fires or peeks is not something the harness selects.",
+      "suggested_action": "Use this only as narration context, not as a plan step. The lever the agent actually has is exposure duration: call seek_cover to reduce incoming damage while health regenerates, and disengage (see running_beats_fighting) once health is low and multiple enemies are firing, rather than trying to choose a fire mode that isn't available to him.",
+      "avoid": "Writing a plan step that assumes the agent can choose to peek-and-aim versus blind-fire.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "None — this item was rewritten from a version that assumed manual aim control, which the agent does not have.",
+      "sources": [
+        "https://gta.wiki/wiki/Cover_System"
+      ]
+    },
+    {
+      "id": "gunfire_direction_locates_enemies",
+      "category": "combat",
+      "cue": "the agent is taking damage but the state feed shows no hostile in front, or the radar edge flashes.",
+      "context": "Ambushes and rooftop shooters, where the shooter is outside the state feed's useful range or above.",
+      "meaning": "The direction damage arrives from, plus audible gunfire, is the cheapest bearing information available. GTA V also flashes the radar red when the protagonist loses health.",
+      "suggested_action": "On unexplained damage, immediately seek_cover facing away from the last damage bearing, then sweep for elevated positions (rooftops, balconies, scaffolding) in that direction.",
+      "avoid": "Standing in the open trying to work out where the shots came from.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Radar flash confirms damage but not direction; direction inference is player-consensus.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "sirens_mean_police_nearby",
+      "category": "police_evasion",
+      "cue": "Sirens audible, or a police vehicle blip appears, with or without stars showing.",
+      "context": "Free roam and missions alike.",
+      "meaning": "Police can be present and responding to something else. If the agent commits a crime in their line of sight, he gets stars immediately; if he stays clean he stays clean.",
+      "suggested_action": "On hearing sirens with no stars, avoid calling combat_hated_targets_around and drive normally (drive_to/wander_drive at a normal speed) to let them pass. On hearing sirens WITH stars, they have a bearing on the agent — break line of sight now. The agent has no holster action; there is nothing extra to do about a weapon he may be holding.",
+      "avoid": "Calling combat_hated_targets_around or driving erratically near a marked police unit; both are instant wanted-level triggers.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "During some missions the wanted level is scripted and cannot be evaded until the mission stage ends.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "never_fire_near_police",
+      "category": "police_evasion",
+      "cue": "the agent is about to use combat_hated_targets_around and a police blip is within sight.",
+      "context": "Street fights and gang encounters that happen near a patrol.",
+      "meaning": "Firing a weapon near police, stealing a vehicle, or hitting a pedestrian are the standard ways to acquire stars. A one-star arrest attempt escalates to shoot-to-kill at two stars.",
+      "suggested_action": "Break contact and relocate the fight away from police, or accept the wanted level deliberately and plan an evasion route before the first shot.",
+      "avoid": "Opening fire reflexively without checking whether a police unit can see it.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "During scripted mission shootouts the wanted level is often already applied and this check is moot.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "two_stars_they_shoot_to_kill",
+      "category": "police_evasion",
+      "cue": "Wanted level reaches two stars.",
+      "context": "GTA V police escalation.",
+      "meaning": "At one star police try to arrest at gunpoint and only one or two cars respond — survivable. At two stars they shoot to kill, at least three cars pursue, and they coordinate ambushes.",
+      "suggested_action": "Treat the one-to-two-star transition as the point to switch from 'drive away casually' to 'active evasion': cover, tunnels, break line of sight. Do not stand and fight patrol cars on foot.",
+      "avoid": "Fighting police in the open at two stars with a pistol.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "three_stars_helicopter_overhead",
+      "category": "police_evasion",
+      "cue": "Wanted level reaches three stars, or a Police Maverick blip appears.",
+      "context": "GTA V police escalation.",
+      "meaning": "At three stars roadblocks, spike strips and a police helicopter join. A helicopter holds line of sight from above, so ground-level cover (walls, alleys, the open river channel) stops working.",
+      "suggested_action": "Get under a roof — tunnel, multi-storey car park, metro tunnel — not just behind a wall. Spike strips also mean burst tyres, so watch for roadblocks ahead and take side streets.",
+      "avoid": "Running the open Los Santos River channel or a straight freeway at three-plus stars; both are perfect helicopter viewing.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Shooting the helicopter down is possible but noisy and usually escalates further.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "five_stars_disengage_immediately",
+      "category": "police_evasion",
+      "cue": "Wanted level reaches four or five stars.",
+      "context": "GTA V escalation: four stars brings NOOSE tactical units in armoured vehicles and up to three helicopters; five brings essentially unlimited police and military.",
+      "meaning": "There is no winning this fight in story mode without cheats, which the agent is not allowed. Survival probability drops sharply and a death costs money and continuity.",
+      "suggested_action": "Abandon whatever caused it, get under a roof, and go completely still. Treat losing the stars as the only objective until they clear.",
+      "avoid": "Trying to fight NOOSE, or continuing a side activity while at four-plus stars.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some late-game missions script a high wanted level you must simply survive to a checkpoint.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "los_santos_customs_clears_wanted",
+      "category": "police_evasion",
+      "cue": "Wanted level active, the agent is in a car, and a Los Santos Customs blip is reachable.",
+      "context": "LS Customs garages around the map; single player.",
+      "meaning": "Entering LS Customs in a vehicle wipes any wanted level — but the garage door will NOT open if police can see the agent on approach.",
+      "suggested_action": "Break line of sight first (tunnel, alley), let the stars start flashing, and only then approach the garage. Drive in cleanly rather than screeching up with a patrol behind.",
+      "avoid": "Driving straight to LS Customs with police in visual contact — the door stays shut and you are cornered in a dead end.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Requires being in a vehicle you can take in; does not work on foot or on some mission vehicles.",
+      "sources": [
+        "https://gta.wiki/wiki/Los_Santos_Customs"
+      ]
+    },
+    {
+      "id": "mask_swap_drops_a_star",
+      "category": "police_evasion",
+      "cue": "Wanted level active, the agent has a mask available, and stars are flashing (police have lost visual).",
+      "context": "Heist and mask-equipped situations in story mode.",
+      "meaning": "Putting on or taking off a mask changes the character's appearance and removes one star. Equipping a mask, however, is a menu/wardrobe interaction, and the agent has no menu-navigation primitive at all — press_prompt_key is contextual-prompt-only, not a menu selector.",
+      "suggested_action": "Not currently actionable: the game exposes nothing usable here given the agent's primitive set. Do not plan around a deliberate mask swap. Keep this as background knowledge only, useful if a mask-equip primitive is ever added, and rely on line-of-sight evasion (tunnels_and_garages_break_line_of_sight, helicopter_overhead_means_no_ground_cover) as the actual lever the agent has.",
+      "avoid": "Writing a plan step that assumes the agent can put on or take off a mask on demand.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Only applies when a mask is actually in the inventory, which is mission-dependent in story mode, and only if a menu-capable primitive is added later. Wiki-sourced; not corroborated by a second source in this session.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "busted_costs_ammo_not_weapons",
+      "category": "survival",
+      "cue": "the agent is surrounded at one star on foot with no escape route.",
+      "context": "GTA V arrest outcome in story mode.",
+      "meaning": "Being busted in GTA V keeps the weapons but confiscates the ammo, and ends the current mission attempt. It is bad but not catastrophic.",
+      "suggested_action": "Weigh arrest against death: at one star, running is almost always better than a shootout, and being busted is better than dying with a full ammo load and $5,000 on the line.",
+      "avoid": "Starting a firefight with arresting officers just to avoid a bust — that escalates to shoot-to-kill and usually ends in death.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "During a mission, any bust fails the mission regardless.",
+      "sources": [
+        "https://gta.wiki/wiki/Grand_Theft_Auto_V"
+      ]
+    },
+    {
+      "id": "wasted_costs_money",
+      "category": "survival",
+      "cue": "Health is critically low and no cover or escape is available.",
+      "context": "GTA V death outcome in story mode.",
+      "meaning": "Dying deducts 5% of the agent's money up to a $5,000 cap, respawns him at the nearest hospital, and he keeps his weapons. On a mission it offers a checkpoint retry.",
+      "suggested_action": "Treat death as a real but recoverable cost. Prioritise disengaging over a last stand: retreating costs nothing, dying costs up to $5,000 and a chunk of stream continuity.",
+      "avoid": "Fighting on at sub-25% health because the objective is 'nearly done'.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Using a mission checkpoint retry disables some gold-medal objectives for 100% completion.",
+      "sources": [
+        "https://gta.wiki/wiki/Wasted"
+      ]
+    },
+    {
+      "id": "health_regenerates_only_to_half",
+      "category": "survival",
+      "cue": "Health is below 50% and no enemies are firing.",
+      "context": "GTA V single-player health model.",
+      "meaning": "GTA V auto-regenerates health only up to about the halfway mark. Above that, health only comes from snacks, armour, or a hospital trip. Waiting will never top the agent back up to full.",
+      "suggested_action": "After a fight, hold position out of contact until regen tops out at half, then decide: if the next objective is another firefight, eat a snack or buy armour first.",
+      "avoid": "Assuming a long wait restores full health, or entering a heavy firefight at 50% because 'health is regenerating'.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Sources disagree on whether regeneration requires standing still: the GTA Wiki mirror says the character must not walk or run, while common play experience is that it ticks up while moving and driving too. Assume the stricter rule (stop moving to heal) since it is safe either way.",
+      "sources": [
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "cover_speeds_health_regen",
+      "category": "survival",
+      "cue": "Health is below half mid-firefight and there is a lull in incoming fire.",
+      "context": "GTA V cover mechanic interaction with regeneration.",
+      "meaning": "Being in cover regenerates health slightly faster than being merely out of contact.",
+      "suggested_action": "Break contact INTO cover rather than into the open, and stay there through the regen window rather than repositioning immediately.",
+      "avoid": "Standing in an open alley to heal when a cover object is two metres away.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Only helps up to the 50% ceiling.",
+      "sources": [
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "buy_armour_before_a_known_fight",
+      "category": "survival",
+      "cue": "The next objective is a known shootout and the agent has money and time, with an Ammu-Nation reachable.",
+      "context": "Story mode preparation.",
+      "meaning": "Body armour is bought at Ammu-Nation in five tiers from $500 (Super Light, ~20% protection) to $2,500 (Super Heavy, ~100%), and shows as a separate blue bar beside health. It absorbs damage that would otherwise cost health — and health only regenerates to half. Selecting a specific tier is a clerk/menu interaction, though, and the agent has no menu-navigation primitive (press_prompt_key is contextual-prompt-only) — so which tier, if any, he ends up buying by walking in and pressing the contextual prompt is not something the harness can control precisely.",
+      "suggested_action": "Not reliably actionable in detail given the agent's current primitives: driving to an Ammu-Nation (drive_to) and using press_prompt_key at the counter may or may not resolve to a specific armour tier depending on what the game treats as the default prompt action — treat any armour gained this way as a bonus, not a planned outcome. Do not depend on it; fall back to the recovery ladder (disengage per running_beats_fighting, rely on cover per cover_speeds_health_regen) as the reliable lever instead.",
+      "avoid": "Building a plan step that assumes the agent can select 'heaviest armour affordable' from a menu.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Not possible mid-mission in any case. Whether armour is retained through death is not confirmed by the source, and tier-selection actionability is unverified against the live install.",
+      "sources": [
+        "https://gta.wiki/wiki/Body_Armor"
+      ]
+    },
+    {
+      "id": "snacks_are_the_only_full_heal_in_the_field",
+      "category": "survival",
+      "cue": "Health is stuck at the ~50% regeneration ceiling and a fight is coming.",
+      "context": "Convenience stores, vending machines, and snacks already in inventory.",
+      "meaning": "Snacks (eCola, Sprunk, Meteorite bars, P's & Q's and similar) restore health by varying amounts and are the only mid-field way past the regen ceiling. Both buying a snack (a clerk/menu interaction) and eating one already held (an inventory/phone interaction) are menu-driven, and the agent has no menu or phone primitive at all — press_prompt_key is contextual-prompt-only.",
+      "suggested_action": "Not reliably actionable given the agent's current primitives: there is no way to deliberately stock or consume a snack to push past the regen ceiling. Do not plan around it. Fall back to the recovery ladder instead — hold position out of contact until regen tops out at half (health_regenerates_only_to_half), and default to disengaging rather than committing to a fight that needs more health than that ceiling allows (running_beats_fighting).",
+      "avoid": "Building a plan step that assumes the agent can buy or eat a snack on demand.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Cannot use a store while at a wanted level in any case. Menu-interaction actionability is unverified against the live install.",
+      "sources": [
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "radar_flashes_red_on_damage",
+      "category": "survival",
+      "cue": "The minimap border flashes red.",
+      "context": "GTA V HUD feedback.",
+      "meaning": "the agent is losing health right now, even if the state feed has not yet reported a hostile. It is the earliest damage signal available.",
+      "suggested_action": "Treat a red radar flash as an immediate trigger for seek_cover, before diagnosing the source.",
+      "avoid": "Waiting for a health-value drop in the state feed before reacting.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Also flashes for fall damage, fire and drowning, which cover does not fix — if cover does not stop it, the agent is burning or drowning and must move or surface.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "mission_trigger_corona",
+      "category": "mission_flow",
+      "cue": "A coloured cylinder of light (a corona/marker) is on the ground at an objective blip, or a letter icon (M, F, T and similar) appears on the map.",
+      "context": "Story mission start points and objective markers in GTA V.",
+      "meaning": "Coronas are trigger volumes. Standing in one — or driving a vehicle into a vehicle-sized one — is what starts a mission or completes an objective. Being near it is not enough; the character's position must be inside it.",
+      "suggested_action": "Route to the centre of the marker, not its edge, and confirm the objective changed. If the corona is vehicle-sized, arrive IN a vehicle; if character-sized, arrive on foot.",
+      "avoid": "Stopping short at the blip, or trying to trigger a vehicle marker on foot (and vice versa).",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some markers only activate at certain times of day or after a phone call; if standing in it does nothing, the prerequisite is not met.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "flashing_objective_means_urgent_or_moving",
+      "category": "mission_flow",
+      "cue": "An objective blip or the objective text is flashing/pulsing.",
+      "context": "GTA V mission HUD.",
+      "meaning": "Flashing signals urgency or state change — a timer running, a target about to escape, or a new objective just issued that supersedes the old one.",
+      "suggested_action": "Re-read the objective text immediately and re-plan; a flashing objective usually means the previous plan is now stale.",
+      "avoid": "Continuing a queued long-horizon task (a cross-map drive) after the objective started flashing.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "Not confirmed against a source in this session; flashing is also used for the wanted-level 'police lost you' state, which means the opposite (stop moving).",
+      "sources": [
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "leaving_the_mission_area_fails",
+      "category": "mission_flow",
+      "cue": "Mission active and the agent is driving away from the objective for an extended distance, or an on-screen warning about returning to the mission area appears.",
+      "context": "Most GTA V story missions define a soft boundary.",
+      "meaning": "Wandering far from a mission's area is a failure condition alongside death, arrest, and letting a target escape.",
+      "suggested_action": "During a mission, constrain navigation to routes that trend toward the objective. If a warning appears, turn around immediately.",
+      "avoid": "Using an evasion route that takes the agent across the map while a mission is live.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some missions have no boundary at all; the warning is the reliable signal.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission"
+      ]
+    },
+    {
+      "id": "three_failures_offers_a_skip",
+      "category": "mission_flow",
+      "cue": "The same mission section has been failed three times in a row.",
+      "context": "GTA V's assistance feature in story mode.",
+      "meaning": "After three consecutive failures on the same portion, the game offers to skip that section. Per failure_recovery's policy (which this item defers to and must not contradict), Skip is forbidden by default and is only allowed after a hard cap of failed retries on the same checkpoint (e.g. 6+) with the recovery ladder exhausted first — taking it at the third prompt undercuts the show's premise that the agent actually plays the game.",
+      "suggested_action": "Treat the skip prompt appearing at three failures as a signal to CHANGE THE PLAN on the next attempt (different vehicle, route, cover position, or approach) rather than repeating the identical failed attempt — see failure_recovery/repeated_identical_death_means_change_plan. Only take the skip once the hard retry cap in failure_recovery has been reached and the recovery ladder is exhausted, and announce it honestly in commentary.",
+      "avoid": "Taking the skip the first time it is offered (three failures) just to save time, and retrying the identical failed approach past the hard cap without changing anything.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Skipping and failing both disable some gold-medal objectives, hurting 100% completion. Accept that trade deliberately, and only once the hard cap is reached.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission"
+      ]
+    },
+    {
+      "id": "checkpoint_retry_vs_restart",
+      "category": "mission_flow",
+      "cue": "A mission fails and the retry menu appears.",
+      "context": "GTA V mission checkpoints.",
+      "meaning": "GTA V presents a modal offering retry-from-checkpoint or quit. Checkpoint retry saves time but disables time/accuracy gold-medal objectives for that mission.",
+      "suggested_action": "For live-show continuity, take the checkpoint retry — progression matters more than gold medals. Do it promptly so the stream is not sitting on a menu.",
+      "avoid": "Quitting the mission entirely, which means re-travelling to the trigger and re-watching the cutscene.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "If a 100%-completion run is the goal, a full restart preserves the gold medal.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "https://gta.wiki/wiki/Wasted"
+      ]
+    },
+    {
+      "id": "running_beats_fighting",
+      "category": "combat",
+      "cue": "Hostiles outnumber the agent three-to-one or more, or health is below half, or the fight has no objective attached to it.",
+      "context": "Free-roam gang encounters, police pursuits, random events.",
+      "meaning": "GTA V rewards disengagement. Health only regenerates to half, death costs money, and unmissioned fights give the agent nothing. Most fights he is not required to have are pure downside.",
+      "suggested_action": "Default to flee (vehicle preferred) whenever the fight is optional. Only commit to combat when the objective explicitly requires clearing hostiles.",
+      "avoid": "combat_hated_targets_around as a reflex whenever a hostile appears in the state feed.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Fleeing on foot from armed hostiles at close range often loses; get into a vehicle first if one is within a few seconds.",
+      "sources": [
+        "https://gta.wiki/wiki/Wasted",
+        "https://gta.wiki/wiki/Health"
+      ]
+    },
+    {
+      "id": "aiming_makes_peds_surrender",
+      "category": "pedestrians",
+      "cue": "A pedestrian is blocking a path the agent needs, or is in the vehicle he needs for enter_nearest_vehicle.",
+      "context": "Free roam, carjacking, crowd control.",
+      "meaning": "Ordinary civilians in GTA V put their hands up, run, or duck when a weapon is aimed at them, and no shot is needed to make them comply. This is real game behaviour, but the agent has no aim primitive at all — he cannot deliberately point a weapon at a ped to clear space or intimidate one, so this tactic is not available to him.",
+      "suggested_action": "The game exposes nothing usable here. Route around pedestrians (walk_to/drive_to a path that avoids them) rather than trying to clear them with a weapon; for enter_nearest_vehicle, let the primitive pick another free vehicle rather than trying to menace a ped out of one.",
+      "avoid": "Planning any step that assumes the agent can aim at a ped to make it move or comply.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Gang-member peds do the opposite: they draw a weapon and start shooting.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians"
+      ]
+    },
+    {
+      "id": "gang_peds_draw_when_provoked",
+      "category": "pedestrians",
+      "cue": "Nearby-ped feed shows peds in a gang area (South LS, Grove Street, Sandy Shores trailers) and the agent is about to carjack or aim.",
+      "context": "GTA V gang territories in free roam.",
+      "meaning": "Gang members generally ignore the player outside missions, but carjacking an armed ped is considerably more dangerous — they pull a weapon and open fire, sometimes after a verbal warning. The agent has no way to identify a ped as armed before the fact (no weapon-in-hand data is exposed for peds either), so the only lever available is where he chooses to carjack.",
+      "suggested_action": "Prefer vehicles in commercial or residential areas over gang blocks when enter_nearest_vehicle would otherwise pick a car in obvious gang territory.",
+      "avoid": "Carjacking in obvious gang territory when a mission is active and the agent cannot afford a firefight.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some missions deliberately send the agent into gang territory; the verbal warning is the last chance to back off.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians"
+      ]
+    },
+    {
+      "id": "peds_call_the_police",
+      "category": "pedestrians",
+      "cue": "the agent commits a crime with civilians watching, even with no police in sight.",
+      "context": "Anywhere with foot traffic.",
+      "meaning": "Pedestrians in GTA V actively call the police and film crimes. A crime with no cop present can still produce a wanted level seconds later.",
+      "suggested_action": "When a crime is necessary (carjacking, a fight), do it where the ped feed is empty — an alley, an underground car park, a quiet Blaine County road.",
+      "avoid": "Assuming 'no police blip nearby' means the act is free.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "do_not_tail_a_ped_too_long",
+      "category": "pedestrians",
+      "cue": "follow_entity has been running on a civilian ped for an extended period outside a mission.",
+      "context": "Free-roam behaviour and stream filler.",
+      "meaning": "Peds become hostile or call the police if followed for too long.",
+      "suggested_action": "Cap free-roam follow behaviour at a short duration and then break off. During a mission, ignore this — the script expects the tail.",
+      "avoid": "Long unmotivated tails of random pedestrians during free roam.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Scripted tailing missions are exempt, though they have their own 'you were spotted' distance rules.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians"
+      ]
+    },
+    {
+      "id": "provoked_peds_do_not_flee",
+      "category": "pedestrians",
+      "cue": "A ped's relationship reads hostile in the nearby-ped feed and it is advancing on the agent, after contact from a vehicle bump, gunfire, or a scripted event — not from anything the agent deliberately did, since he has no melee verb, no aim, and no fire primitive of his own.",
+      "context": "Ped scuffles that escalate to physical hostility in free roam.",
+      "meaning": "Once a ped commits to fighting back it will no longer flee under any circumstances. The agent has no weapon-draw or aim action that could de-escalate it even in principle.",
+      "suggested_action": "Get into a vehicle and drive off (enter_nearest_vehicle then drive_to away from the area); do not stand there expecting the ped to back down, and do not call combat_hated_targets_around over this alone unless the objective requires clearing hostiles.",
+      "avoid": "Standing near a hostile ped expecting it to disengage on its own.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians"
+      ]
+    },
+    {
+      "id": "honking_makes_drivers_hostile",
+      "category": "pedestrians",
+      "cue": "Traffic is blocking a route and the reflex is to sound the horn repeatedly.",
+      "context": "Los Santos city traffic.",
+      "meaning": "AI drivers who are honked at repeatedly can become hostile and get out to attack the player.",
+      "suggested_action": "Go around blocked traffic — mount the kerb briefly, use the opposite lane, or take a side street — rather than sitting on the horn.",
+      "avoid": "Repeated horn spam as a traffic-clearing strategy.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "A single short honk is generally fine and can move a stopped car.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians"
+      ]
+    },
+    {
+      "id": "road_sidewalk_alley_tradeoff",
+      "category": "navigation",
+      "cue": "Choosing a route through the city under time pressure or pursuit.",
+      "context": "Los Santos street network.",
+      "meaning": "Roads are fast but full of traffic and police; pavements are direct but full of peds (each hit is a potential wanted-level trigger and a witness); alleys are slow and narrow but hide you from street-level sight lines and helicopters less well than tunnels.",
+      "suggested_action": "Roads for speed when clean; alleys when evading at one to two stars; pavements only in short bursts to bypass a jam, and only where the ped feed is empty.",
+      "avoid": "Sustained pavement driving in a crowded district — it generates stars from ped hits and witnesses.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "At three-plus stars nothing outdoors is safe from the helicopter; go under a roof instead.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Pedestrians"
+      ]
+    },
+    {
+      "id": "wrong_way_driving_head_on_risk",
+      "category": "vehicles_ground",
+      "cue": "Route planner suggests crossing to the opposite carriageway or the freeway is congested in the agent's direction.",
+      "context": "San Andreas drives on the right; freeways have fast oncoming traffic.",
+      "meaning": "Driving against traffic is fast and empty but every oncoming car is a head-on collision that can total the vehicle instantly. It also fills Franklin's special-ability bar.",
+      "suggested_action": "Use wrong-way sections only briefly and only on roads with sight lines, never blind over a crest or through a tunnel. Return to the correct side as soon as the obstruction clears.",
+      "avoid": "Committing to a long wrong-way freeway run during a mission with a fragile mission vehicle.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "None known. (A prior version of this item cited Franklin's special ability as a mitigation — the agent has no special-ability primitive at all, see CAPABILITIES.md, so that mitigation does not apply and was removed.)",
+      "sources": [
+        "https://gta.wiki/wiki/Special_Ability"
+      ]
+    },
+    {
+      "id": "stunt_jump_ramps_are_optional_risk",
+      "category": "world_hazards",
+      "cue": "A ramp or elevated jump is on the route and a mission is active.",
+      "context": "Unique stunt jumps are scattered around San Andreas; some are also just terrain.",
+      "meaning": "A stunt jump either completes on distance or on landing in an unmarked zone, and a failed one typically means a wrecked vehicle and injured character. Motorcycles handle them best.",
+      "suggested_action": "During a mission, route around ramps. During free-roam show content, take them deliberately with a bike, on a clear landing line — they make good stream moments.",
+      "avoid": "Hitting a ramp at speed in a mission vehicle or with an escorted passenger aboard.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Stunt jumps do not register during mission replays even though the completion graphic appears.",
+      "sources": [
+        "https://gta.wiki/wiki/Stunt_Jumps_in_GTA_V"
+      ]
+    },
+    {
+      "id": "pick_the_vehicle_for_the_terrain",
+      "category": "vehicles_ground",
+      "cue": "The destination is off-road (Blaine County, Mount Chiliad, the badlands) or requires water/air.",
+      "context": "Vehicle selection before a long drive_to.",
+      "meaning": "A sports car on a dirt trail understeers, bottoms out and gets beached; a 4x4 or dirt bike keeps moving. Land vehicles die in deep water regardless.",
+      "suggested_action": "Check the destination's terrain before choosing what to steal. Off-road destination means an off-road vehicle; across-water means a boat; a mountain top means a bike or 4x4.",
+      "avoid": "Taking whatever car is closest for a cross-county off-road route and then spending ten minutes stuck.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "If a mission gives you a vehicle, use it regardless of how badly suited it is.",
+      "sources": [
+        "https://gta.wiki/wiki/Vehicles_in_GTA_V",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "motorcycle_ejection_risk",
+      "category": "vehicles_ground",
+      "cue": "the agent is on a motorcycle and a collision, hard braking, or a chase is imminent.",
+      "context": "Bikes in GTA V.",
+      "meaning": "Bikes are the fastest thing for weaving traffic and stunt jumps, but any solid impact throws the rider off, costing health and leaving him on foot in the open — a terrible state during a police chase.",
+      "suggested_action": "Choose a bike for open, technical routes and stunt work; choose a car when a firefight or police pursuit is expected, because a car is also cover.",
+      "avoid": "Fleeing a three-star wanted level on a bike through dense traffic.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Player-consensus; not verified against a second source in this session.",
+      "sources": [
+        "experienced-player consensus — unverified"
+      ]
+    },
+    {
+      "id": "helicopter_overhead_means_no_ground_cover",
+      "category": "police_evasion",
+      "cue": "An air-unit blip is present or rotor noise is audible while evading.",
+      "context": "Three-plus star wanted levels, and some mission pursuits.",
+      "meaning": "An airborne observer sees over walls, into alleys, and down into the open river channel. Everything that worked against ground units stops working.",
+      "suggested_action": "Change the class of solution: get under a roof. Tunnels, metro tunnels, and multi-storey car parks are the reliable answers; walls and hedges are not.",
+      "avoid": "Sitting still in an alley or open channel believing you are hidden while a helicopter is overhead.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Heavy tree cover and dense downtown streets partially obstruct, but are far less reliable than an actual roof.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "stop_moving_to_lose_the_stars",
+      "category": "police_evasion",
+      "cue": "Stars are flashing (police lost visual) and the agent is under cover with no search cone touching him.",
+      "context": "The final phase of every GTA V evasion.",
+      "meaning": "Evasion completes on a timer that requires staying out of sight. Any movement risks re-entering a cone and resetting the whole thing.",
+      "suggested_action": "Explicitly issue 'stop' and hold — engine off, in a garage or tunnel — until the stars clear. Narrate the wait for the stream rather than filling it with driving.",
+      "avoid": "Continuing to circle the block at speed 'to be safe', which is the single most common way an evasion is thrown away.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "If a search cone drifts onto the agent's position, move immediately — holding still inside a cone gets him re-acquired.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "wanted_level_during_a_mission",
+      "category": "mission_flow",
+      "cue": "A wanted level appears while a mission objective is active.",
+      "context": "Missions that either script the wanted level or where the agent caused it.",
+      "meaning": "Some missions require you to lose the wanted level as the objective; in others the stars are incidental and evading takes you away from the mission area, which is itself a failure condition.",
+      "suggested_action": "Read the objective text first. If the objective IS 'lose the cops', evade properly. If it is something else, evade with minimal displacement — the nearest tunnel or garage, not a cross-map run.",
+      "avoid": "Reflexively running the standard long evasion route while a mission boundary is live.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Scripted mission wanted levels sometimes cannot be lost until a story beat completes; if the stars do not respond to correct evasion, they are scripted.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "holster_weapon_in_public",
+      "category": "pedestrians",
+      "cue": "combat_hated_targets_around has just finished and the agent is about to be routed toward peds, police, or a shop entrance.",
+      "context": "Post-fight transition back to normal movement.",
+      "meaning": "Walking around with a drawn weapon frightens peds, prompts calls to the police, and blocks entry to shops in GTA V. The agent has no holster action and no visibility into whether a weapon is currently drawn — /state does not report weapon-in-hand — so this cannot be managed by issuing a deliberate 'holster' step; it can only be worked around at the margins.",
+      "suggested_action": "The game exposes nothing usable here for direct control. As a rough proxy, insert a short buffer of ordinary movement (drive_to/walk_to, no combat_hated_targets_around) after a fight ends and before routing the agent into a shop-entry marker or near a police unit, since GTA V auto-holsters after a few seconds without firing in most cases. If a shop entry or store-dependent objective silently fails to trigger right after combat, treat that as this state and wait a few more seconds before retrying rather than concluding the marker is broken.",
+      "avoid": "Assuming a store or NPC interaction will work immediately after combat ends, and concluding a shop marker is broken after one failed attempt right after a fight.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "During an active firefight or a mission stage that scripts a weapon out, this does not apply — follow the objective.",
+      "sources": [
+        "https://gta.wiki/wiki/Pedestrians",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "parking_garages_are_the_best_hiding_places",
+      "category": "police_evasion",
+      "cue": "Evading in downtown Los Santos with air support present.",
+      "context": "Multi-storey car parks throughout the city core.",
+      "meaning": "They roof over the vehicle, are common downtown, and have multiple entrances and levels — breaking both ground and air line of sight in one move.",
+      "suggested_action": "Prefer a car park over an alley whenever both are available and a helicopter is present. Drive to an upper or lower level, stop, and wait out the timer.",
+      "avoid": "Parking on the open roof level of a car park, which is the same as being in the street as far as a helicopter is concerned.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "A car park is a dead end if police reach the entrance before the stars start flashing — only enter after contact is broken.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "cutscene_flag_means_do_nothing",
+      "category": "mission_flow",
+      "cue": "The state feed reports a cutscene or non-interactive flag set.",
+      "context": "GTA V plays cutscenes at mission start, between beats, and at completion.",
+      "meaning": "Input during a cutscene does nothing except potentially skip it, losing story the stream audience is watching.",
+      "suggested_action": "Suspend all task issuing while the cutscene flag is set, and use the window for commentary. Resume planning only after it clears, then re-read the objective from scratch — it will have changed.",
+      "avoid": "Queuing tasks against pre-cutscene world state and executing them the instant control returns.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "If the flag stays set for several minutes with no dialogue, treat it as a genuine hang.",
+      "sources": [
+        "https://gta.wiki/wiki/Mission",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    },
+    {
+      "id": "fall_damage_and_high_drops",
+      "category": "world_hazards",
+      "cue": "An objective is below the agent's position and a direct drop looks shorter than the stairwell route.",
+      "context": "Rooftops, freeway overpasses, cliff edges, construction sites.",
+      "meaning": "GTA V applies fall damage that scales with height; drops beyond roughly two storeys do serious damage and high falls are lethal. Health only regenerates to half afterwards.",
+      "suggested_action": "Take the stairs, ramp, or ladder for anything above a one-storey drop. Landing in deep water is survivable from much greater height.",
+      "avoid": "Jumping off a building to save fifteen seconds and arriving at the objective at 30% health. The agent has no parachute-deploy action, so a high drop is never a viable shortcut for him even in a scenario where a human player would pull a chute.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Player-consensus on exact thresholds; not corroborated by a second source in this session.",
+      "sources": [
+        "https://gta.wiki/wiki/Health",
+        "experienced-player consensus — not verified against a second source in this session"
+      ]
+    }
+  ],
+  "notes": "RESEARCH CONSTRAINTS THIS SESSION: the WebSearch budget (200/200) was already exhausted before I started, so every item was grounded via direct WebFetch against known URLs rather than discovered by search. gta.fandom.com was excluded per instructions; pcgamingwiki.com returned HTTP 403; ign.com is blocked by this fetcher; www.gtabase.com/grand-theft-auto-v/gameplay-features/ returned 404. That badly limited two-source corroboration, so most items rest on the gta.wiki mirror plus stated experienced-player consensus, and I have set confidence accordingly.\n\nVERIFIED AGAINST A SOURCE (high confidence): wanted-level mechanics — line-of-sight search across the whole map rather than a fixed radius, search cones drawn on police blips, per-star escalation (1 star arrest at gunpoint / 2 stars shoot-to-kill and 3+ cars / 3 stars roadblocks, spike strips and Maverick / 4 stars NOOSE / 5 stars indefinite), mask swap dropping one star, railways being effective for evasion; Los Santos Customs clearing any wanted level but the door not opening if police see the approach; health regenerating only to about 50% with cover regenerating slightly faster; body armour tiers ($500 Super Light ~20% through $2,500 Super Heavy ~100%) at Ammu-Nation; Wasted costing 5% of money capped at $5,000 with weapons retained; Busted keeping weapons but confiscating ammo; mission failure conditions (death, arrest, killing an important character, destroying critical vehicles, letting a target escape, alerting a target, time limits, police attention during stealth) plus the three-consecutive-failures skip offer and gold-medal loss from checkpoint retry; the radar arrow inside a blip meaning the target is above or below, GPS dropping in tunnels and restoring on exit, and the radar flashing red on damage; cover system blind fire vs peeking trade-off and Space moving around a cover corner on PC; CAPSLOCK for special ability, and each protagonist's ability behaviour and meter-fill sources including Trevor's explicit invulnerability; land vehicles cutting out only once the exhaust is submerged; Los Santos River channel being drivable, deepening near Cypress Flats, and being used in-game as a police escape (Jewel Store Heist); pedestrian behaviour — hands up / flee / duck when aimed at, gang members drawing weapons, hostility from repeated honking, peds calling police and filming crimes, peds turning hostile if followed too long, and provoked peds never fleeing again; stunt jump completion criteria and bikes being best for them; character switching restoring dents, dirt and burst tyres.\n\nCOULD NOT VERIFY — items included at low/medium confidence with the gap named in their \"exceptions\": full PC default key bindings (only CAPSLOCK and the cover-corner Space are sourced; every other binding is unverified and is rebindable in Settings anyway, so the harness must confirm against the live install before hard-coding anything); train collision lethality and train behaviour toward the player (gta.wiki's Trains page only confirms the freight train is drivable in some missions); mission trigger corona/marker mechanics and letter icons (no page covered them); what a flashing objective blip means (note the ambiguity: flashing STARS mean police lost you, i.e. stop moving — nearly the opposite advice to a flashing objective, so the harness must distinguish the two); explosive red barrels and gas canisters; enemy flanking behaviour and cover destructibility; per-wheel tyre shooting as a chase-stopping tactic; vehicle fire-then-explode timing; correct-side vehicle entry and seat assignment; the \"GPS route only draws once you are in the scripted vehicle\" claim (weakest item in the set, confidence low); exact fall-damage thresholds; motorcycle ejection; whether armour depletes before health or survives death.\n\nSOURCE DISAGREEMENT TO FLAG: health regeneration. The gta.wiki mirror states regeneration only occurs while the character stands still and does not walk or run, and only applies below 50% up to the halfway point. Widespread player experience is that it also ticks up while walking, running and driving. I could not resolve this with a second source, so the item tells the agent to assume the stricter rule (stop to heal), which is safe under either model, and the disagreement is recorded in that item's exceptions.\n\nSCOPE HYGIENE: everything here is GTA V Story Mode. The only GTA Online references encountered (personal-vehicle insurance penalties on failed stunt jumps over water) were deliberately excluded rather than included with a low-confidence marker, since they have no story-mode analogue.\n\nHARNESS NOTE: several items are written as guard conditions rather than facts because that is where the harness will actually go wrong — specifically dialogue_gate_waiting_is_action, cutscene_flag_means_do_nothing, chase_target_must_be_tracked and stop_moving_to_lose_the_stars. Those four all describe cases where the correct high-level task is \"wait\" or \"keep doing the same thing\", which is exactly what an idle-detection loop tends to override.\n\nREPAIR PASS (against CAPABILITIES.md and critic findings): deleted 6 unsalvageable items that depended on abilities the agent does not have — special_ability_capslock, franklin_ability_for_hard_driving, trevor_ability_is_a_panic_button (also wrongly claimed Trevor is invincible in Red Mist; he is not), michael_ability_for_accuracy (all four: no special-ability primitive exists at all), cover_corner_move_key (raw Space keypress, not in the primitive set), and switch_character_repairs_cosmetic_damage (character switching is not available to the agent) — and rewrote 17 more (enter_vehicle_correct_side, do_not_kill_protected_npcs, three_failures_offers_a_skip, train_will_kill_you, shoot_tyres_to_stop_a_car, vehicles_explode_do_not_hug_them, red_barrels_and_fuel, blind_fire_tradeoff, aiming_makes_peds_surrender, gang_peds_draw_when_provoked, provoked_peds_do_not_flee, sirens_mean_police_nearby, holster_weapon_in_public, wrong_way_driving_head_on_risk, fall_damage_and_high_drops, mask_swap_drops_a_star, buy_armour_before_a_known_fight, snacks_are_the_only_full_heal_in_the_field) that assumed manual aim/fire/target-selection, weapon holster/draw control, parachute deploy, or menu/phone interaction (buying a specific armour tier, equipping a mask, buying/eating a snack) — none of which the agent can execute per CAPABILITIES.md's primitive list (only combat_hated_targets_around, an 11-task bridge set, and 8 harness primitives including a contextual press_prompt_key with no menu access). Also fixed the three_failures_offers_a_skip vs failure_recovery contradiction flagged by the critic (skip is now framed as change-the-plan-first, hard-cap-only, not an at-three-failures default), and added a mission-objective-overrides-hazard exception to train_will_kill_you for missions that require boarding/jumping onto a train (Paleto Score, Derailed). Rejected critic finding on three_failures as literally worded (kept the id and cue, since detecting repeated failure IS still correct — only the resulting action changed, per the critic's own suggested fix)."
+}

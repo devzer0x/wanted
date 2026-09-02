@@ -1,0 +1,2906 @@
+{
+ "source": "public GTA V walkthrough wikis (gta.wiki mirror of GTA Wiki; gtabase.com cross-check); gta.fandom.com returned HTTP 402 during the fetch",
+ "fetched": "2026-09-02",
+ "missions": [
+  {
+   "name": "Prologue",
+   "order": 1,
+   "protagonist": "Michael Townley (playable during the vault robbery) / Trevor Philips (playable during the ",
+   "giver": "None — this is the opening mission, set nine years before the main story",
+   "start_zone": "Bobcat Security cash depot, Ludendorff, North Yankton (2004 flashback)",
+   "summary": "Michael Townley, Trevor Philips and Brad Snider rob a Bobcat Security cash depot in the snowbound town of Ludendorff; the escape goes wrong when a freight train wrecks their getaway car and federal agents ambush them, appearing to kill Michael.",
+   "objectives": [
+    "Go to the guard (inside the depot)",
+    "Aim your weapon at the hostages to make them move into the back room",
+    "Use your phone to detonate the explosive charge on the vault",
+    "Collect the cash from the vault",
+    "Take out the guard who grabs Michael",
+    "Get to cover as police arrive",
+    "Open the shutter door to reach the getaway car",
+    "Return to the crew",
+    "Escape the cops through Ludendorff",
+    "Get to the car after the train crash",
+    "Wait for the crew to regroup",
+    "Drive to the helicopter pick-up point",
+    "Get back in the car when the route is blocked",
+    "Hold off the cops at the farmhouse until the sequence ends"
+   ],
+   "fail_conditions": [
+    "Michael, Trevor, or Brad dies",
+    "A hostage is killed or allowed to escape",
+    "The crew runs out of ammo during a firefight",
+    "The getaway vehicle is abandoned, destroyed, or gets stuck",
+    "A crew member is left behind or the player abandons the escape route",
+    "The helicopter pickup zone is abandoned before the sequence resolves"
+   ],
+   "tips": [
+    "Herd all hostages into the back room before Trevor blows the vault so none of them panic into the blast",
+    "Once the wanted level hits, sprint straight for the getaway car instead of fighting extra police",
+    "After the train wrecks the car, follow the planned route on foot rather than improvising",
+    "Expect sniper fire during the final farmhouse shootout and use the available cover",
+    "This mission has no Gold Medal requirements, so there's no need to optimize for speed or accuracy"
+   ],
+   "crew_or_companions": [
+    "Trevor Philips",
+    "Brad Snider",
+    "an unnamed getaway driver"
+   ],
+   "vehicles_involved": [
+    "Getaway car (sources differ: listed as a Rancher XL or an Emperor)",
+    "North Yankton State Patrol police cars (Roadcruiser)",
+    "Freight train that collides with the getaway car",
+    "Stockade truck during the escape"
+   ],
+   "unlocks_next": "Franklin and Lamar",
+   "notes": "GTA Wiki (gta.fandom.com) returned HTTP 402 Payment Required to the fetch tool for every page in this batch, so I sourced this from gta.wiki (a community fork/mirror of the same GTA Wiki content) as primary and cross-checked against gtabase.com. The two sources disagree on the exact model of the getaway car (Rancher XL vs. Emperor); flagged rather than guessed. FIB Agent Dave Norton appears as the antagonist who ambushes the crew, not as a companion. | protagonist (raw): Michael Townley (playable during the vault robbery) / Trevor Philips (playable during the getaway and farmhouse shootout) | giver (raw): None — this is the opening mission, set nine years before the main story, with no in-game contact assigning it"
+  },
+  {
+   "name": "Franklin and Lamar",
+   "order": 2,
+   "protagonist": "Franklin Clinton",
+   "giver": "Simeon Yetarian (via a call relayed through Lamar Davis)",
+   "start_zone": "A beach house on Vespucci Beach / Del Perro, Los Santos",
+   "summary": "Franklin and his friend Lamar repossess two convertibles for car dealer Simeon Yetarian, then get chased through Los Santos by the owners before delivering the cars back to the dealership.",
+   "objectives": [
+    "Choose one of the two cars to drive",
+    "Return to Lamar",
+    "Follow Lamar to the getaway route",
+    "Get back in the car after an obstacle",
+    "Park next to Lamar",
+    "Lose the cops",
+    "Take the car back to the dealership",
+    "Get in your own car",
+    "Go to Franklin's house"
+   ],
+   "fail_conditions": [
+    "Franklin is wasted or busted",
+    "Lamar dies or is abandoned",
+    "Franklin loses track of Lamar during the chase",
+    "Either repossessed car is abandoned, destroyed, or gets stuck before delivery",
+    "The car takes damage after the police chase, before it reaches the dealership",
+    "The dealership handoff is disrupted, or Simeon/Jimmy is killed"
+   ],
+   "tips": [
+    "Use Franklin's special ability to slow time and thread traffic during the chase",
+    "Keep pace with Lamar's car rather than racing ahead of him",
+    "Watch for prop obstacles (e.g. in the movie studio backlot) that can wreck the car",
+    "Drive cautiously once the police are lost — any damage before delivery can fail Gold Medal or the mission"
+   ],
+   "crew_or_companions": [
+    "Lamar Davis",
+    "Simeon Yetarian (at the dealership)"
+   ],
+   "vehicles_involved": [
+    "9F Cabrio or Rapid GT Cabrio (player's choice of the two repossession targets)",
+    "Buffalo S (given to Franklin afterward)"
+   ],
+   "unlocks_next": "Repossession",
+   "notes": "gta.fandom.com returned HTTP 402 to the fetch tool, so this uses gta.wiki as primary with gtabase.com as secondary check; the two sources phrase the start location slightly differently (gta.wiki: 'Bertolt Beach House, Pacific Bluffs'; gtabase: 'Vespucci Beach/Del Perro') but describe the same beach-house location. | start_zone (raw): A beach house on Vespucci Beach / Del Perro, Los Santos, where the two target cars are parked"
+  },
+  {
+   "name": "Repossession",
+   "order": 3,
+   "protagonist": "Franklin Clinton",
+   "giver": "Simeon Yetarian",
+   "start_zone": "Premium Deluxe Motorsport dealership",
+   "summary": "Simeon sends Franklin and Lamar to repossess a motorcycle from a Vagos gang member at Vespucci Beach; the job turns into a shootout and a motorcycle chase.",
+   "objectives": [
+    "Go to Vespucci Beach",
+    "Return to Lamar",
+    "Follow Lamar",
+    "Search the garages for the bike",
+    "Pick up a weapon",
+    "Take out the Vagos gang members",
+    "Get the bike",
+    "Get on the bike",
+    "Go to the car wash on Innocence Boulevard, Strawberry"
+   ],
+   "fail_conditions": [
+    "Franklin or Lamar dies",
+    "Police are alerted before the shootout starts",
+    "Lamar is abandoned or killed",
+    "The target motorcycle is destroyed or its owner escapes with it"
+   ],
+   "tips": [
+    "Stay quiet at first — Lamar will force a confrontation with the Vagos regardless",
+    "Shoot the fuel trail leaking from the fleeing Penumbra to take out pursuers efficiently",
+    "Use Franklin's special ability during the bike chase to keep pace more easily",
+    "Go for headshots on the Vagos to meet the mission's Gold Medal criteria"
+   ],
+   "crew_or_companions": [
+    "Lamar Davis"
+   ],
+   "vehicles_involved": [
+    "Player's choice of car from Simeon's lot (Bullet GT, Schwartzer, or Baller) to drive to Vespucci Beach",
+    "Bagger motorcycle (the repossession target)",
+    "Penumbra (driven by a fleeing Vagos member)"
+   ],
+   "unlocks_next": "Complications",
+   "notes": "gta.fandom.com returned HTTP 402 to the fetch tool; used gta.wiki as primary, gtabase.com as secondary check — both agree closely on objectives. gta.wiki also lists a side mission 'Pulling Favors' unlocking alongside Complications, but that branch wasn't independently verified here. | start_zone (raw): Premium Deluxe Motorsport dealership, Pillbox Hill (job assigned there; action moves to Vespucci Beach)"
+  },
+  {
+   "name": "Complications",
+   "order": 4,
+   "protagonist": "Franklin Clinton",
+   "giver": "Simeon Yetarian",
+   "start_zone": "Premium Deluxe Motorsport dealership, Pillbox Hill",
+   "summary": "Franklin is sent to repossess an SUV from a house in Rockford Hills and discovers Michael De Santa hiding inside it; the two are forced to drive the car straight to Simeon's dealership, where Michael retaliates against Simeon.",
+   "objectives": [
+    "Go to the house",
+    "Find a way into the house (scale the wall/garden)",
+    "Take out the gardener",
+    "Retrieve the car from the garage",
+    "Take the car to the dealership without deviating (Michael is hiding inside)",
+    "Ram the car through the dealership window",
+    "Beat up Simeon",
+    "Return to the dealership before the police arrive"
+   ],
+   "fail_conditions": [
+    "Franklin is caught, killed, or arrested",
+    "The target car is damaged too heavily to complete the delivery",
+    "Franklin alerts the household/family before getting the car out",
+    "Simeon is killed, his deal collapses, or the dealership is destroyed outside the scripted ram",
+    "The car is driven off the direct route to the dealership once Michael is inside",
+    "The police intervene, or Simeon manages to call the police"
+   ],
+   "tips": [
+    "Head straight for the garage/truck at the back of the house to beat the time window",
+    "Climb onto the gardener's truck to reach an upper window and get in without alerting the family",
+    "Take out the gardener with a stealth take-down rather than gunfire",
+    "Drive directly to the dealership once Michael is in the car — any detour risks failing the mission",
+    "Keep hitting Simeon without pausing to avoid his counter-attacks (helps the 'Can't Touch This' Gold Medal)"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa"
+   ],
+   "vehicles_involved": [
+    "Karin BeeJay XL (yellow SUV — the repossession target)"
+   ],
+   "unlocks_next": "Father/Son (this mission also opens other Franklin/Michael strand missions such as Chop, Grass Roots, Exercising Demons, and Seeking the Truth, depending on order played)",
+   "notes": "gta.fandom.com returned HTTP 402 to the fetch tool; used gta.wiki as primary, gtabase.com as secondary check. Sources differ on what unlocks immediately next (gta.wiki lists Father/Son among several options; gtabase names 'Chop') because Complications opens a branching set of optional Franklin/Michael missions rather than one single next mission — Father/Son is confirmed as one of the unlocked options, matching the task's stated mission order. | protagonist corrected from \"Franklin Clinton (Michael De Santa becomes controllable partway through)\" (QA) | start_zone (raw): Premium Deluxe Motorsport dealership, Pillbox Hill, job assigned there; the repossession itself happens at the De Santa residence, Rockford Hills"
+  },
+  {
+   "name": "Father/Son",
+   "order": 5,
+   "protagonist": "Michael De Santa and Franklin Clinton (played in alternating segments)",
+   "giver": "Michael De Santa (mission starts at his house after Jimmy calls him in a panic)",
+   "start_zone": "De Santa residence, Rockford Hills",
+   "summary": "Jimmy De Santa gets in trouble trying to sell his father's yacht to buyers who turn out to be thieves; Michael calls in Franklin, and together they chase the stolen yacht down the freeway to save Jimmy and recover the boat.",
+   "objectives": [
+    "Get in Amanda's car",
+    "Go to Pacific Bluffs",
+    "Get Franklin close to the yacht (being towed by truck)",
+    "Shoot the thief driving the tow truck",
+    "Chase the yacht down the freeway",
+    "Catch Jimmy as he's thrown/falls from the yacht",
+    "Catch up to/reunite with Franklin",
+    "Go to Los Santos Customs",
+    "Get Amanda's car repaired",
+    "Go to Michael's house"
+   ],
+   "fail_conditions": [
+    "Michael or Franklin is wasted or busted",
+    "Franklin or Jimmy dies",
+    "Franklin is left behind during the chase",
+    "Amanda's Sentinel is destroyed, abandoned, or gets stuck",
+    "The player fails to get the car repaired at Los Santos Customs",
+    "The yacht/Jimmy is lost before the rescue is completed"
+   ],
+   "tips": [
+    "Position the car directly under the yacht's boom/mast so Jimmy has a safe landing when he falls",
+    "Drive Amanda's car back carefully afterward — no damage is required for the 'Not a Scratch' Gold Medal",
+    "Catch Jimmy within about 10 seconds of the prompt for the 'Quick Catch' Gold Medal"
+   ],
+   "crew_or_companions": [
+    "Franklin Clinton",
+    "Jimmy De Santa"
+   ],
+   "vehicles_involved": [
+    "Amanda's Sentinel (car used for the chase, must be repaired afterward)",
+    "Phantom flatbed truck (towing the stolen yacht)",
+    "Marquis (the yacht itself)"
+   ],
+   "unlocks_next": "Marriage Counseling or The Long Stretch, depending on which optional strand mission is played next",
+   "notes": "gta.fandom.com returned HTTP 402 to the fetch tool; used gta.wiki as primary, gtabase.com as secondary check — both agree on the core objective sequence. gtabase's own site numbering names 'Chop' as its next tracked mission, which appears to reflect a different linear ordering than the branching structure gta.wiki describes; not independently resolved here."
+  },
+  {
+   "name": "Marriage Counseling",
+   "order": 6,
+   "protagonist": "Michael De Santa",
+   "giver": "No NPC hands this one off — it self-triggers when Michael returns home and catches his wif",
+   "start_zone": "De Santa Residence, Rockford Hills, Los Santos",
+   "summary": "Michael catches his wife Amanda cheating with her tennis coach Kyle Chavis and, with Franklin's help, chases him down — only to wreck the wrong house and land Michael in debt to cartel boss Martin Madrazo.",
+   "objectives": [
+    "Get in the truck (the Bison) — Michael",
+    "Follow the tennis coach",
+    "Drive to the canyon",
+    "Get back in the truck after losing him briefly",
+    "Go back to Michael's house",
+    "Lose Madrazo's men (Michael and Franklin)"
+   ],
+   "fail_conditions": [
+    "Wasted",
+    "Busted",
+    "Franklin died",
+    "Franklin was left behind",
+    "The Bison truck was destroyed",
+    "The truck got stuck",
+    "The tennis coach (Kyle) was attacked",
+    "The tennis coach got spooked",
+    "The tennis coach died"
+   ],
+   "tips": [
+    "Drive the Bison carefully — ramming other cars or cutting shortcuts costs the 'Not a Scratch' gold medal.",
+    "Kyle cannot be harmed at all; even getting too close spooks him and fails the mission, so just keep pace with his Blista rather than trying to stop him.",
+    "Overtaking Kyle's car makes it dramatically speed up, so stay behind it instead of trying to pass.",
+    "Skip cutscenes to make the 5:30 time target.",
+    "During the escape, shoot 3 of Madrazo's men from inside a moving or stationary vehicle for the 'Drive-by Killer' medal — sticky bombs work well if you're carrying them.",
+    "Franklin ties the truck's winch cable to the target house's support beam — you then drive the Bison to pull the house down, so don't abandon the truck at that point."
+   ],
+   "crew_or_companions": [
+    "Amanda De Santa",
+    "Kyle Chavis (the fleeing target, cannot be harmed)",
+    "Martin Madrazo (confronts Michael at the end)",
+    "Natalia Zverovna (owner of the house that gets pulled down)"
+   ],
+   "vehicles_involved": [
+    "Bison (McGill-Olsen pickup, 'borrowed' by Michael and Franklin — must survive with minimal damage)",
+    "Blista (Kyle's car, chased but can't be caught or overtaken)"
+   ],
+   "unlocks_next": "Friend Request unlocks unconditionally; Daddy's Little Girl only unlocks from this mission if Chop was already completed beforehand; the side mission Chaos also opens up.",
+   "notes": "gta.fandom.com returned HTTP 402 to the WebFetch tool on every attempt (confirmed across all 5 pages in this batch), so this was pulled via the public Fandom API (action=parse, prop=wikitext) instead, which returned the full article text — treated as the primary GTA Wiki source. Cross-checked objectives and gold-medal criteria against GTABase, which matched. Note the wiki's own unlock graph is conditional/branching (e.g., Daddy's Little Girl only unlocks here if Chop is already done), so the strict 6→7→8→9→10 sequence given for this task may not be the only valid in-game order — flagging rather than asserting a single linear chain. | giver (raw): No NPC hands this one off — it self-triggers when Michael returns home and catches his wife with her tennis coach. Playable as Franklin instead, the intro cutscene is trimmed and starts from Kyle jumping off the balcony."
+  },
+  {
+   "name": "Daddy's Little Girl",
+   "order": 7,
+   "protagonist": "Michael De Santa",
+   "giver": "Jimmy De Santa (Michael's son) — the mission grows out of a father/son argument at home th",
+   "start_zone": "De Santa Residence, Rockford Hills (moves to Mr. Spoke Bike Rental at Vespucci Beach",
+   "summary": "Michael takes his son Jimmy out for bonding time at Vespucci Beach, but a bike race turns into Michael swimming out to drag his daughter Tracey off a yacht full of sleazy 'industry people' and fleeing its owner's men on a jet ski.",
+   "objectives": [
+    "Go to the bike rental stand",
+    "Select a bike",
+    "Race Jimmy to the pier",
+    "Swim to the yacht",
+    "Head to the outlet (steal a Seashark and get clear)",
+    "Lose the pursuers",
+    "Go to the shore"
+   ],
+   "fail_conditions": [
+    "Wasted",
+    "Busted",
+    "Jimmy died, was abandoned, was spooked, or was injured",
+    "Tracey died, was abandoned, was spooked, or was injured",
+    "The bike rental clerk died or was spooked",
+    "The Seashark was destroyed or ran aground",
+    "The bikes got trashed",
+    "Michael's bike was abandoned, became unrideable, or got stuck",
+    "The area was abandoned (straying too far)"
+   ],
+   "tips": [
+    "You don't need to win the bike race against Jimmy — take it slow and avoid pedestrians, walls, and staircases to keep from falling off (needed for the 'Stabilizer' medal).",
+    "Swim underwater rather than on the surface to reach the yacht faster (helps hit the 1-minute 'Faster Than Fish' target); higher stamina stats make this easier too.",
+    "On the Seashark, lean forward and stay parallel to the shoreline to avoid wave bounce and hold top speed for the 'Fastest Speed' medal — prioritize losing pursuers over fighting them.",
+    "The pursuers (Freddy Slade and his friend Blake) can be killed if they get in the way, but the priority is escaping, not a shootout.",
+    "Tracey is scripted to be immune to the pursuers' bullets during the chase, so don't worry about shielding her specifically."
+   ],
+   "crew_or_companions": [
+    "Jimmy De Santa (races Michael on a bike)",
+    "The unnamed bike-rental clerk"
+   ],
+   "vehicles_involved": [
+    "Bicycles at Mr. Spoke Bike Rental (BMX, Cruiser, Scorcher, or the faster Whippet/Endurex race bikes)",
+    "Seashark jet ski (stolen from the yacht owner to escape)"
+   ],
+   "unlocks_next": "Not a follow-on story mission directly — completing it unlocks the Carbine Rifles for the 'Loud' heist approach later, and Bugstars Equipment for the 'Smart' approach if Casing the Jewel Store is done first. It also unlocks the Triathlons activity and (Enhanced Edition only) Tracey as a Director Mode character.",
+   "notes": "Same access note as above: fetched via the Fandom API since gta.fandom.com gave WebFetch a 402 each time. The wiki lists this mission as unlockable by either Marriage Counseling or Chop, so its place right after Marriage Counseling (as given in this task's order) is one valid path but not the only one the game allows. Its internal file name ('family2') is earlier than Marriage Counseling's ('family3'), which the wiki's own trivia section flags as a possible sign the two were originally meant to run in the opposite order — noting this as an unresolved dev-history detail, not a gameplay fact. | giver (raw): Jimmy De Santa (Michael's son) — the mission grows out of a father/son argument at home that turns into a bike outing. | start_zone (raw): De Santa Residence, Rockford Hills (moves to Mr. Spoke Bike Rental at Vespucci Beach, then Pleasure Pier/Del Perro Pier, the Pacific Ocean, Vespucci Canals, and Del Perro Beach)"
+  },
+  {
+   "name": "Chop",
+   "order": 8,
+   "protagonist": "Franklin Clinton",
+   "giver": "Lamar Davis",
+   "start_zone": "Clinton Residence, Strawberry, Los Santos (moves to an alley off Vinewood Boulevard",
+   "summary": "Franklin joins Lamar (and Lamar's dog Chop) to snatch a rival Ballas member called D for ransom, chasing him across Los Santos by van and on foot before Chop sniffs him out hiding in a rail yard boxcar.",
+   "objectives": [
+    "Follow Lamar and Chop on foot to the van (stay close — there's no destination marker)",
+    "Get in the van",
+    "Wait for Lamar to load Chop in the back",
+    "Drive to the meeting spot on Vinewood Boulevard",
+    "After D flees on his motorcycle, get back in the van and chase him",
+    "Open the boxcars at the rail yard to search for D",
+    "Follow Chop as he sniffs around",
+    "Go pull Chop off another dog he gets distracted by",
+    "Approach D once Chop corners and bites him, then take him to Lamar's house",
+    "Stop the van to let D out (or run from a 2-star wanted level first if you keep driving)",
+    "Drop Lamar off at the BJ Smith Recreational Center"
+   ],
+   "fail_conditions": [
+    "Wasted",
+    "Busted",
+    "Lamar died or was abandoned",
+    "Chop died or was abandoned",
+    "D was spooked, died, or got away",
+    "The van was destroyed, abandoned, or got stuck",
+    "Police attention was drawn near Franklin's house during the opening walk"
+   ],
+   "tips": [
+    "There's no waypoint during the opening walk to the van — stay near Lamar or the mission fails, and don't draw police attention on the way.",
+    "You can't overtake or knock D off his motorcycle; get in front of him and he'll ram straight through the van, so just stay on his tail.",
+    "Use Franklin's special ability during the van chase to dodge buses and other traffic — it protects the van for the 'Not a Scratch' medal and doubles as the 'Advanced Reflexes' requirement.",
+    "Switch to Chop's point of view for at least 10 seconds while he's searching the boxcars for the 'Homedog' medal.",
+    "Calling Chop back when he wanders off to hump another dog doesn't work — you have to walk over and physically pull him off.",
+    "D can't actually be hurt by gunfire once Chop is chasing him down, so there's no need to shoot — just let Chop catch him and walk up.",
+    "Letting D go quietly avoids a wanted level; refusing and continuing to drive gets you a 2-star chase you'll need to lose before you can drop him off."
+   ],
+   "crew_or_companions": [
+    "Lamar Davis",
+    "D (the captured Ballas member)"
+   ],
+   "vehicles_involved": [
+    "Speedo (Lamar's white van — the main mission vehicle, keep it intact)",
+    "D's Bati 801 motorcycle (chase target only, can't be taken or overtaken)"
+   ],
+   "unlocks_next": "The Long Stretch, but only if Father/Son was already completed (which it is, per this task's earlier missions) — matching this task's stated order. It can also unlock Daddy's Little Girl if Marriage Counseling was done first, though per this task's sequence that's already been completed.",
+   "notes": "Fetched via the Fandom API for the same reason noted above (gta.fandom.com gave WebFetch a 402 each time this session). Chop stays at Franklin's house afterward as a companion you can walk. The wiki doesn't name a required starting vehicle for the initial walk-and-drive segment beyond Lamar's van itself. | giver (raw): Lamar Davis, who shows up at Franklin's house with his dog Chop with a plan to kidnap a Ballas member for ransom money. | start_zone (raw): Clinton Residence, Strawberry, Los Santos (moves to an alley off Vinewood Boulevard, then Dashound Bus Center and Mirror Park Rail Yard, then Lamar Davis' House, ending at BJ Smith Recreational Center)"
+  },
+  {
+   "name": "The Long Stretch",
+   "order": 9,
+   "protagonist": "Franklin Clinton",
+   "giver": "Lamar Davis, who reintroduces Franklin to Stretch, just released from prison",
+   "start_zone": "Franklin's House",
+   "summary": "Franklin, Lamar, and the newly-released Stretch go to what's supposed to be a drug deal with D at a recycling plant, but D betrays them into a Ballas ambush, forcing a shootout, a rooftop escape, and a police chase.",
+   "objectives": [
+    "Go to Ammu-Nation",
+    "Buy a Pump Shotgun with the flashlight mod",
+    "Drive to the meeting at the recycling plant",
+    "Escape the recycling plant (shootout with the Ballas)",
+    "Escape the junkyard",
+    "Lose the cops",
+    "Return to Franklin's house"
+   ],
+   "fail_conditions": [
+    "Wasted",
+    "Busted",
+    "Lamar and/or Stretch died",
+    "Lamar and/or Stretch was/were abandoned",
+    "Franklin didn't have enough money to buy the shotgun and flashlight mod (though Lamar will loan $1,500 if needed)",
+    "Franklin was barred from Ammu-Nation",
+    "Spooking the Ammu-Nation clerk",
+    "Abandoning the deal"
+   ],
+   "tips": [
+    "If you're short on cash at Ammu-Nation, Lamar spots you $1,500 for the shotgun — you don't need it beforehand.",
+    "The shotgun's spread makes it easier to rack up hits for the 60%+ accuracy medal; aim for heads (neck shots also count) to reach 10 headshot kills.",
+    "Before the final big room, an automatic weapon drops enemies faster and keeps your health/armor up; once in that last room, hug the right-hand wall for the safest cover (needed for the 'Unmarked' no-damage medal).",
+    "Franklin has to shoot down a police Maverick helicopter that shows up outside during the escape.",
+    "Steal the Jackal parked nearby to get away, and use Franklin's special ability to help lose the cops fast — cutting through a tunnel (the subway near the Mile High Club, the freeway metro tunnel, or the one below Mirror Park) breaks line of sight quickly for the sub-10:30 time medal.",
+    "Skip cutscenes if you're going for time."
+   ],
+   "crew_or_companions": [
+    "Lamar Davis",
+    "Stretch (Harold 'Stretch' Joseph)",
+    "D (turns out to have set them up, killed by Stretch)",
+    "Ballas gang members (hostile, many killed in the shootout)",
+    "LSPD officers and pilots in two Police Mavericks"
+   ],
+   "vehicles_involved": [
+    "Jackal (stolen getaway car used to lose the police)",
+    "Police Maverick helicopters (enemy air support Franklin has to shoot down)"
+   ],
+   "unlocks_next": "Per the wiki this mission's own listed unlock is the side mission Hood Safari (and only if Three's Company was completed first) — it doesn't list Friend Request as something it unlocks.",
+   "notes": "Fetched via the Fandom API (gta.fandom.com gave WebFetch a 402 on every URL this session, confirmed repeatedly). Important discrepancy to flag: the wiki's unlockedby field for this mission lists Chop, or Father/Son (if Chop was done before Father/Son), or Friend Request itself (if Chop was done after Father/Son) — meaning the game's own branching logic can put Friend Request before The Long Stretch, the reverse of the 9-then-10 order given for this task. I'm reporting what the source says rather than forcing a single linear chain; treat the task's numbering as a processing order, not a confirmed unlock sequence. | giver (raw): Lamar Davis, who reintroduces Franklin to Stretch, just released from prison, before the drug deal that goes wrong. | start_zone (raw): Franklin's House, Strawberry (moves to an Ammu-Nation at Adam's Apple Boulevard and Elgin Avenue, then Rogers Salvage & Scrap in La Puerta, ending back at Franklin's house)"
+  },
+  {
+   "name": "Friend Request",
+   "order": 10,
+   "protagonist": "Michael De Santa",
+   "giver": "Lester Crest",
+   "start_zone": "Lester's House",
+   "summary": "Lester hires Michael to sneak a bomb into Lifeinvader's prototype phone so it kills founder Jay Norris live on stage during his keynote reveal.",
+   "objectives": [
+    "Go to the Suburban store in Vinewood",
+    "Buy a suitable disguise outfit",
+    "Go to the Lifeinvader offices",
+    "Go to the rear entrance",
+    "Follow the programmer (Rickie Lukens) inside",
+    "Close the pop-ups to reveal the antivirus shortcut",
+    "Run the antivirus software",
+    "Rig the prototype in the demo room",
+    "Exit the building",
+    "Watch the keynote at Michael's house",
+    "Wait for Jay Norris to pull out the prototype, then call the phone to detonate it"
+   ],
+   "fail_conditions": [
+    "Wasted",
+    "Busted",
+    "Michael's cover was blown",
+    "Michael was unable to obtain the disguise",
+    "Michael couldn't afford the disguise",
+    "Michael left before planting the bomb",
+    "Michael failed to detonate the phone in time",
+    "Too much heat/attention to carry out the job",
+    "Scaring Tracey at home (e.g., firing a gun near the house without a suppressor)"
+   ],
+   "tips": [
+    "If Michael shows up broke at the Suburban store, Lester texts him $200 to cover the outfit.",
+    "Take the rear entrance both going in and leaving — leaving that way lets Michael start running sooner, which matters for the sub-8:30 time medal.",
+    "Trigger Michael's special ability (slows time) right as the pop-up-clearing cutscene starts so you can clear every pop-up inside the 32-second window for the 'Popups Clear' medal.",
+    "Don't bother trying to launch the antivirus software until every pop-up is closed — it won't run otherwise.",
+    "Back at Michael's house, wait for Norris to actually reveal the phone on the live Weazel News broadcast before dialing it — calling early won't trigger the kill."
+   ],
+   "crew_or_companions": [
+    "Lester Crest (mission planner, stays remote)",
+    "Jay Norris (the target, Lifeinvader's CEO)"
+   ],
+   "vehicles_involved": [
+    "No mission-specific vehicle is given or required beyond Michael's own transport between the house, the clothing store, and the Lifeinvader office."
+   ],
+   "unlocks_next": "Casing the Jewel Store (the next main heist-prep mission), plus The Good Husband and the Simeon Yetarian random event; it can also unlock The Long Stretch if Chop wasn't completed until after Father/Son and is finished before this mission.",
+   "notes": "Fetched via the Fandom API for the same reason noted on the other four missions (gta.fandom.com returned HTTP 402 to WebFetch consistently this session). Its unlockedby field lists only Marriage Counseling, so in the strict wiki-documented chain Friend Request can follow Marriage Counseling directly — Daddy's Little Girl, Chop, and The Long Stretch sit in between as flexible/optional-order missions rather than strict gatekeepers, which is worth keeping in mind if an agent is deciding what to play next rather than just following this task's fixed list. | giver (raw): Lester Crest, who recruits Michael (now $2.5 million in debt to Martin Madrazo) for a paid job. | start_zone (raw): Lester's House, El Burro Heights (moves to the SubUrban clothing store on Power Street/Hawick Avenue in Alta, then the Lifeinvader Office in Rockford Hills, ending at the De Santa Residence, Rockford Hills)"
+  },
+  {
+   "name": "Casing the Jewel Store",
+   "order": 11,
+   "protagonist": "Michael De Santa",
+   "giver": "Lester Crest",
+   "start_zone": "Darnell Bros. garment factory, La Mesa, Los Santos",
+   "summary": "Michael meets his old heist planner Lester Crest, who has an idea to rob a jewelry store to help pay off Martin Madrazo. Michael scopes out the Vangelico jewelry store in Rockford Hills/Little Portola, photographing its security setup from inside and from a rooftop vantage point.",
+   "objectives": [
+    "Meet Lester at the Darnell Bros. garment factory (La Mesa)",
+    "Drive to the Vangelico jewelers in Rockford Hills / Little Portola",
+    "Go inside and use the camera-glasses to photograph the alarm keypad, ventilation outlet, and security camera",
+    "Talk to the store assistant/doorman",
+    "Get back in the car and drive around the block",
+    "Climb to the rooftop via the building under renovation for a high vantage point",
+    "Photograph the store's ventilation system from the roof",
+    "Return to the Darnell Bros. garment factory to report to Lester"
+   ],
+   "fail_conditions": [
+    "Trying to start the mission without wearing a suit — Lester sends Michael away to change clothes",
+    "Failing a retry before speaking to the store attendant can leave the attendant/doorman missing on the next attempt, blocking progress",
+    "Standard fail states: Michael wasted, busted, or straying from the mission area"
+   ],
+   "tips": [
+    "Change into a suit before triggering the mission or Lester turns you away",
+    "For the 'Picture Perfect' gold medal, look directly at the keypad so the camera, keypad, and vents are all captured in one photo",
+    "Finish within 8:00 for the time-based gold medal",
+    "Doing this mission too early in the story can affect which heist crew members (e.g. hacker Rickie Lukens) are available later"
+   ],
+   "crew_or_companions": [
+    "Lester Crest"
+   ],
+   "vehicles_involved": [
+    "Michael's personal car (used to drive to/from Vangelico jewelers)"
+   ],
+   "unlocks_next": "Leads to a Loud/Smart approach choice: Carbine Rifles (Loud) or Bugstars Equipment (Smart), both of which set up The Jewel Store Job",
+   "notes": "GTA Wiki (gta.fandom.com) returned HTTP 402/was unreachable on every fetch attempt this session (article URL and API endpoint alike; a raw curl hit a Cloudflare challenge page instead). Data compiled from GTABase (permitted secondary source) plus WebSearch snippets quoting GTA Wiki gold-medal names. Exact on-screen objective wording not independently confirmed against GTA Wiki itself."
+  },
+  {
+   "name": "Carbine Rifles",
+   "order": 12,
+   "protagonist": "Michael De Santa",
+   "giver": "Lester Crest (by text/phone call)",
+   "start_zone": "A highway ambush point near Palomino Avenue / Burton",
+   "summary": "Lester alerts Michael that an LSPD/NOOSE tactical team truck loaded with weapons is moving through the city. Michael must ambush it and steal it to arm the crew for the loud version of the jewel store heist.",
+   "objectives": [
+    "Head to the highway ambush point flagged after Lester's call",
+    "Ambush and block the NOOSE tactical team truck",
+    "Kill the NOOSE guards",
+    "Steal the tactical truck (this instantly gives a 3-star wanted level)",
+    "Lose the cops",
+    "Deliver the truck to the Darnell Bros. garment factory"
+   ],
+   "fail_conditions": [
+    "Michael is wasted or busted during the ambush or the ensuing chase",
+    "Only playable after choosing the Loud approach in Casing the Jewel Store"
+   ],
+   "tips": [
+    "Use Michael's special ability (bullet-time aim) to drop the NOOSE guards quickly during the ambush",
+    "Ducking into the metro tunnel near LS Customs/Burton after stealing the truck helps shake the cops fast",
+    "Lose the wanted level within 2 minutes for the 'Swift Getaway' gold medal"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (remote, by phone/text only)"
+   ],
+   "vehicles_involved": [
+    "NOOSE/LSPD tactical team truck (stolen and delivered)"
+   ],
+   "unlocks_next": "The Jewel Store Job (Loud Approach)",
+   "notes": "GTA Wiki unreachable this session (see mission 11 notes); sourced via GTABase and corroborating WebSearch results. | start_zone (raw): A highway ambush point near Palomino Avenue / Burton, Los Santos (only triggers if the Loud approach was chosen for the jewel store job)",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Bugstars Equipment",
+   "order": 13,
+   "protagonist": "Michael De Santa",
+   "giver": "Lester Crest (by text message)",
+   "start_zone": "Bugstars Equipment warehouse",
+   "summary": "Lester texts Michael about a Bugstars delivery van at a South Los Santos warehouse. Michael needs to steal the van, ideally without being spotted, to use as a disguise vehicle for the smart-approach heist.",
+   "objectives": [
+    "Drive to the Bugstars Equipment warehouse",
+    "Get past or take out the warehouse guards",
+    "Steal the Bugstars van parked inside",
+    "Drive the van out (through the back exit, for the stealth route)",
+    "Deliver the van to the Darnell Bros. garment factory"
+   ],
+   "fail_conditions": [
+    "Michael takes too much damage and is wasted",
+    "Michael is busted/arrested",
+    "The Bugstars van is destroyed before it reaches the drop-off"
+   ],
+   "tips": [
+    "Approach from the back of the warehouse for the stealth route",
+    "Holster your weapon and crouch/use cover before entering to avoid detection",
+    "Knock out the driver near the van rather than fighting through for the 'Sneaky Pest' gold medal",
+    "Exit slowly and stay to the left when leaving to avoid noise and detection",
+    "Killing the four employees instead is possible but triggers a 2-star wanted level"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (remote, by text)"
+   ],
+   "vehicles_involved": [
+    "Bugstars Burrito van (Declasse Burrito) — stolen and delivered"
+   ],
+   "unlocks_next": "BZ Gas Grenades, then The Jewel Store Job (Smart Approach)",
+   "notes": "GTA Wiki unreachable this session (see mission 11 notes); sourced via GTABase and corroborating WebSearch results. | start_zone (raw): Bugstars Equipment warehouse, Port of Los Santos / South Los Santos (only triggers if the Smart approach was chosen for the jewel store job)",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "BZ Gas Grenades",
+   "order": 14,
+   "protagonist": "Michael De Santa",
+   "giver": "Lester Crest (by text/phone call)",
+   "start_zone": "A tracked Humane Labs van on the highway (an 'H' blip on the radar)",
+   "summary": "Lester tells Michael about a Humane Labs van shipping BZ knockout-gas grenades to the airport. Michael must steal the van or just its cargo and deliver the gas to the garment factory for use in the smart-approach jewel store heist.",
+   "objectives": [
+    "Track down the Humane Labs delivery van marked on the radar",
+    "Either steal the whole van, or shoot open its rear doors to spill the cargo of grenades",
+    "Lose the resulting wanted level (roughly 1-star if only the cargo is taken by shooting the doors, 3-star if the van is hijacked by force)",
+    "Deliver the BZ grenades / van to the Darnell Bros. garment factory"
+   ],
+   "fail_conditions": [
+    "The van gets away before the cargo is secured",
+    "The grenades/cargo are lost or left behind",
+    "The van (carrying the cargo) is destroyed or abandoned before delivery"
+   ],
+   "tips": [
+    "Shoot open the van's rear doors to spill the cargo — this is the gold medal ('Loose Cargo') route and only draws a 1-star wanted level",
+    "Hijacking the van outright by killing the driver/guards draws a 3-star wanted level instead",
+    "Killing the driver first, then shooting the rear doors, can sometimes let you take the cargo with no wanted level at all"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (remote, by phone/text)"
+   ],
+   "vehicles_involved": [
+    "Humane Labs Boxville (van carrying the BZ gas cargo)"
+   ],
+   "unlocks_next": "The Jewel Store Job (Smart Approach)",
+   "notes": "GTA Wiki unreachable this session (see mission 11 notes); sourced via GTABase and corroborating WebSearch results. | start_zone (raw): A tracked Humane Labs van on the highway (an 'H' blip on the radar), following Bugstars Equipment on the Smart approach path",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "The Jewel Store Job",
+   "order": 15,
+   "protagonist": "Michael De Santa (with Franklin Clinton)",
+   "giver": "Lester Crest",
+   "start_zone": "Darnell Bros. garment factory, La Mesa",
+   "summary": "The heist finale for the jewel store setup: Michael, Franklin, and a hired crew rob the Vangelico jewelry store in Rockford Hills, then flee through the Los Santos River storm drains before regrouping and hauling the loot to the lockup. Plays out differently depending on whether the Loud or Smart approach was set up earlier.",
+   "objectives": [
+    "Get in the crew's van/car at the garment factory",
+    "Drive to the Vangelico jewelry store in Rockford Hills",
+    "(Smart approach only) Go to the roof and throw the BZ gas grenade into the air vent to knock everyone inside unconscious",
+    "Go in and steal the jewelry from the display cabinets, within the time limit for the gold medal",
+    "Flee with the crew into the Los Santos River storm drains/sewers (on foot, then dirt bikes for the Loud approach getaway)",
+    "Take out pursuing police cars and protect Franklin/the crew during the escape",
+    "Rendezvous with the crew at the extraction point",
+    "Go to the lockup to end the mission"
+   ],
+   "fail_conditions": [
+    "Franklin or a crew member is killed or left behind during the getaway",
+    "Michael is wasted or busted",
+    "A poorly-performing gunman choice (e.g. Norm Richards) mishandles the hostages and can cause the heist to fail"
+   ],
+   "tips": [
+    "For the 'Quick Grab' gold medal, steal the jewelry within 50 seconds — use first-person view and move directly between cabinets; picking Rickie Lukens as hacker buys the longest alarm delay for retries",
+    "For 'Protégé Protected', actively watch for and clear pursuing units chasing Franklin during the Los Santos River chase",
+    "For 'Clean Sweep' (loot all 20 glass cabinets), pick a competent gunman (Packie McReary or Gustavo Mota) who keeps the hostages controlled so you have enough time",
+    "Crew choice affects the payout cut — some drivers/hackers take a bigger percentage of the take than others"
+   ],
+   "crew_or_companions": [
+    "Franklin Clinton",
+    "Lester Crest (support role)"
+   ],
+   "vehicles_involved": [
+    "Getaway van/car to the store",
+    "Bati 801RR motorcycles for the Loud-approach getaway",
+    "Bugstars Burrito van and a Benson van in the Smart-approach variant"
+   ],
+   "unlocks_next": "Progresses the main story toward the next heist chain; unlocks the used heist crew members for Director Mode",
+   "notes": "GTA Wiki unreachable this session (see mission 11 notes). GTABase publishes Loud Approach and Smart Approach as separate pages; this entry merges both since they are the same story mission branching on the earlier setup choice. GTABase's own 'next mission' field for the Loud Approach page listed Bugstars Equipment, which looks like a site-ordering artifact (that mission is a Smart-approach setup mission, not a sequel to the Loud finale) — could not verify the true next story mission against GTA Wiki directly, so treat 'unlocks_next' here as approximate. | start_zone (raw): Darnell Bros. garment factory, La Mesa, Los Santos (crew assembles here before heading to the store)",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Mr. Philips",
+   "order": 16,
+   "protagonist": "Trevor Philips",
+   "giver": "None — self-directed. Triggered automatically after Trevor overhears a news report (while ",
+   "start_zone": "Trevor's Trailer, Sandy Shores, Blaine County",
+   "summary": "Trevor realizes his old partner Michael Townley may still be alive, and takes brutal revenge on the Lost MC for killing Johnny Klebitz while also settling his score with rival dealer Ortega.",
+   "objectives": [
+    "Get in the truck with Ron Jakowski and Wade Hebert at Trevor's Trailer",
+    "Drive to Grapeseed",
+    "Confront Terry, Clay, and the other Lost MC members",
+    "Follow the gang's van to their hideout (the Stab City trailer park) — do not kill all the fleeing bikers before reaching it",
+    "Kill every remaining Lost MC member at the hideout",
+    "Go to Ortega's trailer by the river",
+    "Push Ortega's trailer into the river using the truck",
+    "Choose Ortega's fate — kill or spare him",
+    "Return to Trevor's Trailer"
+   ],
+   "fail_conditions": [
+    "Trevor is killed or arrested (standard fail)",
+    "Killing all the fleeing bikers during the initial confrontation, before following them to the hideout, fails the mission — you must be allowed to follow them there",
+    "Reported bug: destroying the fleeing gang van (rather than just the riders) can break/crash the mission at Stab City, so avoid shooting the van itself"
+   ],
+   "tips": [
+    "Skip cutscenes and take route shortcuts to hit the 12:00 gold-medal time",
+    "Keep accelerating into Ortega's trailer continuously so it rolls all the way down the bank into the river (also needed for the 'Trailer Trashed' $5,000-damage requirement)",
+    "During the chase, prioritize killing escort bikers Terry and Clay first — the van itself needs to keep going so it leads you to the hideout"
+   ],
+   "crew_or_companions": [
+    "Ron Jakowski",
+    "Wade Hebert"
+   ],
+   "vehicles_involved": [
+    "Trevor's pickup truck (used to ram Ortega's trailer)",
+    "Lost MC motorcycles",
+    "Lost MC Gang Burrito van"
+   ],
+   "unlocks_next": "Trevor Philips Industries",
+   "notes": "One non-wiki walkthrough site claimed this mission opens at Michael De Santa's house in Rockford Hills, playable from Michael or Franklin. That conflicts with the GTA Wiki's own account (starts at Trevor's Trailer with Ashley Butler, Trevor-only) and could not be corroborated, so it was not used. | giver (raw): None — self-directed. Triggered automatically after Trevor overhears a news report (while with Ashley Butler in his trailer) that convinces him Michael Townley is still alive. Michael De Santa and Franklin Clinton appear only in a separate opening cutscene, not as playable characters."
+  },
+  {
+   "name": "Nervous Ron",
+   "order": 17,
+   "protagonist": "Trevor Philips",
+   "giver": "Ron Jakowski",
+   "start_zone": "Trevor's Trailer, Sandy Shores",
+   "summary": "A shaken Ron Jakowski, whose trailer possessions were trashed by the Lost MC, helps Trevor intercept and sell on a weapons shipment near Sandy Shores Airfield.",
+   "objectives": [
+    "Get on the ATV outside Trevor's Trailer (the game prompts this, but the mission proceeds even if skipped)",
+    "Go to Ammu-Nation and buy/upgrade a Sniper Rifle with a suppressor and advanced scope",
+    "Ride to the water tower near Sandy Shores Airfield and climb it",
+    "Snipe the Lost MC guards defending the airstrip from the water tower",
+    "Reach the runway and climb onto the wing of Ron's plane",
+    "Shoot the remaining bikers on the runway from the plane's wing as it taxis/takes off",
+    "Stay on the wing while Ron flies to the drop-off point over the water",
+    "Wait for Ron to spot the buyers' flare and make the drop to the boat below",
+    "Race Ron back to the airfield hangar",
+    "Taxi the plane into the hangar to finish"
+   ],
+   "fail_conditions": [
+    "Trevor is killed, arrested, or falls to his death from the tower/wing",
+    "Ron's plane being destroyed during the runway fight or the flight fails the mission",
+    "Reported bug: if a fixed-wing aircraft is already stored in Trevor's hangar from an earlier playthrough, Ron can crash into it on return, destroying both planes and failing the mission"
+   ],
+   "tips": [
+    "Landing headshots on the runway guards helps with the 'Headshots' gold-medal requirement",
+    "Watch for six bridges along the return flight path and fly under them for an optional gold objective",
+    "You don't need to reload the assault rifle Trevor auto-equips on the wing — it has unlimited ammo for that section"
+   ],
+   "crew_or_companions": [
+    "Ron Jakowski"
+   ],
+   "vehicles_involved": [
+    "Blazer ATV",
+    "Cuban 800 light aircraft (Trevor's red-and-white plane and Ron's blue-and-white plane)"
+   ],
+   "unlocks_next": "Friends Reunited — but only once Crystal Maze is also completed; after Trevor Philips Industries, Nervous Ron and Crystal Maze can be played in either order",
+   "notes": "A separate known bug (being unable to buy the Sniper Rifle at Ammu-Nation, blocking progress) is a glitch reported on the wiki, not an intended fail condition."
+  },
+  {
+   "name": "Trevor Philips Industries",
+   "order": 18,
+   "protagonist": "Trevor Philips",
+   "giver": "Tao Cheng (the meeting is set up with him; the attack itself is triggered mid-mission by C",
+   "start_zone": "Yellow Jack Inn, Sandy Shores / Grand Senora Desert",
+   "summary": "Trevor meets meth buyer Tao Cheng at the Yellow Jack Inn, then races to defend his meth lab — his new front, Trevor Philips Industries — from an Aztecas attack launched in revenge for the Ortega trailer incident.",
+   "objectives": [
+    "Meet Tao Cheng and his translator at the Yellow Jack Inn",
+    "Take Cheng and the translator to the meth lab (Trevor Philips Industries)",
+    "Lock Cheng and the translator in the walk-in freezer once Chef warns the Aztecas are inbound",
+    "Fight off waves of Aztecas gunmen attacking the lab compound alongside Chef",
+    "Follow Chef around the compound as the assault continues",
+    "Release Cheng and the translator from the freezer once the attack ends",
+    "Try to restart negotiations with Cheng's translator — she refuses, ending the mission"
+   ],
+   "fail_conditions": [
+    "Trevor is killed or arrested (standard fail)",
+    "Chef being killed during the shootout is expected to fail the mission, since he fights at Trevor's side throughout — this specific point is not spelled out on the wiki page itself but follows the game's usual companion-mission rules"
+   ],
+   "tips": [
+    "Take the grenade launcher Chef hands you from the balcony to clear groups of Aztecas and their vehicles fast, for the 'Body Count' gold requirement",
+    "Shoot the gas canisters scattered around the lot to blow up clusters of enemies and vehicles at once",
+    "Stay in cover and use Trevor's special ability when swarmed"
+   ],
+   "crew_or_companions": [
+    "Chef",
+    "Tao Cheng (non-combat, held in the freezer)",
+    "Cheng's translator (non-combat, held in the freezer)"
+   ],
+   "vehicles_involved": [
+    "Trevor's Bodhi",
+    "two Blazers with custom 'TP Industries' plates",
+    "a Sanchez",
+    "a Frogger — the branded company vehicles seen at the lab"
+   ],
+   "unlocks_next": "Nervous Ron and Crystal Maze both become playable afterward, in either order",
+   "notes": "If Ortega was spared in Mr. Philips, he joins the Aztecas assault here but is killed by Trevor mid-fight; if Ortega was killed earlier, another Azteca simply fills his spot — the mission otherwise plays out the same either way. | giver (raw): Tao Cheng (the meeting is set up with him; the attack itself is triggered mid-mission by Chef's warning call)"
+  },
+  {
+   "name": "Crystal Maze",
+   "order": 19,
+   "protagonist": "Trevor Philips",
+   "giver": "Tao Cheng (indirectly — his announcement that he's switched suppliers to the O'Neil Brothe",
+   "start_zone": "Yellow Jack Inn, Sandy Shores / Grand Senora Desert",
+   "summary": "Furious that Tao Cheng has taken his meth business to the O'Neil Brothers instead, Trevor drives to the O'Neil family ranch and burns their meth lab to the ground.",
+   "objectives": [
+    "Confront Tao Cheng and his translator again at the Yellow Jack Inn as they reveal they're now working with the O'Neil Brothers",
+    "Call and threaten Elwood O'Neil while driving out to the O'Neil Ranch, Grand Senora Desert",
+    "Reach the vantage point on the hill overlooking the ranch",
+    "Snipe/eliminate the O'Neil family members and guards outside, including the two loading the van",
+    "Push into the farmhouse and clear the remaining guards (the rear entrance gives better cover)",
+    "Head to the basement and pick up a jerry can",
+    "Pour a trail of gasoline from the meth lab out through the house to the exterior",
+    "Ignite the gasoline trail",
+    "Get clear of the house before the resulting explosion"
+   ],
+   "fail_conditions": [
+    "Trevor is killed or arrested (standard fail)",
+    "Breaking or interrupting the gasoline trail partway through pouring it forces you to redo that step"
+   ],
+   "tips": [
+    "Take out the two O'Neils loading the van first from the hilltop, then headshot the remaining guards for the 'Headshots' gold requirement",
+    "Line up guards who are talking to each other and drop both with one shot for the '2 Birds, 1 Stone' requirement",
+    "Favor aimed headshots over spray fire to keep shooting accuracy above 80%"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Trevor's own vehicle for the drive to the ranch (specific model not confirmed by sources checked)"
+   ],
+   "unlocks_next": "Friends Reunited — jointly with Nervous Ron; both must be completed first",
+   "notes": "One source listed 'Tao Cheng or the Translator dies' as a fail condition for this mission, but neither is present at the ranch assault (only at the opening Yellow Jack Inn scene), so that condition more plausibly belongs to Trevor Philips Industries, where they're held in a freezer during a firefight. Could not confirm directly on the wiki page, so flagged rather than asserted here. | giver (raw): Tao Cheng (indirectly — his announcement that he's switched suppliers to the O'Neil Brothers is what sends Trevor to the ranch)"
+  },
+  {
+   "name": "Friends Reunited",
+   "order": 20,
+   "protagonist": "Trevor Philips",
+   "giver": "None — self-directed. Wade Hebert supplies the lead (a 'Michael De Santa' in Los Santos ma",
+   "start_zone": "Trevor's Trailer, Sandy Shores",
+   "summary": "Trevor gets a solid lead that Michael Townley is alive in Los Santos under the name Michael De Santa, but before heading south he wipes out a new Lost MC chapter that's reoccupied the Blaine County trailer park from Mr. Philips, then travels to Los Santos with Wade.",
+   "objectives": [
+    "Return to Trevor's Trailer, where Wade Hebert is waiting with news",
+    "Hear from Wade that a 'Michael De Santa' in Los Santos matches Michael Townley's description",
+    "Drive to the Stab City trailer park, now reoccupied by a new Lost MC chapter",
+    "Plant sticky bombs on the trailers",
+    "Detonate the bombs — ideally all at once — before leaving the park",
+    "Return to Wade",
+    "Drive to Los Santos",
+    "Go to Wade's cousin Floyd's apartment",
+    "Follow Wade inside to finish the mission"
+   ],
+   "fail_conditions": [
+    "Trevor is killed or arrested (standard fail)",
+    "Being detected during the trailer-park stealth section does not appear to hard-fail the mission, but it forfeits the stealth-related gold-medal objectives"
+   ],
+   "tips": [
+    "Use a suppressed weapon and shoot out nearby lights to clear the park undetected",
+    "Plant every sticky bomb before detonating any of them, then set them all off together for the 'Perfect Gift' gold requirement",
+    "Staying undetected also helps you avoid damage, which is needed for the 'Unmarked' requirement"
+   ],
+   "crew_or_companions": [
+    "Wade Hebert"
+   ],
+   "vehicles_involved": [
+    "Trevor's truck/pickup for the drive to Stab City and on to Los Santos"
+   ],
+   "unlocks_next": "Fame or Shame",
+   "notes": "giver (raw): None — self-directed. Wade Hebert supplies the lead (a 'Michael De Santa' in Los Santos matching Michael Townley's description) that sends Trevor to Los Santos."
+  },
+  {
+   "name": "Fame or Shame",
+   "order": 21,
+   "protagonist": "Michael De Santa, Trevor Philips",
+   "giver": "Michael De Santa (family situation, no outside mission-giver NPC)",
+   "start_zone": "De Santa Residence, Rockford Hills",
+   "summary": "Trevor walks back into Michael's life after nine years just as the family learns Tracey is auditioning for a sleazy reality show; Michael and Trevor rush to stop her and end up chasing down the show's host after he gropes her.",
+   "objectives": [
+    "Go to the Maze Bank Arena (drive there from the De Santa Residence)",
+    "Go inside (head to the audition room)",
+    "Chase after Lazlow on foot then by vehicle after he flees the arena",
+    "Get in the truck to continue the vehicular pursuit of Lazlow's car"
+   ],
+   "fail_conditions": [
+    "Not explicitly documented in the sources reached for this mission; the closest confirmed constraint is a Gold Medal requirement to keep Lazlow in view/nearby during the truck chase (losing sight of him for too long risks losing the pursuit), not a stated hard mission failure."
+   ],
+   "tips": [
+    "Push the Phantom truck to top speed on the Hawick Avenue or Davis Avenue straights.",
+    "Stay close behind Lazlow's car through the chase; steer around traffic and telegraph poles so you don't get slowed down.",
+    "Knock out the event coordinator standing next to the parking space near the arena.",
+    "Don't manually unhook the trailer, and drive carefully so it doesn't get wrecked."
+   ],
+   "crew_or_companions": [
+    "Trevor Philips",
+    "Tracey De Santa",
+    "Amanda De Santa",
+    "Jimmy De Santa",
+    "Fabien LaRouche",
+    "Lazlow Jones"
+   ],
+   "vehicles_involved": [
+    "Phantom (semi truck)",
+    "Dilettante",
+    "Lazlow's car"
+   ],
+   "unlocks_next": "Dead Man Walking",
+   "notes": "GTA Wiki (gta.fandom.com) could not be reached directly — the WebFetch tool returned HTTP 402 and direct curl requests hit a Cloudflare JS challenge page. Facts above are drawn from GTABase's Gold Medal guide plus GTA-Wiki-indexed search snippets; treat fail_conditions as unconfirmed. Rewards per GTABase: 'A Friendship Resurrected' achievement/trophy, Trevor added as a contact, unlocks Lester's Assassinations, Far Out, and Nigel and Mrs. Thornhill side content, and Lazlow/Fabien become Director Mode characters."
+  },
+  {
+   "name": "Dead Man Walking",
+   "order": 22,
+   "protagonist": "Michael De Santa",
+   "giver": "Federal Investigation Bureau (FIB) / Agent Dave Norton",
+   "start_zone": "Galileo Observatory, Vinewood Hills",
+   "summary": "Dave Norton confronts Michael about the jewelry-store heist and, instead of arresting him, blackmails him into faking his own death to sneak into the morgue and identify a supposedly-dead FIB target, Ferdinand Kerimov.",
+   "objectives": [
+    "Search the morgue for the body (Los Santos County Coroner's Office) — Michael wakes on the slab, knocks out the examiners and a guard, then checks the tagged body, which turns out not to be Ferdinand",
+    "Escape from the building, fighting through guards floor by floor once an alarm triggers",
+    "Escape through the window, retrieving Michael's clothes/weapons first, then breaking a window and jumping into a dumpster",
+    "Lose the Cops (a 3-star wanted level appears once outside)",
+    "Go to the oil derricks in El Burro Heights to meet Franklin"
+   ],
+   "fail_conditions": [
+    "If Michael fails to 'wake up' in time while the examiners are working, they cut him open with a bonesaw and he dies, failing the mission.",
+    "Mission fails if Franklin is killed.",
+    "Carrying too much heat (an active wanted level) when going to meet Franklin fails the objective."
+   ],
+   "tips": [
+    "Skip cutscenes and aim to finish within 09:30 for the gold-medal time.",
+    "Escape using the Felon parked outside once you're clear of the building.",
+    "Use the coroner's office rear exit to avoid the police outside.",
+    "Use Michael's bullet-time special ability to land more headshots on guards.",
+    "Take cover as much as possible to keep health/armor damage minimal."
+   ],
+   "crew_or_companions": [
+    "Dave Norton"
+   ],
+   "vehicles_involved": [
+    "Felon (getaway car)",
+    "Baller (featured)"
+   ],
+   "unlocks_next": "Three's Company",
+   "notes": "Same GTA Wiki access issue noted for mission 21 — content compiled from GTABase's Gold Medal guide plus GTA-Wiki-indexed search snippets. Unlocks Combat Pistol and Heavy Pistol weapons per GTABase; Dave Norton becomes a Director Mode character."
+  },
+  {
+   "name": "Did Somebody Say Yoga?",
+   "order": 23,
+   "protagonist": "Michael De Santa",
+   "giver": "None — triggers automatically at Michael's house",
+   "start_zone": "De Santa Residence, Rockford Hills, Los Santos",
+   "summary": "Michael comes home drunk and stoned; Fabien talks him into a yoga session that ends with Michael in the pool and Amanda storming off. He then rides with Jimmy to Burger Shot, gets his drink spiked, is robbed and ditched, hallucinates an abduction, and drags himself home to find Amanda has left with the kids.",
+   "objectives": [
+    "Join Amanda and Fabien on the mat and hold the Warrior pose.",
+    "Hold the Triangle pose without breaking form.",
+    "Finish with the Praise the Sun pose.",
+    "After the pool incident, go check on Jimmy in his room.",
+    "Get in the car with Jimmy.",
+    "Drive to Burger Shot to meet Jimmy's contact.",
+    "Ride out the hallucination sequence, then make your way back to Michael's house."
+   ],
+   "fail_conditions": [
+    "Michael is killed or arrested.",
+    "The yoga session is failed or quit partway through.",
+    "The car carrying Michael and Jimmy is destroyed, abandoned, or gets stuck.",
+    "Jimmy, Amanda, or Fabien dies during their scenes.",
+    "Jimmy's friend at Burger Shot is killed or scared off before he can act."
+   ],
+   "tips": [
+    "Keep holding each yoga pose instead of letting go early, or the pose breaks.",
+    "During the freefall hallucination, aim downward to land properly.",
+    "The drive to and from Burger Shot has no real threat; follow the GPS route and avoid crashing."
+   ],
+   "crew_or_companions": [
+    "Amanda De Santa",
+    "Jimmy De Santa",
+    "Fabien LaRouche"
+   ],
+   "vehicles_involved": [
+    "Tailgater",
+    "Premier"
+   ],
+   "unlocks_next": "unclear in sources (Blitz Play / Hood Safari named); unverified",
+   "notes": "Sources: gta.wiki (GTA Wiki mirror) + gtabase.com Gold Medal Guide, cross-checked; gta.fandom.com returned HTTP 402. Predecessor/successor disagreed across fetches (Dead Man Walking vs Fame or Shame; Blitz Play vs Minor Turbulence vs Hood Safari) - treat the exact order as unverified. | ORDER PLACED after \"Dead Man Walking\" (the predecessor its sources named most); exact neighbours unverified (QA)."
+  },
+  {
+   "name": "Three's Company",
+   "order": 24,
+   "protagonist": "Michael De Santa, Franklin Clinton, Trevor Philips",
+   "giver": "Federal Investigation Bureau (FIB) / Steve Haines",
+   "start_zone": "FIB Headquarters, Downtown Los Santos",
+   "summary": "Steve Haines strong-arms Michael into an off-books FIB extraction: pull IAA prisoner Ferdinand Kerimov out of Agency headquarters by helicopter, with Franklin sniping cover from across the street and Trevor flying.",
+   "objectives": [
+    "Go to Dave (outside FIB Headquarters, Downtown Los Santos)",
+    "Get in Dave's car",
+    "Go to the meeting point (a Dutch London Warehouse in East Los Santos, where Franklin and Trevor join)",
+    "Fly to the Agency (IAA) headquarters — Trevor pilots the helicopter",
+    "Rappel down the Agency office window as Michael, break in and grab Ferdinand",
+    "Take down the pursuing choppers (switching between Franklin's sniper cover and Michael/Trevor's helicopter fight)",
+    "Land the helicopter at the meeting point to hand Ferdinand off to FIB agents"
+   ],
+   "fail_conditions": [
+    "Mission fails if Michael is killed by IAA guards — while playing as Franklin during the sniping segment, all nearby guards must be taken out before they can kill Michael."
+   ],
+   "tips": [
+    "Skip cutscenes, and once the area is clear of enemies, switch to Michael so Trevor can fly to the checkpoint, then switch back to Trevor just before landing, to help hit the 07:30 gold-medal time.",
+    "As Franklin, use the sniper rifle and aim for headshots to clear IAA guards before Michael is exposed.",
+    "As Michael, trigger his special ability while shooting to boost accuracy for the gold-medal 60% accuracy target.",
+    "Watch for the pursuing choppers on the flight back and take them down before they can do damage."
+   ],
+   "crew_or_companions": [
+    "Franklin Clinton",
+    "Trevor Philips",
+    "Dave Norton",
+    "Steve Haines",
+    "Andreas Sanchez",
+    "Ferdinand Kerimov"
+   ],
+   "vehicles_involved": [
+    "Buzzard Attack Chopper (Trevor's helicopter)",
+    "FIB Granger (Dave's car)",
+    "Frogger",
+    "Oracle",
+    "Utility Truck (Contender)"
+   ],
+   "unlocks_next": "By the Book",
+   "notes": "Same GTA Wiki access issue noted above; details compiled from GTABase's Gold Medal guide and GTA-Wiki-indexed search snippets. Unlocks the Frogger, AP Pistol, and Heavy Sniper, plus Franklin/Trevor 'Grass Roots' strangers-and-freaks content and the 'Paparazzo — The Partnership' mission per GTABase; Steve Haines becomes a Director Mode character."
+  },
+  {
+   "name": "By the Book",
+   "order": 25,
+   "protagonist": "Michael De Santa, Trevor Philips",
+   "giver": "Federal Investigation Bureau (FIB) / Steve Haines",
+   "start_zone": "Dutch London Warehouse, Banning",
+   "summary": "The FIB has Trevor torture Ferdinand Kerimov for the location of terror suspect Tahir Javan while Michael and Dave stake out the leads, ending in Michael sniping the target once his description is confirmed.",
+   "objectives": [
+    "Go to the warehouse in Banning to meet Steve, Dave, and Ferdinand",
+    "Go to the house in Rockford Hills that Ferdinand names under threat of torture (turns out to be a false lead)",
+    "Go to Chumash, the house Ferdinand gives up after a torture session, once Michael/Dave learn the first lead was fake",
+    "Find the target — set up a sniper position across the street and use torture-extracted details (build, beard, smoking habit, handedness) to pick out and assassinate Tahir Javan from a house full of party guests",
+    "Go to the airport — as Trevor, drive Ferdinand there afterward instead of killing him"
+   ],
+   "fail_conditions": [
+    "Mission fails if Michael shoots someone other than Tahir Javan or misses him and lets him escape — Dave radios Steve that Michael 'fucked up' and the mission ends.",
+    "Killing a female guest at the party is also treated as a failure by the game (Dave reacts negatively)."
+   ],
+   "tips": [
+    "As Trevor, each torture method (pull a tooth with pliers, electrocute, hit with a wrench, waterboard) extracts a piece of Tahir's description — for the gold medal, try each across replays without letting Kerimov's heart rate pass 200 BPM.",
+    "As Michael, use the sniper rifle from across the street at the Chumash house and carefully cross-reference the torture clues (average build/height, bushy beard, chain-smokes Redwood cigarettes, left-handed) before firing, since several party guests could match a partial description.",
+    "Don't fire on bystanders — only the confirmed target."
+   ],
+   "crew_or_companions": [
+    "Trevor Philips",
+    "Dave Norton",
+    "Steve Haines",
+    "Ferdinand Kerimov (torture subject)"
+   ],
+   "vehicles_involved": [
+    "Oracle"
+   ],
+   "unlocks_next": "Hood Safari",
+   "notes": "Same GTA Wiki access issue noted above; details compiled from GTABase's Gold Medal guide and GTA-Wiki-indexed search snippets. Tahir Javan and the Armenian Mob are listed as featured; Devin Weston becomes a Director Mode actor per GTABase."
+  },
+  {
+   "name": "Scouting the Port",
+   "order": 26,
+   "protagonist": "Trevor Philips",
+   "giver": "unknown",
+   "start_zone": "Floyd's Apartment, Vespucci Beach",
+   "summary": "Wanting a new score, Trevor has Floyd take him to Pier 400 to case a freighter that Merryweather Security is unusually guarding, posing as dock workers to snap photos and steal the shipping manifest.",
+   "objectives": [
+    "Get in your truck (at Floyd's apartment)",
+    "Go to Pier 400",
+    "Park next to dispatch",
+    "Follow Floyd into the port",
+    "Get in the (dock) handler vehicle",
+    "Move the marked containers to the loading area to keep up appearances",
+    "Go to the crane",
+    "Climb the crane to reach the cabin",
+    "Load the containers onto the trucks (crane operator task)",
+    "Go to the vantage point at the end of the catwalk",
+    "Use the camera phone to take photos of the boat, following Ron's instructions",
+    "Send the photos to Ron",
+    "Descend the crane to the docks floor",
+    "Get in the truck",
+    "Drive to the docking area to scope the Naval Port, where Merryweather guards swarm and Floyd is beaten as a distraction",
+    "Leave the restricted area after sneaking into the guardhouse and stealing the manifest briefcase",
+    "Go to Floyd's apartment"
+   ],
+   "fail_conditions": [
+    "Mission fails from causing a disturbance at the docks — entering a parked Biff and lingering too long in it, spooking dock workers with it, or hitting dock workers with it are all cited as ways to trigger this failure."
+   ],
+   "tips": [
+    "Drive the Dock Handler carefully and avoid damaging the containers (gold-medal 'Employee of the Month' requirement).",
+    "Follow Ron's photo instructions closely and get all 3 required shots of the boat for 'Perfect Surveillance'.",
+    "Don't loiter in, spook workers with, or hit anyone with the parked Biff — avoiding any disturbance is itself the gold-medal 'An Honest Day's Work' requirement.",
+    "Skip cutscenes to stay under the 20:00 gold-medal time."
+   ],
+   "crew_or_companions": [
+    "Floyd Hebert",
+    "Wade Hebert (present at the apartment, not at the docks)",
+    "Ron Jakowski (phone contact for photo instructions)"
+   ],
+   "vehicles_involved": [
+    "Trevor's truck",
+    "Dock Handler",
+    "Hauler",
+    "Tipper (4-wheel)",
+    "Tipper II (6-wheel)",
+    "Tow Truck (Large)",
+    "Crane (climbed/operated, not driven)"
+   ],
+   "unlocks_next": "Minisub (leads toward The Merryweather Heist finale, in either its Offshore or Freighter variant)",
+   "notes": "Same GTA Wiki access issue noted above; details compiled from GTABase's Gold Medal guide and GTA-Wiki-indexed search snippets. Unlike the other four missions, GTABase's info box for this one does not name an explicit human mission-giver, only Trevor as protagonist — treat 'giver' as inferred, not sourced verbatim. | order corrected 27->25 (QA) | giver (raw): Not clearly stated as a given-by NPC in the sources — self-initiated by Trevor, guided on-site by Floyd Hebert and by phone from Ron Jakowski"
+  },
+  {
+   "name": "Minisub",
+   "order": 27,
+   "protagonist": "Trevor Philips",
+   "giver": "No separate NPC hands this one off on-screen; it is self-directed by Trevor as part of the",
+   "start_zone": "Port of Los Santos",
+   "summary": "For the Offshore approach to the Merryweather Heist, Trevor needs a submarine to reach Merryweather's device, so he frees a yellow submersible hanging off a freighter in the Port of Los Santos and has Floyd haul it away on a flatbed truck.",
+   "objectives": [
+    "Head to the freighter in the Port of Los Santos",
+    "Free the submersible — either sneak aboard and hit the release switch on the ship's control panel (dealing with one guard), or stay outside and shoot the support cables with a sniper rifle so the sub drops into the water",
+    "Board the submersible once it's in the water",
+    "Pilot the submersible to the extraction point elsewhere in the port",
+    "Wait while Floyd's crane lifts the sub onto a semi-truck's flatbed",
+    "Get clear of/away from the truck to finish"
+   ],
+   "fail_conditions": [
+    "Trevor is killed (wasted)",
+    "Trevor is busted",
+    "Floyd dies",
+    "Floyd is abandoned",
+    "The submersible is destroyed",
+    "The submersible is abandoned",
+    "The truck is destroyed",
+    "Floyd's pickup is destroyed"
+   ],
+   "tips": [
+    "Shoot the securing cables from outside the ship instead of boarding it — avoids the lone guard and is faster",
+    "Skip cutscenes if going for speed",
+    "Keep the sub away from rocks/obstacles on the way to the extraction point"
+   ],
+   "crew_or_companions": [
+    "Floyd Hebert (arranges the crane pickup)"
+   ],
+   "vehicles_involved": [
+    "Yellow submersible (stolen)",
+    "Floyd's pickup truck",
+    "Flatbed semi-truck"
+   ],
+   "unlocks_next": "Cargobob (the parallel Offshore-approach setup mission)",
+   "notes": "Could not fetch gta.fandom.com/wiki/Minisub directly — WebFetch returned HTTP 402 Payment Required on every attempt this session. Facts assembled from search-engine snippets referencing GTA Wiki plus GTABase, Neoseeker, and Gamer Guides; exact on-screen objective wording and the precise start building are not independently verified against the primary page. | giver (raw): No separate NPC hands this one off on-screen; it is self-directed by Trevor as part of the Offshore-approach setup chain for the Merryweather Heist (triggered after choosing that approach with Floyd/Wade). | start_zone (raw): Port of Los Santos, at the freighter (the Daisy Lee) carrying the submersible — reached after the heist-planning stage.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Cargobob",
+   "order": 28,
+   "protagonist": "Trevor Philips",
+   "giver": "No formal in-person mission-giver cutscene; Wade Hebert points out Fort Zancudo as the pla",
+   "start_zone": "Blaine County — begins near Sandy Shores/Trevor's location and moves to Fort Zancudo milit",
+   "summary": "Trevor needs a heavy-lift helicopter for the Offshore heist approach, so he infiltrates Fort Zancudo, steals a Cargobob parked by the runway, and flies it to the hangar at Sandy Shores Airfield while evading the military.",
+   "objectives": [
+    "Get to Fort Zancudo",
+    "Steal the Cargobob parked near the runway",
+    "Fly out of the base and lose the pursuing military helicopter",
+    "Fly the Cargobob to the hangar at Sandy Shores Airfield"
+   ],
+   "fail_conditions": [
+    "Trevor is killed (wasted)",
+    "Trevor is busted",
+    "The Cargobob is destroyed",
+    "The Cargobob is left anywhere other than the correct hangar"
+   ],
+   "tips": [
+    "Entering the base gives an instant ~4-star wanted level — expect it",
+    "Military gunfire is inaccurate at range, so a fast, direct exit beats trying to dogfight",
+    "Head straight for the coast/hangar rather than evading defensively"
+   ],
+   "crew_or_companions": [
+    "Wade Hebert (points out the target chopper)"
+   ],
+   "vehicles_involved": [
+    "Cargobob (heavy-lift helicopter, stolen from Fort Zancudo)",
+    "Pursuing military helicopter (enemy)"
+   ],
+   "unlocks_next": "The Merryweather Heist (Offshore approach), once both Minisub and Cargobob are complete",
+   "notes": "Could not fetch gta.fandom.com/wiki/Cargobob_(mission) directly — WebFetch returned HTTP 402 each attempt. Compiled from search snippets citing GTA Wiki, GTABase, gamepressure, and gurugamer; exact on-screen objective phrasing unconfirmed against the primary page. | giver (raw): No formal in-person mission-giver cutscene; Wade Hebert points out Fort Zancudo as the place to find the needed helicopter, within the same Offshore-approach setup chain. | start_zone (raw): Blaine County — begins near Sandy Shores/Trevor's location and moves to Fort Zancudo military base.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "The Merryweather Heist",
+   "order": 29,
+   "protagonist": "Michael De Santa, Franklin Clinton, and Trevor Philips (three-protagonist mission)",
+   "giver": "Trevor Philips (proposes and leads the job to Michael and Franklin)",
+   "start_zone": "Sandy Shores Airfield (for the Offshore approach launch)",
+   "summary": "Trevor brings in Michael and Franklin to steal a prototype device Merryweather Security is testing at sea; depending on the setup approach chosen earlier, the crew either dives to a Merryweather test site (Offshore) or infiltrates a wrecked freighter (Freighter/Under approach) to grab it.",
+   "objectives": [
+    "Meet up at Sandy Shores Airfield",
+    "Load into the Cargobob (Michael flies, carrying the mini-sub) while Trevor rides inside the sub",
+    "Fly out to sea and drop the mini-sub near the Merryweather test site",
+    "As Trevor, pilot the mini-sub and use the Trackify app to locate the device on the ocean floor, avoiding rocks",
+    "Retrieve the device and ascend toward the surface",
+    "Have Michael use the Cargobob to hoist the mini-sub out of the water",
+    "Fight off or evade the Merryweather boats and helicopters now pursuing the crew (Franklin covers/snipes)",
+    "Fly back and land to complete the heist",
+    "(Freighter/Under approach alternative: Franklin covers Michael with a sniper from a bridge vantage point while Michael searches the wrecked ship for the device)"
+   ],
+   "fail_conditions": [
+    "Merryweather is alerted while Michael or Franklin is out of position",
+    "Michael or Franklin leaves the area",
+    "Sticky bombs run out, or detonate too early",
+    "The mini-sub is grounded or destroyed",
+    "The Cargobob is destroyed or abandoned",
+    "Floyd dies",
+    "Any protagonist is left behind or abandons the heist",
+    "Merryweather forces aren't dealt with quickly enough"
+   ],
+   "tips": [
+    "Follow the radar blip to reach Michael/the objective quickly",
+    "Watch for the Merryweather helicopter targeting Franklin and snipe its pilot fast",
+    "Guide the mini-sub directly over the crate to pick it up",
+    "Keep the sub clear of rocks on the ocean floor"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Trevor Philips",
+    "Floyd Hebert (support)",
+    "Wade Hebert"
+   ],
+   "vehicles_involved": [
+    "Cargobob (carries/retrieves the mini-sub)",
+    "Mini-submersible"
+   ],
+   "unlocks_next": "Advances the main heist storyline past this job; the specific next main mission unlocked was not reliably confirmed from available sources.",
+   "notes": "Could not fetch gta.fandom.com/wiki/The_Merryweather_Heist directly — WebFetch returned HTTP 402 on every attempt. Detail on the Offshore approach is solid from search snippets citing GTA Wiki/GTABase/Gamer Guides; the Freighter/Under approach objectives are only briefly covered, and the confirmed next unlocked mission is unverified.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Hood Safari",
+   "order": 30,
+   "protagonist": "Franklin Clinton (with Trevor Philips along for the mission)",
+   "giver": "Lamar Davis",
+   "start_zone": "Franklin's neighborhood, moving into Grove Street/Chamberlain Hills",
+   "summary": "Lamar sets up a drug deal and brings Trevor along as extra muscle; the deal turns out to be a scam (the brick is fake) and erupts into a running gunfight with the Ballas through Grove Street.",
+   "objectives": [
+    "Get in the van (Franklin, Lamar, Trevor, and Chop)",
+    "Go to Grove Street",
+    "Go to the house to meet the dealer for the deal",
+    "Escape Grove Street once the deal goes bad and gunfire breaks out",
+    "Follow Lamar",
+    "Lose the cops"
+   ],
+   "fail_conditions": [
+    "Franklin, Trevor, or Lamar is killed (wasted)",
+    "The player is busted",
+    "Falling too far behind Lamar during the escape/follow segment"
+   ],
+   "tips": [
+    "As Trevor, a high-damage single-shot weapon like the pump shotgun lets you drop Ballas with headshots while advancing",
+    "Keep moving so Trevor's special ability keeps recharging",
+    "Police won't follow into water — ducking under a bridge can shake a chasing helicopter",
+    "Go for headshots; the walkthroughs note this helps the accuracy/headshot Gold-medal targets"
+   ],
+   "crew_or_companions": [
+    "Lamar Davis",
+    "Trevor Philips",
+    "Chop (Franklin's dog, along for the ride)"
+   ],
+   "vehicles_involved": [
+    "A van (used to reach Grove Street)",
+    "Whatever vehicle is grabbed to lose the cops during the escape"
+   ],
+   "unlocks_next": "Leads into the heist-prep chain starting with Scouting the Port, per available sources.",
+   "notes": "Could not fetch gta.fandom.com/wiki/Hood_Safari directly — WebFetch returned HTTP 402 each attempt. Compiled from search snippets citing GTA Wiki, GTABase, PowerPyx, and Gamer Guides. The exact on-screen wording for the 'go to the house' step and firm confirmation of the immediately-next mission are not independently verified against the primary wiki page."
+  },
+  {
+   "name": "The Hotel Assassination",
+   "order": 31,
+   "protagonist": "Franklin Clinton",
+   "giver": "Lester Crest",
+   "start_zone": "A multi-story parking garage across from the Von Crastenburg Hotel, Los Santos",
+   "summary": "Lester sends Franklin on his first assassination job — explaining how killing a target lets him profit by shorting the stock market — with the target being Brett Lowrey, CEO of Bilkinton Research, staying at the Von Crastenburg Hotel.",
+   "objectives": [
+    "Go to the parking garage across from the Von Crastenburg Hotel",
+    "Get into position and pick a method — snipe Lowrey as he arrives, or plant a sticky bomb on his car",
+    "Assassinate Lowrey: wait for the marked target (the one man not wearing a suit) then take the shot, or detonate the bomb once he's in the vehicle",
+    "Leave the area and lose the cops"
+   ],
+   "fail_conditions": [
+    "Franklin is killed (wasted)",
+    "Franklin is busted",
+    "Franklin's cover is blown before the hit",
+    "Lester is attacked",
+    "The mission is abandoned",
+    "The vehicle/bomb alerts the guards too early",
+    "The target escapes"
+   ],
+   "tips": [
+    "Wait for the marked target instead of firing early — he's the one not wearing a suit",
+    "Use the sniper rifle for the cleanest kill (required for 100%/Gold medal)",
+    "After the kill, take a vehicle and leave the garage on the side opposite the hotel to dodge the immediate response",
+    "Use Franklin's driving ability to escape quickly without crashing"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (sets up and directs the job)"
+   ],
+   "vehicles_involved": [
+    "No mission vehicle is provided going in — a sniper position is used; a getaway car (e.g. the target's vehicle) is taken from the scene if fleeing by car"
+   ],
+   "unlocks_next": "Advances the Franklin/Lester storyline further; the exact next mission this unlocks was not reliably confirmed — one source's claim conflicts with this being an early, mandatory assassination job, so treat any specific next-mission name as unverified.",
+   "notes": "Could not fetch gta.fandom.com/wiki/The_Hotel_Assassination directly — WebFetch returned HTTP 402 on every attempt this session (a general tool failure, not URL-specific — likely tied to an account spend-limit issue noted elsewhere in this repo's STATUS.md). All facts here were reconstructed from search-engine result snippets that quote or summarize GTA Wiki plus secondary sources (GTABase, Gamer Guides, Sportskeeda, gamepressure); none of the five mission pages were read in full from the primary source, so treat objective wording and the 'unlocks_next' fields as approximate pending a direct wiki fetch."
+  },
+  {
+   "name": "Masks",
+   "order": 32,
+   "protagonist": "Michael, Franklin, or Trevor (player's choice of the three)",
+   "giver": "FIB (setup mission assigned as part of the Blitz Play heist prep chain",
+   "start_zone": "Vespucci Beach — the Vespucci Movie Masks clothing store",
+   "summary": "A short heist-prep errand where the chosen protagonist drives to the mask shop at Vespucci Beach and buys three masks to be worn during the Blitz Play robbery.",
+   "objectives": [
+    "Drive to the clothing store at Vespucci Beach",
+    "Buy three masks (they can all be the same one)"
+   ],
+   "fail_conditions": [
+    "The protagonist is killed (wasted)",
+    "The protagonist is arrested (busted)",
+    "Leaving the shop/area without buying all three masks",
+    "Not having enough money to buy all three masks"
+   ],
+   "tips": [
+    "Buying three of the identical mask is fine — no need for variety.",
+    "For the 'Face Time' gold medal, buy all three masks within 20 seconds.",
+    "For the 'Cliche' gold medal, buy a white hockey mask for each of the three characters.",
+    "Gold medal objectives don't all need to happen in the same playthrough — you can pick them up across separate runs.",
+    "The mask shop stays open for regular shopping after this mission."
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [],
+   "unlocks_next": "Blitz Play (only once all the other setup missions — Boiler Suits, Trash Truck, Tow Truck — are also done)",
+   "notes": "gta.fandom.com itself returned HTTP 402 Payment Required on every direct WebFetch attempt this session (isolated to that domain — other sites fetched fine). Details here were reconstructed from web-search summaries of the fandom page plus a gta.wiki mirror and gtabase.com's walkthrough, so exact on-screen wording and the full fail-condition list from the wiki's infobox could not be independently confirmed against the raw page. | giver (raw): FIB (setup mission assigned as part of the Blitz Play heist prep chain, no separate on-screen mission giver)"
+  },
+  {
+   "name": "Boiler Suits",
+   "order": 33,
+   "protagonist": "Michael, Franklin, or Trevor (player's choice of the three)",
+   "giver": "FIB (setup mission in the Blitz Play prep chain)",
+   "start_zone": "Ammu-Nation in Strawberry, South Los Santos",
+   "summary": "A heist-prep errand where the chosen protagonist visits the Strawberry Ammu-Nation and buys three boiler suits (worker disguises) for the crew to wear during Blitz Play.",
+   "objectives": [
+    "Go to the Ammu-Nation store in Strawberry",
+    "Buy three boiler suits",
+    "Leave Ammu-Nation"
+   ],
+   "fail_conditions": [
+    "The protagonist is killed (wasted)",
+    "The protagonist is arrested (busted)",
+    "Leaving without buying all three suits",
+    "Not having enough money to buy all three suits"
+   ],
+   "tips": [
+    "The Strawberry Ammu-Nation is the only store in the game that stocks boiler suits, so go there specifically.",
+    "For the 'Quick Shopper' gold medal, buy all three suits within 30 seconds.",
+    "For the 'United Colors' gold medal, pick a different suit color for each character.",
+    "Gold medals can be earned across separate playthroughs, not necessarily in one run."
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [],
+   "unlocks_next": "Blitz Play (once the other setup missions are also done)",
+   "notes": "Same fandom-access caveat as Masks: gta.fandom.com returned HTTP 402 on direct fetch, so this is built from a gta.wiki mirror and gtabase.com plus search summaries. One aggregated search result briefly mislabeled the shop location as Cypress Flats; cross-checked against three independent sources (gta.wiki, gtabase.com, sportskeeda) which all agree it's Strawberry, so that's used here."
+  },
+  {
+   "name": "Trash Truck",
+   "order": 34,
+   "protagonist": "Michael, Franklin, or Trevor (player's choice of the three)",
+   "giver": "FIB (setup mission in the Blitz Play prep chain)",
+   "start_zone": "Wherever the roaming Trashmaster is found — it circles the Mirror Park, La Mesa",
+   "summary": "A heist-prep mission where the protagonist steals a garbage truck (Trashmaster) needed for Blitz Play, shakes off the police it attracts, and delivers it to the FIB warehouse in El Burro Heights.",
+   "objectives": [
+    "Find and steal the garbage truck circling Mirror Park / La Mesa / East Vinewood",
+    "Lose the cops (stealing the truck draws a wanted level)",
+    "Take the garbage truck to the FIB lot in El Burro Heights",
+    "Leave the garbage truck"
+   ],
+   "fail_conditions": [
+    "The protagonist is wasted or busted",
+    "The Trashmaster is destroyed",
+    "The Trashmaster is abandoned",
+    "The Trashmaster gets stuck"
+   ],
+   "tips": [
+    "Hop into the truck while the sanitation worker is out collecting bins — it's an easy, unguarded steal.",
+    "Losing the cops is required before the delivery counts, so break line of sight or get out of the search radius.",
+    "Use Franklin's special ability to help hit top speed for the 'In The Dust' gold medal.",
+    "Avoid all damage to the truck for the 'Undented' gold medal.",
+    "Finish within 5 minutes for the time-based gold medal."
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Trashmaster (garbage truck, required)"
+   ],
+   "unlocks_next": "Blitz Play (once the other setup missions are also done)",
+   "notes": "Same fandom-access caveat: gta.fandom.com gave HTTP 402 on direct fetch, so this entry is built from a gta.wiki mirror plus gtabase.com and search summaries, which agreed closely with each other on objectives and gold-medal details. | start_zone (raw): Wherever the roaming Trashmaster is found — it circles the Mirror Park, La Mesa, and East Vinewood areas of Los Santos"
+  },
+  {
+   "name": "Tow Truck",
+   "order": 35,
+   "protagonist": "Michael, Franklin, or Trevor (player's choice of the three)",
+   "giver": "FIB (setup mission in the Blitz Play prep chain)",
+   "start_zone": "The auto repair shop on Elysian Island (Autopia Parkway, La Puerta area)",
+   "summary": "A heist-prep mission where the protagonist steals the large, Yankee-based tow truck needed for Blitz Play from a repair shop and drives it to the FIB warehouse in El Burro Heights.",
+   "objectives": [
+    "Steal the tow truck from the repair shop on Elysian Island",
+    "Drive the tow truck to the FIB lot in El Burro Heights",
+    "Leave the tow truck"
+   ],
+   "fail_conditions": [
+    "The protagonist is wasted or busted",
+    "The tow truck is destroyed",
+    "The tow truck is abandoned",
+    "The tow truck gets stuck"
+   ],
+   "tips": [
+    "A mechanic works on a car right next to the truck and may start a fistfight, or jump in his own car and chase you — deal with him quickly or you'll draw police attention.",
+    "Make sure you take the larger, Yankee-based Tow Truck — a smaller vehicle with the same name exists elsewhere and won't satisfy the mission.",
+    "Finish within 3 minutes for the time gold medal.",
+    "Deliver the truck with zero damage for the 'Not a Scratch' gold medal — unlike some earlier missions, there's no leniency here.",
+    "Use Franklin's special ability to help hit top speed for the matching gold medal.",
+    "This mission is skipped entirely if Franklin has already bought the Los Santos Customs impound yard."
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Tow Truck (large, Yankee-based model, required)"
+   ],
+   "unlocks_next": "Blitz Play (once the other setup missions are also done)",
+   "notes": "Same fandom-access caveat: gta.fandom.com returned HTTP 402 on direct fetch; entry built from a gta.wiki mirror and gtabase.com plus search summaries, which agreed on objectives, location, and gold-medal details."
+  },
+  {
+   "name": "Blitz Play",
+   "order": 36,
+   "protagonist": "Rotates between Michael De Santa, Franklin Clinton, and Trevor Philips within the mission",
+   "giver": "Steve Haines (FIB)",
+   "start_zone": "Begins with a call/cutscene",
+   "summary": "The heist itself: Michael, Franklin, and Trevor ambush an armored Securicar in Cypress Flats to steal IAA drug-money funds for the FIB, fighting off police and a helicopter before delivering the stolen bonds to Devin Weston.",
+   "objectives": [
+    "Trevor: watch the road from an elevated lookout with binoculars to spot the incoming armored car",
+    "Michael: get in the garbage truck (with Trevor)",
+    "Michael: drive the garbage truck to the ambush point in Cypress Flats",
+    "Michael: block the road with the garbage truck",
+    "Franklin: ram the security truck with the tow truck",
+    "Franklin: plant sticky bombs on the security truck's rear doors and detonate them",
+    "Fight off waves of police and NOOSE reinforcements closing in from multiple directions",
+    "Trevor: take out the snipers",
+    "Trevor: shoot down the police helicopter",
+    "Franklin: get clear of / destroy the garbage truck",
+    "Get in the getaway vehicle and escape the area",
+    "Michael: report to Devin Weston's mansion and hand over the stolen bonds"
+   ],
+   "fail_conditions": [
+    "Michael, Franklin, or Trevor is killed or arrested",
+    "The crew abandons the ambush or the mission area",
+    "The garbage truck or tow truck is destroyed before it's done its job",
+    "The sticky bombs aren't detonated on the security truck's doors in time",
+    "The meeting with Devin Weston afterward is disrupted"
+   ],
+   "tips": [
+    "Complete all four prep missions first — Masks, Boiler Suits, Trash Truck, and Tow Truck — or Blitz Play won't unlock.",
+    "As Trevor on lookout duty, stay on your elevated perch and call the shot the moment you spot the armored car.",
+    "Prioritize the police helicopter early — it's both dangerous and the 'Hawk Down' gold medal.",
+    "Keep shooting accuracy at 60%+ and land at least 12 headshots for the related gold medals.",
+    "Switch between the three characters at least 10 times during the mission for the 'Switcher' gold medal.",
+    "Use the garbage truck purely as a roadblock and the tow truck to disable the security truck — don't waste time trying to out-drive it."
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Trevor Philips",
+    "Steve Haines (FIB handler, cutscene only)",
+    "Devin Weston (cutscene only)"
+   ],
+   "vehicles_involved": [
+    "Trashmaster (garbage truck, roadblock)",
+    "Tow Truck (ramming vehicle)",
+    "Securicar (the target armored car)",
+    "Police Maverick helicopter (enemy)",
+    "A getaway vehicle"
+   ],
+   "unlocks_next": "Leads into working for Devin Weston (the vehicle-theft job for him, then onward through that story arc)",
+   "notes": "gta.fandom.com returned HTTP 402 on direct WebFetch, so this entry was built by cross-checking a gtabase.com walkthrough against a gta.wiki mirror of the fandom page; the two agreed closely on the objective sequence and gold medals but differed slightly on exact step wording, and sources vary on whether Steve Haines alone, or 'Haines and Norton' jointly, are the FIB contacts giving the job — flagged as unconfirmed. The precise next-mission title immediately after Blitz Play could not be pinned down with confidence from these sources. | giver (raw): Steve Haines (FIB), acting on the deal he and the FIB struck with the trio; sets up the robbery of an IAA-linked armored car | start_zone (raw): Begins with a call/cutscene, then the crew stages the ambush in Cypress Flats using the garbage truck and tow truck acquired in the prep missions"
+  },
+  {
+   "name": "I Fought the Law...",
+   "order": 37,
+   "protagonist": "Franklin Clinton (also Michael De Santa and Trevor Philips)",
+   "giver": "Devin Weston",
+   "start_zone": "Alta (construction site)",
+   "summary": "Devin Weston has Franklin lure two rich kids into racing their Entity XF and Cheetah at high speed while Michael and Trevor, disguised as San Andreas Highway Patrol, pull the pair over so the crew can steal both cars.",
+   "objectives": [
+    "Get in the Ocelot F620 Devin provided (Alta construction site)",
+    "Drive to the meeting point/gas station to start the race",
+    "Race the Entity XF and Cheetah drivers, forcing them up to top speed",
+    "Lead the two cars into Michael and Trevor's path near Cassidy Creek Bridge, north of Chumash, so they can pull them over",
+    "Drive the stolen car to the garage to deliver it"
+   ],
+   "fail_conditions": [
+    "Not explicitly stated on the sources checked."
+   ],
+   "tips": [
+    "Race between the two trucks side by side just after the start for the 'Tight Squeeze' gold bonus.",
+    "Race between the bus and Dashound near the LS Freeway turn for 'Bus Passed'.",
+    "Follow Trevor through the tunnel rather than detouring, for 'Follow the Leader'.",
+    "Finish within 12:00 for the time bonus.",
+    "Use Franklin's special ability during the race to help keep pace with traffic."
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Trevor Philips",
+    "Molly Schultz (phone only)"
+   ],
+   "vehicles_involved": [
+    "Ocelot F620 (Franklin's)",
+    "Police motorcycles (Michael and Trevor)",
+    "Entity XF and Cheetah (the two stolen target cars)"
+   ],
+   "unlocks_next": "Eye in the Sky",
+   "notes": "The primary source, gta.fandom.com, returned a blocked/HTTP 402 response for every mission in this batch this session, so gtabase.com's mission-guide page was used instead and cross-checked against search-engine summaries of the GTA Wiki text. Exact fail conditions weren't stated on the pages that were reachable."
+  },
+  {
+   "name": "Eye in the Sky",
+   "order": 38,
+   "protagonist": "Franklin Clinton and Trevor Philips",
+   "giver": "Devin Weston",
+   "start_zone": "Mission Row Police Station, Los Santos",
+   "summary": "Devin Weston lends Franklin and Trevor a police helicopter with a thermal/ID scanner so they can track down car dealer Chad Mulligan and steal the Z-Type he's driving.",
+   "objectives": [
+    "Go to the front desk at Mission Row Police Station",
+    "Head up to the helipad and get in the police helicopter",
+    "Fly to Franklin's location and scan him in to link up",
+    "Scan the group of targets in Hawick",
+    "Scan the next set of targets",
+    "Track Chad Mulligan to his parked car",
+    "Zoom in on the heat signature matching Chad, seated in the Z-Type",
+    "Get in the Z-Type once Chad is dealt with",
+    "Deliver the Z-Type to the airport without damaging it",
+    "Exit the airport"
+   ],
+   "fail_conditions": [
+    "Not explicitly stated on the sources checked; damaging the Z-Type only costs the gold-medal bonus per the tips, not confirmed as a hard fail."
+   ],
+   "tips": [
+    "Drive the Z-Type carefully to keep it undamaged for the 'Not a Scratch' bonus.",
+    "Hold the aim/focus button on conversing pedestrians to log 3 conversations for 'Eavesdropper'.",
+    "Chad shows up as the left-most heat signature on the thermal scan.",
+    "You can choose to spare or kill Chad; killing him skips a police notification."
+   ],
+   "crew_or_companions": [
+    "Trevor Philips",
+    "Franklin Clinton",
+    "Molly Schultz (phone)"
+   ],
+   "vehicles_involved": [
+    "Police Maverick (helicopter)",
+    "Z-Type (target car, delivered to the airport)"
+   ],
+   "unlocks_next": "Mr. Richards",
+   "notes": "gta.fandom.com blocked/402 this session; gtabase.com used as the source. One secondary summary named the alternate Franklin-side start as Murrieta Oil Field, but Mission Row Police Station is the start given by the main source used here."
+  },
+  {
+   "name": "Mr. Richards",
+   "order": 39,
+   "protagonist": "Michael De Santa",
+   "giver": "Solomon Richards",
+   "start_zone": "Richards Majestic Productions backlot, East Los Santos",
+   "summary": "Solomon Richards asks Michael to rough up an actor's pushy new agent, Rocco Pelosi, then use a helicopter to scare two rattled actors back into cooperating with the film shoot.",
+   "objectives": [
+    "Travel to the backlot in East Los Santos",
+    "Sneak to the helipad without alerting the guards or Rocco",
+    "Beat up Rocco",
+    "Get in the helicopter",
+    "Fly erratically to change actors Milton McIlroy and Anton Beaudelaire's minds",
+    "Fly back to the studio",
+    "Go to Solomon's office"
+   ],
+   "fail_conditions": [
+    "Alerting the guards during the stealth approach to the helipad fails the mission."
+   ],
+   "tips": [
+    "Skip cutscenes to stay under the gold time (10:00).",
+    "Use stealth takedowns on the workers on the way to the helipad rather than fighting openly.",
+    "Keep punching Rocco repeatedly so he can't land a counter-attack.",
+    "Land the Frogger helicopter gently so it isn't damaged."
+   ],
+   "crew_or_companions": [
+    "Solomon Richards",
+    "Rocco Pelosi",
+    "Milton McIlroy",
+    "Anton Beaudelaire"
+   ],
+   "vehicles_involved": [
+    "Frogger (helicopter)"
+   ],
+   "unlocks_next": "Caida Libre",
+   "notes": "gta.fandom.com blocked/402 this session; gtabase.com used as the source. A search-engine summary of this same gtabase page also listed 'Eye in the Sky' as a nearby link, but gtabase's own sequential mission list confirms this mission's next mission is Caida Libre, matching this batch's given order."
+  },
+  {
+   "name": "Caida Libre",
+   "order": 40,
+   "protagonist": "Michael De Santa and Trevor Philips",
+   "giver": "Martin Madrazo",
+   "start_zone": "La Fuente Blanca, Vinewood Hills (Madrazo's house)",
+   "summary": "Cartel boss Martin Madrazo has Michael and Trevor shoot down a plane carrying his cousin Javier, who is about to testify against him, then chase down the wreckage to silence Javier and recover his documents.",
+   "objectives": [
+    "Go to the observatory in Vinewood Hills",
+    "Get in the van with the mounted rifle",
+    "Shoot out the plane's engine",
+    "Follow the falling package on the Sanchez motorcycle and grab it",
+    "Silence Javier",
+    "Go inside the crashed plane",
+    "Leave the crash site",
+    "Destroy the van",
+    "Go to Martin Madrazo's house",
+    "Meet Trevor at the cement works"
+   ],
+   "fail_conditions": [
+    "Michael or Trevor is killed",
+    "Michael or Trevor gets busted (arrested)",
+    "Player deliberately dismounts the Sanchez during the motorcycle chase"
+   ],
+   "tips": [
+    "Skip cutscenes and keep the Sanchez at top speed for the gold time (under 9:45).",
+    "Stay mounted on the Sanchez for the whole chase for the 'Glued to the Seat' bonus.",
+    "Bring down the plane using exactly 3 shots for 'One Two Three'.",
+    "A Fusilade or a helicopter can help navigate quickly to reach the observatory."
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Trevor Philips",
+    "Javier (Madrazo's cousin, the target)"
+   ],
+   "vehicles_involved": [
+    "Van with a mounted rifle",
+    "Sanchez motorcycle",
+    "Shamal (the plane that gets shot down)"
+   ],
+   "unlocks_next": "Deep Inside",
+   "notes": "gta.fandom.com blocked/402 this session; gtabase.com used as the source. Its own mission text describes the ending as handing off to Franklin's storyline, and its sequential mission list confirms the very next mission is Deep Inside, matching this batch's given order. 'Caida Libre' is Spanish for 'free fall'."
+  },
+  {
+   "name": "Deep Inside",
+   "order": 41,
+   "protagonist": "Franklin Clinton",
+   "giver": "Devin Weston",
+   "start_zone": "Richards Majestic Productions backlot, Los Santos",
+   "summary": "Devin Weston has Franklin sneak onto a movie backlot disguised as an extra to steal a JB 700 sports car being used on the film shoot.",
+   "objectives": [
+    "Get inside the backlot",
+    "Find the actor (Brandon Roberts) to take his place",
+    "Get in the JB 700",
+    "Lose the security chasing him",
+    "Deliver the car to the garage"
+   ],
+   "fail_conditions": [
+    "Not explicitly stated on the sources checked."
+   ],
+   "tips": [
+    "Use Franklin's special ability while driving to dodge traffic and keep the car undamaged.",
+    "Knock out actor Brandon Roberts with a stealth takedown rather than fighting him openly.",
+    "Use the ejector seat prompt within about 10 seconds of it appearing for a bonus.",
+    "Running over the actor while escaping in the JB 700 is another optional gold-medal action."
+   ],
+   "crew_or_companions": [
+    "Molly Schultz (phone)",
+    "Brandon Roberts (the actor)",
+    "Lamar Davis (appears at the mission's end)"
+   ],
+   "vehicles_involved": [
+    "JB 700"
+   ],
+   "unlocks_next": "Minor Turbulence",
+   "notes": "gta.fandom.com blocked/402 this session; gtabase.com used as the source, which lists this mission's sequential successor as Minor Turbulence. The exact on-screen order of 'lose the security' versus 'deliver the car' step wasn't fully certain from the source text, so it's listed in the order the source presented it."
+  },
+  {
+   "name": "Minor Turbulence",
+   "order": 42,
+   "protagonist": "Trevor Philips",
+   "giver": "unknown",
+   "start_zone": "De Santa Residence",
+   "summary": "Trevor takes a crop duster up to intercept a Merryweather Security cargo plane full of weapons, boards it mid-air, clears the guards, and tries to fly it home before military jets shoot it down and he has to bail out.",
+   "objectives": [
+    "Get in the Duster crop duster at Michael's mansion",
+    "Fly to intercept the Merryweather cargo plane",
+    "Follow the cargo plane while staying close to the ground to avoid being spotted",
+    "Fly close to the rear of the cargo plane",
+    "Fly the Duster inside the cargo plane's open hold",
+    "Take out the guards inside the cargo plane",
+    "Take over the cargo plane's controls",
+    "Fly the cargo plane back toward McKenzie Field",
+    "Climb to a safe altitude and jump from the plane before it goes down",
+    "Parachute to safety"
+   ],
+   "fail_conditions": [
+    "Trevor is killed or arrested",
+    "Ron, Michael, or Patricia is killed",
+    "The Duster is destroyed or abandoned before reaching the cargo plane",
+    "The cargo plane is destroyed or lost",
+    "Trevor falls from the cargo plane before it's secured",
+    "Flying too close to Los Santos/Fort Zancudo draws the military down too soon"
+   ],
+   "tips": [
+    "Approach the cargo plane from underneath and behind so its rear gunners have a harder time hitting the Duster",
+    "Keep the Duster's health up — lining up the entry into the hold often takes more than one pass",
+    "Top off armor before boarding since the guards inside fire at close range",
+    "Use Trevor's special ability once inside for steadier aim",
+    "Stay low near Fort Zancudo to delay the fighter jets showing up",
+    "For the Four Wheel Flier gold medal, bail out over the Mesa on land rather than over water"
+   ],
+   "crew_or_companions": [
+    "Ron Jakowski",
+    "Michael De Santa",
+    "Patricia Madrazo"
+   ],
+   "vehicles_involved": [
+    "Duster (Trevor's crop duster)",
+    "Merryweather Cargo Plane (hijacked)",
+    "Mesa (optional bail-out vehicle)",
+    "P-996 Lazer fighter jets (enemy)"
+   ],
+   "unlocks_next": "Sources disagree: GTA.wiki lists it unlocking Paleto Score Setup, The Civil Border Patrol, Risk Assessment, Fucked Up, and (conditionally) The Construction Assassination; GTABase names only The Construction Assassination.",
+   "notes": "Primary source gta.fandom.com/wiki/Minor_Turbulence returned HTTP 402 on every WebFetch attempt and HTTP 403 on a direct curl (Cloudflare/Fandom bot block), so this entry is built from GTABase.com and gta.wiki (an independent, non-Fandom GTA wiki) plus corroborating web-search snippets. The mission-giver and unlocks_next fields conflict between the two secondary sources as noted above — could not confirm which is authoritative without reaching the Fandom page. | giver (raw): Ambiguous in sources: GTABase lists Trevor Philips as initiating; GTA.wiki says the mission is triggered by Franklin phoning Michael, which sets Trevor's plan in motion. | start_zone (raw): De Santa Residence, Rockford Hills (Michael's mansion) — the mission begins there before moving to the skies over Blaine County/Alamo Sea."
+  },
+  {
+   "name": "Predator",
+   "order": 43,
+   "protagonist": "Franklin Clinton (ground chase)",
+   "giver": "Trevor Philips (mission triggers as part of the Paleto heist string, per gta.wiki",
+   "start_zone": "Trevor's Trailer, Sandy Shores — action then moves to Raton Canyon forest, Blaine County.",
+   "summary": "Franklin, Michael, and Trevor run down the last O'Neil brothers fleeing through the Raton Canyon woods, with Michael sniping from Trevor's helicopter while Franklin and Chop chase on the ground.",
+   "objectives": [
+    "Go to Franklin's location as the chase begins",
+    "Chase the O'Neil brothers' truck through the forest",
+    "Get in the car to keep up the pursuit",
+    "Go to the airfield to meet Trevor and pick up the helicopter",
+    "Fly to Franklin's location in Raton Canyon",
+    "Take out two O'Neil brothers with the thermal-scope rifle as Michael",
+    "Deal with the last O'Neil brother (now firing rockets) as Franklin",
+    "Follow Chop to track the last brother through the woods",
+    "Pick up Franklin and Chop from Raton Canyon by helicopter",
+    "Fly back to the airfield in Blaine County"
+   ],
+   "fail_conditions": [
+    "The protagonist in control is killed or arrested",
+    "The O'Neil brothers get away",
+    "Chop dies or is left behind",
+    "The pursuit vehicle (Baller/Dubsta) is destroyed or gets stuck",
+    "The Frogger helicopter is destroyed or abandoned",
+    "Too much heat/attention is drawn in the forest",
+    "Michael shoots Chop, Franklin, or one of the deer instead of an O'Neil brother"
+   ],
+   "tips": [
+    "Let Franklin's ground chase play out and use the thermal scope once you switch to Michael to spot O'Neils through the trees",
+    "Don't shoot any of the wandering deer — needed for the Thin the Herd gold medal — and watch your fire near Chop and Franklin",
+    "Go for headshots where you can for the Headshots gold medal",
+    "Keep the chase vehicle from wrecking on the rough canyon terrain",
+    "Aim to wrap it up within about 9 minutes for the accuracy/time gold medal"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Trevor Philips",
+    "Chop (Franklin's dog)"
+   ],
+   "vehicles_involved": [
+    "Baller (Franklin's pursuit SUV)",
+    "Dubsta (O'Neil brothers' vehicle)",
+    "Frogger helicopter (Trevor flies, Michael shoots from)"
+   ],
+   "unlocks_next": "Exercising Demons (Franklin's side mission); also required, alongside Military Hardware, before The Paleto Score becomes available.",
+   "notes": "gta.fandom.com/wiki/Predator_(mission) returned HTTP 402 on WebFetch, so this is drawn from GTABase.com and gta.wiki, cross-checked against web-search summaries. Both secondary sources agree closely on objectives and fail conditions; the exact vehicle used by the O'Neils (Dubsta) vs. Franklin's chase vehicle (Baller) varied slightly in phrasing between the two sources and is reconciled above. | protagonist (raw): Franklin Clinton (ground chase), switching to Michael De Santa (helicopter sniper) and Trevor Philips (pilot) | giver (raw): Trevor Philips (mission triggers as part of the Paleto heist string, per gta.wiki, after Paleto Score Setup has been done)"
+  },
+  {
+   "name": "Paleto Score Setup",
+   "order": 44,
+   "protagonist": "Michael De Santa and Trevor Philips",
+   "giver": "Steve Haines (FIB agent), with Lester Crest present for the scouting",
+   "start_zone": "Trevor's meth lab at Liquor Ace, Sandy Shores — the crew then drives north to Paleto Bay.",
+   "summary": "Michael and Trevor meet FIB handler Steve Haines and Lester Crest to case a small-town bank in Paleto Bay as the next heist target, testing its alarm and the police response time before racing back to Trevor's meth lab.",
+   "objectives": [
+    "Get in the car at the meth lab in Sandy Shores",
+    "Wait for Trevor to arrive",
+    "Drive to Paleto Bay",
+    "Go to the bank",
+    "Focus on/scope out the bank",
+    "Drive to the lot next door to the bank",
+    "Shoot the bank's alarm to trigger it",
+    "Get back in the car",
+    "Watch the police response time from the nearby gas station",
+    "Race Trevor back to his office/meth lab in Sandy Shores"
+   ],
+   "fail_conditions": [
+    "Michael, Trevor, or Lester is killed or arrested",
+    "The car is destroyed or gets stuck",
+    "Lester is left behind or killed",
+    "Being spotted while scoping the bank or setting off security too early",
+    "Getting stopped at a police checkpoint on the highway during the return race"
+   ],
+   "tips": [
+    "Take the back roads through Paleto Forest and Raton Canyon on the race back rather than the Great Ocean Highway, which the cops watch",
+    "Make sure you're carrying a weapon before trying to shoot the alarm box",
+    "Losing the return race doesn't fail the mission, but reaching the lab within about 3:30 is needed for the gold medal",
+    "This setup only lets you choose the getaway/crew details later — no separate manual save point like the earlier heists"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Trevor Philips",
+    "Lester Crest",
+    "Steve Haines (FIB)",
+    "Dave Norton (mentioned)"
+   ],
+   "vehicles_involved": [
+    "Michael's Premier/sedan (drive up to Paleto Bay)",
+    "Trevor's Ruffian motorcycle (used in the race back)"
+   ],
+   "unlocks_next": "Predator and Military Hardware (both become available; the player can do either first)",
+   "notes": "gta.fandom.com/wiki/Paleto_Score_Setup returned HTTP 402 on WebFetch, so this entry relies on GTABase.com and gta.wiki plus web-search corroboration. Vehicle list (a mentioned Sovereign/Sheriff Cruiser in one source) could not be fully confirmed as mission-required versus incidental traffic — flagged as uncertain."
+  },
+  {
+   "name": "Military Hardware",
+   "order": 45,
+   "protagonist": "Michael De Santa or Trevor Philips (player's choice of who does this setup)",
+   "giver": "Lester Crest",
+   "start_zone": "Grand Senora Desert, Blaine County, on the roads leading toward Fort Zancudo.",
+   "summary": "Michael or Trevor ambushes a military convoy in the Grand Senora Desert to steal a Barracks truck loaded with the hardware needed to pull off the Paleto Bay bank job.",
+   "objectives": [
+    "Get into position in the Grand Senora Desert to intercept the convoy",
+    "Stop the convoy (a Barracks escorted by two Crusaders)",
+    "Take out the soldiers guarding it",
+    "Steal the Barracks truck",
+    "Lose any pursuing military vehicles",
+    "Drive the Barracks to the meth lab in Sandy Shores and park it behind Trevor's office",
+    "Call Lester to confirm the job's done"
+   ],
+   "fail_conditions": [
+    "The protagonist in control is killed or arrested",
+    "The Barracks is destroyed, abandoned, or gets stuck",
+    "The convoy reaches its base/Fort Zancudo before being stopped",
+    "The transport truck is lost to police/military pursuit"
+   ],
+   "tips": [
+    "Block the road ahead of the convoy, lay Sticky Bombs in front of your vehicle, and detonate them as the convoy arrives to cripple the lead Crusader instantly — needed for the Sticky Strategist gold medal",
+    "Go for headshots on the fleeing soldiers for the Head Hunter gold medal (5 headshots)",
+    "The convoy only spawns at certain in-game times heading toward Fort Zancudo, so you may need to wait around if it's not there yet",
+    "Drive carefully once you have the Barracks — it's slow and can't absorb much more damage before the mission fails"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa or Trevor Philips (whichever is chosen)",
+    "Lester Crest (phone contact)"
+   ],
+   "vehicles_involved": [
+    "Barracks (the target truck, mission-critical)",
+    "Crusader armored trucks (convoy escorts)"
+   ],
+   "unlocks_next": "The Paleto Score (once Predator is also completed)",
+   "notes": "gta.fandom.com/wiki/Military_Hardware returned HTTP 402 on WebFetch, so this entry is built from GTABase.com and gta.wiki, cross-checked with web-search summaries; both secondary sources agreed closely on objectives, fail conditions, and gold medal requirements."
+  },
+  {
+   "name": "The Paleto Score",
+   "order": 46,
+   "protagonist": "Michael De Santa, Franklin Clinton, and Trevor Philips",
+   "giver": "Lester Crest",
+   "start_zone": "Trevor's meth lab (Liquor Ace), Sandy Shores",
+   "summary": "The finale heist: Michael, Franklin, and Trevor hit the well-guarded Blaine County Savings Bank in Paleto Bay, crack the vault, then fight through police and military on the way to a getaway train.",
+   "objectives": [
+    "Get in the van at the meth lab in Sandy Shores",
+    "Drive to the pier near Paleto Bay",
+    "Park the van near the bank entrance",
+    "Go inside the bank",
+    "Go to the vault",
+    "Take out the responding cops",
+    "Take out the police helicopter that arrives",
+    "Shoot down the perimeter fence",
+    "Hold off the military response",
+    "Regroup with Michael and Trevor",
+    "Head to the chicken factory",
+    "Go to the railway platform",
+    "Get on the departing train to complete the escape"
+   ],
+   "fail_conditions": [
+    "Any protagonist is killed or arrested (wasted/busted)",
+    "The Burrito van is destroyed before reaching the bank",
+    "The crew (the gunman chosen earlier) is abandoned or killed",
+    "The heist is blown before the vault is cracked",
+    "The getaway vehicle (Dozer) is destroyed",
+    "The crew misses the train at the end"
+   ],
+   "tips": [
+    "Use Trevor's minigun to run up bullets fired toward the Let it Rain gold medal (4,000+ rounds)",
+    "Shoot up the gas station and vehicles around town for the $1,000,000-in-damage gold medal",
+    "Keep shooting accuracy above 50% and move quickly — the gold-medal time limit is about 16 minutes",
+    "The gunman picked back in Paleto Score Setup affects this heist: Norm Richards reportedly nets the biggest cut but is less reliable in a fight, while the pricier options are steadier"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Trevor Philips",
+    "Lester Crest (planning)"
+   ],
+   "vehicles_involved": [
+    "Burrito van (approach to the bank)",
+    "Dozer (Franklin's bulldozer getaway vehicle)",
+    "Police Maverick (enemy helicopter)",
+    "Freight train (final escape)",
+    "Utility truck (mentioned in one source, role unconfirmed)"
+   ],
+   "unlocks_next": "Derailed",
+   "notes": "gta.fandom.com/wiki/The_Paleto_Score returned HTTP 402 on WebFetch, so this entry relies on GTABase.com and gta.wiki plus web-search corroboration; both secondary sources agreed on the overall heist structure and fail conditions. Could not verify the exact role of the 'utility truck' mentioned only in the GTABase extract. | start_zone (raw): Trevor's meth lab (Liquor Ace), Sandy Shores, moving to the Blaine County Savings Bank in Paleto Bay for the heist itself."
+  },
+  {
+   "name": "Derailed",
+   "order": 47,
+   "protagonist": "Michael & Trevor",
+   "giver": "Trevor Philips",
+   "start_zone": "Trevor's Trailer, Sandy Shores, Blaine County",
+   "summary": "Trevor talks Michael into helping him rob a Merryweather-guarded freight train carrying a valuable ancient artifact; they board it on dirt bikes, blow open the cargo car, then escape down the river by boat.",
+   "objectives": [
+    "Ride the Sanchez out to the train tracks east of Sandy Shores",
+    "Jump the dirt bike onto the moving train",
+    "Ride along the train's roof/cars forward to reach the engine",
+    "Ride the train to the rail bridge",
+    "Place sticky bombs on the orange container's doors and detonate them",
+    "Fight off the Merryweather guards to protect Michael",
+    "Get into the Dinghy",
+    "Steer the Dinghy down the rapids and land at the beach",
+    "Head to the getaway vehicles"
+   ],
+   "fail_conditions": [],
+   "tips": [
+    "Get the Sanchez up to top speed before reaching the train for one gold-medal requirement",
+    "Try to land on the train on your very first jump attempt for the 'Better Than CJ' bonus objective",
+    "Skip cutscenes and move quickly to finish inside the ~11:30 gold-medal time"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Sanchez (dirt bike)",
+    "Freight train",
+    "Dinghy (boat)"
+   ],
+   "unlocks_next": "Monkey Business",
+   "notes": "GTA Wiki (gta.fandom.com) could not be fetched for this mission or any of the other four — every attempt returned HTTP 402 Payment Required, while a control fetch of example.com succeeded, so the block appears specific to that domain rather than a general tool outage. Used GTABase (gtabase.com) as the fallback secondary source per instructions. GTABase's summary also referenced 'The Paleto Score' as a follow-on link alongside Monkey Business; that looked like an unrelated cross-reference (it's a separate Trevor heist) rather than this mission's actual successor, so it was not reported as unlocks_next. Explicit fail conditions were not stated by the source."
+  },
+  {
+   "name": "Monkey Business",
+   "order": 48,
+   "protagonist": "Michael, Franklin & Trevor",
+   "giver": "The FIB (via Steve Haines/Dave Norton)",
+   "start_zone": "Cape Catfish, near Humane Labs and Research, Blaine County",
+   "summary": "Working with the FIB, the crew infiltrates the Humane Labs facility from underwater to steal a sample of an experimental nerve toxin, then escapes by helicopter and drops Patricia Madrazo home.",
+   "objectives": [
+    "Travel down the coastline toward Humane Labs",
+    "Find a way to gain entry to the lab",
+    "Head to the elevator",
+    "Take down the lab workers",
+    "Take cover from security guards inside the lab",
+    "Plant the nerve toxin in the refrigeration unit",
+    "Retrieve the toxin container",
+    "Fly the helicopter to the airfield",
+    "Land the helicopter",
+    "Drive Patricia Madrazo to the farmhouse"
+   ],
+   "fail_conditions": [
+    "Source's wording here was garbled/unclear (something about the mission being cancelled if you reach the mission-start location the wrong way); not confident enough in this to state as fact — see notes."
+   ],
+   "tips": [
+    "Use the stun gun to non-lethally stun 8 enemies for a bonus medal",
+    "Land 15 headshot kills during the mission",
+    "Keep shooting accuracy at 70% or above",
+    "Skip cutscenes and move briskly to finish within the ~13:30 gold-medal time"
+   ],
+   "crew_or_companions": [
+    "Steve Haines (FIB)",
+    "Dave Norton (FIB)",
+    "Patricia Madrazo"
+   ],
+   "vehicles_involved": [
+    "Dinghy (Jetsam variant)",
+    "Cargobob (helicopter)",
+    "Barracks (military truck, likely enemy reinforcement)"
+   ],
+   "unlocks_next": "Hang Ten",
+   "notes": "GTA Wiki was unreachable (HTTP 402 on every attempt); used GTABase as fallback. Source's fail-condition line was oddly phrased ('mission cancels if you reach the location prematurely — use a taxi') and not clearly explained, so it's flagged rather than asserted. Beyond the next mission, the source says this mission unlocks the Heavy Shotgun, Pistol .50 and Stun Gun, returns Michael's Tailgater, and lets Michael/Trevor re-enter Los Santos freely without an automatic wanted level."
+  },
+  {
+   "name": "Hang Ten",
+   "order": 49,
+   "protagonist": "Trevor Philips",
+   "giver": "unknown",
+   "start_zone": "Floyd's Apartment, Vespucci Beach, Los Santos",
+   "summary": "Trevor returns to Los Santos, confronts Floyd and Debra at their apartment, then takes over the Vanilla Unicorn strip club and meets Michael and Lester there to start planning the Union Depository heist.",
+   "objectives": [
+    "Deal with Floyd and Debra at their Vespucci Beach apartment",
+    "Go to the Vanilla Unicorn strip club"
+   ],
+   "fail_conditions": [],
+   "tips": [
+    "Skip all cutscenes and move quickly to hit the ~4:00 gold-medal time"
+   ],
+   "crew_or_companions": [
+    "Wade Hebert",
+    "Floyd Hebert",
+    "Debra",
+    "Lester Crest"
+   ],
+   "vehicles_involved": [
+    "Trevor's truck (used to drive to the Vanilla Unicorn)"
+   ],
+   "unlocks_next": "Surveying the Score",
+   "notes": "GTA Wiki was unreachable (HTTP 402); used GTABase as fallback. The fallback source's objective list was thin — it only gave one explicit on-screen objective ('go to the strip club') plus a narrative description of the Floyd/Debra confrontation, so the ordered list above blends narrative beats with the one confirmed objective rather than a full on-screen sequence; treat it as incomplete. Source states no explicit fail conditions. Beyond the next mission, it says this mission makes the Vanilla Unicorn a safehouse for Trevor, grants club perks for all three protagonists, and unlocks an 'Extra Commission' side mission and a paint job for Trevor's Bodhi. | protagonist corrected from \"Trevor & Michael\" (QA) | giver (raw): Self-initiated (no formal mission-giver character named by the source)"
+  },
+  {
+   "name": "Surveying the Score",
+   "order": 50,
+   "protagonist": "Michael, Franklin & Trevor",
+   "giver": "Lester Crest",
+   "start_zone": "Vanilla Unicorn, Strawberry, Los Santos",
+   "summary": "The crew scopes out the Union Depository bank on the ground and its armored security van's route by helicopter, scouting an ambush point near a downtown construction site to prep for the Big Score heist.",
+   "objectives": [
+    "Get in the car at the Vanilla Unicorn",
+    "Drive to the Union Depository bank",
+    "Scope out the bank's back entrance",
+    "Drive to the airfield",
+    "Get in the helicopter",
+    "Fly to Murrieta Heights",
+    "Search the construction site for a hidden way in",
+    "Hover near the construction entrance to scout it",
+    "Fly back to the airfield",
+    "Drop Franklin back at his house"
+   ],
+   "fail_conditions": [
+    "Not explicitly listed by the source; it only speculates that straying too far while tailing the security van, failing to find the construction entrance in time, or crashing the helicopter would plausibly end the mission — flagged as inferred, not confirmed."
+   ],
+   "tips": [
+    "Keep the helicopter at a safe altitude while following the security vans",
+    "Find the construction hole east of the building quickly (around 20 seconds) for a bonus objective",
+    "Fly under the bridge's drainage section during the chase",
+    "Avoid hitting obstacles while flying through the tunnel",
+    "Skip cutscenes and move efficiently to finish within the ~11:00 gold-medal time"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Lester Crest"
+   ],
+   "vehicles_involved": [
+    "Frogger (helicopter)",
+    "Stockade (armored security truck being surveyed)"
+   ],
+   "unlocks_next": "The Big Score",
+   "notes": "GTA Wiki was unreachable (HTTP 402); used GTABase as fallback. Fail conditions were presented by the source itself as speculation rather than confirmed fact, so they're marked as inferred above."
+  },
+  {
+   "name": "Bury the Hatchet",
+   "order": 51,
+   "protagonist": "Michael & Trevor (played separately, one after the other)",
+   "giver": "Michael De Santa (triggered by story events, not a formal mission pickup)",
+   "start_zone": "Michael's Mansion, Rockford Hills (Michael's path) / Sandy Shores Airfield (Trevor's path)",
+   "summary": "After learning the truth about what really happened to Brad in North Yankton, Michael and Trevor each separately fly out to visit his grave at Ludendorff cemetery, confronting their shared past.",
+   "objectives": [
+    "Michael's path: travel to Los Santos International Airport",
+    "Michael's path: enter the second-level terminal",
+    "Michael's path: fly to Ludendorff cemetery, North Yankton",
+    "Michael's path: walk to Brad's grave",
+    "Michael's path: return to the vehicle",
+    "Trevor's path: go to Sandy Shores Airfield",
+    "Trevor's path: steal and board a plane",
+    "Trevor's path: fly to North Yankton",
+    "Trevor's path: return to Sandy Shores Airfield"
+   ],
+   "fail_conditions": [
+    "Source only gave a generic line ('deviating from mission objectives or failing to complete assigned tasks') with no specific triggers named — treated as unconfirmed detail rather than a real fail condition."
+   ],
+   "tips": [
+    "Fly directly to North Yankton and skip cutscenes to hit the ~11:00 gold-medal time",
+    "Land 20 headshot kills using Michael's special ability during the mission",
+    "Keep shooting accuracy at 80% or above"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Cuban 800 (plane)",
+    "Unspecified sedans"
+   ],
+   "unlocks_next": "Not stated by the source",
+   "notes": "GTA Wiki was unreachable (HTTP 402 on every attempt, same as the other four missions); used GTABase as fallback. The source's fail-condition text was too generic to report as fact and is flagged rather than stated outright. No named companions accompany either protagonist on their halves of this mission per the source; Wei Cheng's Triad members appear only as antagonists/enemies encountered along the way. The source did not name the next mission, only that completing this one awards 'The Moment of Truth' achievement/trophy."
+  },
+  {
+   "name": "Pack Man",
+   "order": 52,
+   "protagonist": "Franklin Clinton (with Trevor Philips)",
+   "giver": "Devin Weston (relayed through Lamar Davis)",
+   "start_zone": "Lamar Davis's house, Strawberry, Los Santos",
+   "summary": "Devin Weston has Franklin, Trevor, and Lamar deliver a group of stolen supercars to a drop-off point near Paleto Bay, and the crew has to fend off a police ambush along the way.",
+   "objectives": [
+    "Collect the car with Lamar",
+    "Take the car to the garage / load it onto the trailer",
+    "Go to the drop-off point",
+    "Keep the truck steady for Franklin (Trevor stabilizes it)",
+    "Defend the truck from the cops",
+    "Follow the truck to the drop-off point",
+    "Meet Molly (Schultz) at the drop-off"
+   ],
+   "fail_conditions": [
+    "Wasted or Busted",
+    "Trevor, Lamar, or Molly dies",
+    "The Packer truck, trailer, or cars are destroyed",
+    "You abandon or fall too far behind the truck",
+    "Vehicle gets stuck or you lead police somewhere the mission doesn't want"
+   ],
+   "tips": [
+    "Drive alongside the Packer rather than behind it so you don't get sandwiched between it and pursuing cops",
+    "Use the JB 700's mounted weapon/spikes to take out chasing police cars",
+    "Skip cutscenes and take the eastern highway route to hit the roughly 12-minute gold time"
+   ],
+   "crew_or_companions": [
+    "Trevor Philips",
+    "Lamar Davis",
+    "Molly Schultz"
+   ],
+   "vehicles_involved": [
+    "Pegassi Monroe",
+    "MTL Packer (with trailer)",
+    "JB 700 (weaponized, used against the cops)"
+   ],
+   "unlocks_next": "Fresh Meat",
+   "notes": "gta.fandom.com itself returned an access error (HTTP 402) through the fetch tool for every attempt, so this was sourced from a fandom mirror (gta.wiki) and cross-checked with GTAbase rather than the fandom domain directly; exact on-screen prompt wording may differ slightly."
+  },
+  {
+   "name": "Fresh Meat",
+   "order": 53,
+   "protagonist": "Franklin Clinton",
+   "giver": "Lester Crest alerts Franklin that Michael has been captured (Trevor supplies context on th",
+   "start_zone": "Franklin's (Clinton) residence, Strawberry",
+   "summary": "After Michael is grabbed by Wei Cheng's Triads over a botched deal, Franklin has to track him down and pull him out of a meat-packing plant before he ends up in the machinery.",
+   "objectives": [
+    "Find Michael's location using the Trackify phone app",
+    "Rescue Michael by fighting through the Triad gunmen at the slaughterhouse",
+    "Escape the slaughterhouse with Michael",
+    "Go to Michael's house"
+   ],
+   "fail_conditions": [
+    "Wasted or Busted",
+    "Michael dies, including being killed by the meat processor if you're too slow",
+    "The Triads escape / you lose track of the objective"
+   ],
+   "tips": [
+    "Use the Trackify app to pinpoint Michael instead of relying on a map waypoint",
+    "Switch to Michael's special ability once he's freed for more accurate shooting",
+    "A shotgun clears rooms quickly for a gold-medal pace (around 3:30)",
+    "Keep character switches to 3 or fewer for the gold medal"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa (rescued)",
+    "Trevor Philips (context only, opening)"
+   ],
+   "vehicles_involved": [
+    "Coquette",
+    "Feltzer (available for the escape)"
+   ],
+   "unlocks_next": "The Ballad of Rocco",
+   "notes": "Same access issue as above: gta.fandom.com returned HTTP 402 via the fetch tool, so a fandom mirror (gta.wiki) plus GTAbase were used instead; the mirror's first response mistakenly pulled a 'Fresh Meat' business-location page before the correct mission page was retrieved, so this was double-checked against a second source before including it. | giver (raw): Lester Crest alerts Franklin that Michael has been captured (Trevor supplies context on the botched deal)"
+  },
+  {
+   "name": "The Ballad of Rocco",
+   "order": 54,
+   "protagonist": "Michael De Santa",
+   "giver": "Solomon Richards",
+   "start_zone": "Richards Majestic Productions, Backlot City, Los Santos",
+   "summary": "Solomon Richards asks Michael to deal with talent agent Rocco Pelosi and his associate Gianni after they threaten Solomon at the film studio.",
+   "objectives": [
+    "Eliminate Rocco",
+    "Leave the area"
+   ],
+   "fail_conditions": [
+    "Wasted or Busted",
+    "Rocco escapes",
+    "Solomon dies"
+   ],
+   "tips": [
+    "Use Michael's special ability to snipe Rocco while he's still in the car, then finish off Gianni as he bails out the passenger side",
+    "A homing launcher or railgun also drops the vehicle quickly",
+    "Aim for under roughly 3:00 for the gold time medal"
+   ],
+   "crew_or_companions": [
+    "Solomon Richards (mission giver)",
+    "Rocco Pelosi (target)",
+    "Gianni (target)"
+   ],
+   "vehicles_involved": [
+    "Baller (Rocco and Gianni's car)",
+    "a Baller made available if you need to give chase"
+   ],
+   "unlocks_next": "Unconfirmed — one source lists it feeding into 'Legal Trouble' (once 'Reuniting the Family' and 'Architect's Plans' are also done), another lists 'Cleaning Out the Bureau' as the follow-on. Could not confirm a single answer.",
+   "notes": "The two sources checked (a fandom mirror and GTAbase) disagreed on what mission follows this one, so the disagreement is reported rather than guessed. gta.fandom.com itself returned HTTP 402 via the fetch tool on every attempt."
+  },
+  {
+   "name": "Cleaning Out the Bureau",
+   "order": 55,
+   "protagonist": "Michael De Santa (with Franklin Clinton)",
+   "giver": "Lester Crest (the job ultimately originates from FIB agents Dave Norton and Steve Haines)",
+   "start_zone": "Darnell Bros. garment factory, La Mesa",
+   "summary": "Lester has Michael and Franklin steal a janitor's ID and uniform so they can slip into the FIB building and scope it out ahead of the planned heist.",
+   "objectives": [
+    "Get in your car",
+    "Go to the FIB Building",
+    "Wait for the janitor's car",
+    "Follow the janitor, staying roughly two car lengths back",
+    "Follow the janitor into his apartment",
+    "Get back in your car",
+    "Go to the garment factory",
+    "Go to the office"
+   ],
+   "fail_conditions": [
+    "Wasted or Busted",
+    "Lester or Franklin dies",
+    "Lester is left behind / abandoned",
+    "The janitor is killed, escapes, or is spooked (tailed too closely or honked at)",
+    "The janitor can't reach home",
+    "Your car is destroyed or gets stuck, or you leave the area",
+    "Building security is alerted"
+   ],
+   "tips": [
+    "Stay at least two car lengths back while tailing the janitor and don't lean on the horn a second time, or he'll be spooked",
+    "Zoom in on license plates while waiting, for the 'Eagle Eye' objective",
+    "Skip cutscenes to beat the roughly 9-minute gold time"
+   ],
+   "crew_or_companions": [
+    "Lester Crest",
+    "Franklin Clinton",
+    "Harvey Molina (the janitor)",
+    "Dave Norton and Steve Haines (FIB agents behind the job)"
+   ],
+   "vehicles_involved": [
+    "Michael's sedan (named as a Tailgater in one source, an Asterope in another — unconfirmed which)",
+    "Harvey Molina's car"
+   ],
+   "unlocks_next": "Architect's Plans (both setup jobs then lead into The Bureau Raid)",
+   "notes": "Sources disagree on the exact make of Michael's car for this mission (Tailgater vs Asterope); flagged rather than picked arbitrarily. gta.fandom.com returned HTTP 402 via the fetch tool, so a fandom mirror plus GTAbase were used."
+  },
+  {
+   "name": "Architect's Plans",
+   "order": 56,
+   "protagonist": "Franklin Clinton",
+   "giver": "Continues directly from Cleaning Out the Bureau — no separate NPC hands it off",
+   "start_zone": "Mile High Club construction site, Pillbox Hill, Downtown Los Santos",
+   "summary": "Franklin tails FIB architect Chip Peterson around a construction site to take the briefcase holding the building's blueprints, needed to plan the Bureau Raid.",
+   "objectives": [
+    "Get out of the car near the construction site and take the offered hard hat to blend in with workers",
+    "Tail the architect, keeping enough distance that he isn't spooked",
+    "Get the architect to give up the briefcase (a stealth knockout from behind works — killing him isn't required)",
+    "Pick up the blueprints",
+    "Leave the construction site",
+    "Go to the garment factory"
+   ],
+   "fail_conditions": [
+    "Wasted or Busted",
+    "You lose the architect or he's spooked",
+    "The blueprints are lost",
+    "Lester or Michael dies"
+   ],
+   "tips": [
+    "Approach from behind unarmed and knock the architect out with a punch to the back of the head rather than shooting him, then take his car",
+    "For the gold 'Quick Getaway' medal, clear the site within about 45 seconds — parachuting off the roof after dealing with Peterson is one route"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa (bookends the mission)",
+    "Lester Crest (bookends the mission)",
+    "Chip Peterson (the architect, target)"
+   ],
+   "vehicles_involved": [
+    "Franklin's car",
+    "the architect's car (optional takeover)",
+    "construction-site lifts/scaffolding"
+   ],
+   "unlocks_next": "The Bureau Raid (Fire Crew or Roof Entry approach, player's choice)",
+   "notes": "gta.fandom.com direct fetch failed with HTTP 402 on every attempt, so a fandom mirror and GTAbase were used instead. One fetched source additionally claimed 'Legal Trouble' and 'Fire Truck'/'Getaway Vehicle' as also unlocked, but that wasn't corroborated by the other source, so it's left out of the confirmed unlocks_next answer. | giver (raw): Continues directly from Cleaning Out the Bureau — no separate NPC hands it off, it's the Franklin-side half of the setup Lester and Michael have already put in motion"
+  },
+  {
+   "name": "Fire Truck",
+   "order": 57,
+   "protagonist": "Michael De Santa or Franklin Clinton (player choice)",
+   "giver": "Lester Crest (via text message)",
+   "start_zone": "Los Santos — wherever the protagonist is when Lester's text arrives",
+   "summary": "A heist setup mission: Lester needs an LSFD fire truck for the covert ('Fire Crew') approach to the Bureau Raid, so Michael or Franklin must acquire one and deliver it to Darnell Bros. while evading the police.",
+   "objectives": [
+    "Call 911 to summon a fire truck, or go find one at a fire station",
+    "Drive off in the fire truck (a 1-star wanted level triggers automatically)",
+    "Lose the cops",
+    "Go to the garment factory (Darnell Bros.)",
+    "Get out of the fire truck"
+   ],
+   "fail_conditions": [
+    "Character is wasted",
+    "Character is busted",
+    "The fire truck is abandoned",
+    "The fire truck is destroyed"
+   ],
+   "tips": [
+    "Call 911 rather than driving to a station — required for the 'What is your Emergency?' gold-medal objective",
+    "Keep the truck undamaged for the 'Not a Scratch' gold medal",
+    "Expect an automatic 1-star wanted level the moment you take the truck; break line of sight before heading to the factory",
+    "If playing Franklin, use his slow-time driving ability to dodge traffic and keep the truck intact"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Fire truck (LSFD engine)"
+   ],
+   "unlocks_next": "The Bureau Raid (Fire Crew approach) — once the other setup, Getaway Vehicle, is also done",
+   "notes": "gta.fandom.com returned HTTP 402 (unreachable to the fetch tool this session); content pulled from the gta.wiki mirror and cross-checked against gtabase.com, which agreed on objectives, giver, and fail state.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "The Bureau Raid",
+   "order": 58,
+   "protagonist": "Michael De Santa and Franklin Clinton (playable, switching)",
+   "giver": "Steve Haines (FIB)",
+   "start_zone": "Darnell Bros. (garment factory), then FIB Headquarters, Downtown Los Santos",
+   "summary": "The heist finale: Michael and Franklin break into FIB Headquarters to steal a containment drive, using whichever of two approaches was chosen back in 'Architect's Plans' — the covert 'Fire Crew' plan (start a fire, pose as firefighters) or the direct 'Roof' assault (helicopter in, fight out).",
+   "objectives": [
+    "Enter the FIB building and pass the security turnstile",
+    "Take the elevator up to the office floor",
+    "Pick up the mop and clean the marked floor sections (timed, for the gold medal)",
+    "Plant C4 in the locker and in the restroom",
+    "Return the mop and bucket, then leave the building",
+    "Meet Michael at Pillbox Hill",
+    "Detonate the planted explosives by phone",
+    "Drive the fire truck to the FIB building",
+    "Enter as firemen, plant door explosives, and retrieve the containment drive",
+    "Escape down through the burning building",
+    "Reach the elevator shaft and rappel down (timed)",
+    "Get to the fire truck and drive to the getaway point",
+    "Destroy the fire truck and lose the police",
+    "Reach Lester's house"
+   ],
+   "fail_conditions": [
+    "Either playable character is wasted or busted",
+    "A required crew member is abandoned",
+    "The FIB is alerted / detected too early",
+    "The fire truck is destroyed before it's needed",
+    "Explosives run out",
+    "The floor-mopping or bomb-planting time limits are exceeded",
+    "Running out of oxygen while rappelling down the shaft"
+   ],
+   "tips": [
+    "Rush the mopping objective — it's on a strict clock for gold",
+    "Keep moving while rappelling down the shaft so you don't run out of air",
+    "Pick a more skilled hired gunman/driver for a cleaner escape sequence",
+    "Skip cutscenes to stay inside the ~18-19 minute gold-medal time",
+    "Destroy the fire truck promptly once you reach the getaway point so it can't be traced"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (heist organizer)",
+    "player-selected hired gunman",
+    "player-selected driver"
+   ],
+   "vehicles_involved": [
+    "Fire truck (Fire Crew approach)",
+    "Getaway car (ambulance or van, depending on driver chosen)"
+   ],
+   "unlocks_next": "The Wrap Up (and makes 'Abandonment Issues' with Dr. Friedlander available)",
+   "notes": "gta.fandom.com returned HTTP 402 this session; used the gta.wiki mirror plus gtabase.com's 'Fire Crew' walkthrough page to cross-check — both agreed on the covert-approach objective order above. The alternate 'Roof' approach (parachute onto the FIB roof, hack the server room, fight off agents, escape by chopper) is mentioned on gta.wiki but I could not cross-check its objective order against a second source, so treat those details as less certain.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "The Wrap Up",
+   "order": 59,
+   "protagonist": "Michael De Santa (Trevor Philips assists remotely)",
+   "giver": "Dave Norton",
+   "start_zone": "Kortz Center, Pacific Bluffs",
+   "summary": "Michael meets FIB agent Dave Norton at the Kortz Center to hand over the Bureau Raid's stolen drive, but Steve Haines and a mix of FIB, IAA, and Merryweather forces ambush them; Michael has to protect Dave and shoot his way out while Trevor snipes from a distance, and Trevor comes out of it demanding Michael commit to one last heist.",
+   "objectives": [
+    "Meet Dave at the Kortz Center",
+    "Escape onto the balcony as the ambush starts",
+    "Shoot the helicopter pilot (as Trevor)",
+    "Get down to the courtyard",
+    "Defend Dave from the attacking agents/mercenaries",
+    "Go to the parking lot",
+    "Escape toward Morningwood",
+    "Lose the pursuing helicopter",
+    "Arrive in Morningwood with no wanted level"
+   ],
+   "fail_conditions": [
+    "Michael is wasted or busted",
+    "Dave Norton dies or is left behind",
+    "Michael reaches Morningwood while still carrying a wanted level"
+   ],
+   "tips": [
+    "Clear the courtyard methodically rather than rushing — Dave can go down if left exposed",
+    "Use Trevor's sniping vantage point to thin out enemies at range before Michael pushes forward",
+    "Shake or destroy the pursuing helicopter before entering Morningwood so the wanted level actually clears",
+    "Don't move toward Dave until the immediate area is clear of shooters"
+   ],
+   "crew_or_companions": [
+    "Dave Norton (must be kept alive and with you)",
+    "Trevor Philips (sniper support)"
+   ],
+   "vehicles_involved": [
+    "A getaway car taken from the parking lot",
+    "Enemy Merryweather Buzzard helicopter"
+   ],
+   "unlocks_next": "Lamar Down (contingent on 'Reuniting the Family' already being completed)",
+   "notes": "gta.fandom.com returned HTTP 402 this session; sourced from the gta.wiki mirror only — I did not get an independent second-source confirmation for this one, so treat the exact objective wording and the next-mission branching as reasonably but not fully verified."
+  },
+  {
+   "name": "Reuniting the Family",
+   "order": 60,
+   "protagonist": "Michael De Santa",
+   "giver": "Jimmy De Santa (wakes Michael at home)",
+   "start_zone": "De Santa Residence, Rockford Hills",
+   "summary": "Michael tries to patch up his estranged family by shutting down the people meddling in their lives — Amanda's tennis coach Fabien and Tracey's boyfriend Lazlow — then sits through a family therapy session with Dr. Friedlander.",
+   "objectives": [
+    "Leave the house with Jimmy",
+    "Go to the Bean Machine coffee shop and confront Fabien",
+    "Go to the tattoo parlor, deal with Lazlow, and pick up Tracey there",
+    "Go to Dr. Friedlander's office for the therapy session",
+    "Return to Michael's house"
+   ],
+   "fail_conditions": [
+    "Michael is wasted or busted",
+    "Amanda, Jimmy, or Tracey dies",
+    "The Bean Machine is destroyed",
+    "Amanda becomes frightened",
+    "Fabien or Lazlow dies",
+    "Any family member is left behind/abandoned"
+   ],
+   "tips": [
+    "Use the laptop near Fabien at the coffee shop as an improvised weapon rather than a gun",
+    "Put Lazlow through the piercing/tattoo/haircut gauntlet at the parlor instead of hurting him",
+    "Keep pace with Jimmy and Tracey while driving between stops so nobody gets left behind",
+    "Drive carefully — the mission fails if a family member riding with you dies"
+   ],
+   "crew_or_companions": [
+    "Jimmy De Santa (with Michael from the start)",
+    "Tracey De Santa (picked up at the tattoo parlor)",
+    "Amanda De Santa (met at the therapist's office)"
+   ],
+   "vehicles_involved": [
+    "Michael's personal Tailgater"
+   ],
+   "unlocks_next": "Branches to one of: Doting Dad, Legal Trouble, Lamar Down, or Exercising Demons, depending on mission order/choices",
+   "notes": "gta.fandom.com returned HTTP 402 this session; sourced from the gta.wiki mirror only, no second source cross-check done. The multiple listed 'unlocks next' options reflect this mid-game mission's branching structure per that source, not independently verified."
+  },
+  {
+   "name": "Legal Trouble",
+   "order": 61,
+   "protagonist": "Michael De Santa",
+   "giver": "Solomon Richards",
+   "start_zone": "Richards Majestic film studio (Solomon Richards' office)",
+   "summary": "Devin Weston has Molly Schultz try to steal the Meltdown film reel out from under Solomon Richards as part of an insurance-fraud scheme; Michael chases her down to Los Santos International Airport to get the reel back.",
+   "objectives": [
+    "Go to the airport and find Molly",
+    "Chase after Molly",
+    "Get into a vehicle to keep up with her",
+    "Retrieve the film reel from Molly",
+    "Lose the police (a 3-star wanted level)"
+   ],
+   "fail_conditions": [
+    "Michael is wasted or busted",
+    "Molly escapes",
+    "Molly dies before reaching the hangar",
+    "Michael strays into restricted airport airspace",
+    "The film reel is abandoned"
+   ],
+   "tips": [
+    "Grab one of the sports cars parked nearby (Carbonizzare, Rapid GT, or Surano) to keep pace with Molly's Cognoscenti Cabrio",
+    "There's a Shamal plane near the hangar entrance if you need a fast way out",
+    "Keep your speed up for the 'Floor It' gold-medal objective",
+    "Lose the cops within about 2 minutes for the 'Clean Escape' gold medal"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Yellow Carbonizzare / White Rapid GT / Black Surano (player's choice)",
+    "Molly's red Cognoscenti Cabrio",
+    "Police cruisers",
+    "Weazel News Maverick helicopter",
+    "A Shamal jet (scripted escape option)"
+   ],
+   "unlocks_next": "Meltdown (also requires The Bureau Raid completed first)",
+   "notes": "gta.fandom.com returned HTTP 402 this session; sourced from the gta.wiki mirror only, not independently cross-checked with a second source."
+  },
+  {
+   "name": "Lamar Down",
+   "order": 62,
+   "protagonist": "Franklin Clinton (assisted by Michael De Santa and Trevor Philips)",
+   "giver": "Tanisha Jackson (phone call informing Franklin that Stretch set Lamar up again)",
+   "start_zone": "Franklin's house, Vinewood Hills — then drive north to the Paleto Forest Sawmill",
+   "summary": "Tanisha tells Franklin that Stretch has set Lamar up with the Ballas again and he's being held at the Paleto Forest Sawmill, so Franklin brings in Michael and Trevor for a three-man rescue.",
+   "objectives": [
+    "Go to the sawmill (Paleto Forest Sawmill)",
+    "Get into assault position (Franklin)",
+    "Search the sawmill and find Lamar (Trevor and Franklin)",
+    "Get to Lamar",
+    "Lead Lamar to the sawmill exit while fighting off Ballas",
+    "Drive Lamar back to his house"
+   ],
+   "fail_conditions": [
+    "Franklin, Michael, or Trevor is killed or busted",
+    "Lamar is killed during the rescue",
+    "Arriving at the sawmill already carrying a wanted level",
+    "Losing Lamar during the escort/drive home"
+   ],
+   "tips": [
+    "Attack the sawmill from multiple sides with the three-man crew rather than head-on",
+    "Go for headshots — gold needs 18 headshot kills",
+    "Keep shooting accuracy at 70%+ for gold",
+    "Stay close to Lamar once found so stray Ballas fire doesn't drop him",
+    "Get at least one kill with all three characters for the 'Three Way' gold objective"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Trevor Philips",
+    "Lamar Davis (rescue target)"
+   ],
+   "vehicles_involved": [
+    "Bison",
+    "Dozer",
+    "Felon",
+    "FIB Buffalo"
+   ],
+   "unlocks_next": "Meltdown",
+   "notes": "gta.fandom.com (GTA Wiki) could not be fetched directly — the fetch tool returned HTTP 402 Payment Required on every attempt against that domain, while other domains fetched normally. Details were compiled from GTABase (secondary source) and search-engine summaries that quote GTA Wiki text, per the fallback instruction to note unreachable sources rather than invent content. | start_zone (raw): Franklin's house, Vinewood Hills — then drive north to the Paleto Forest Sawmill, Blaine County"
+  },
+  {
+   "name": "Meltdown",
+   "order": 63,
+   "protagonist": "Michael De Santa",
+   "giver": "Solomon Richards (invites Michael to the film premiere)",
+   "start_zone": "Ponsonbys clothing store",
+   "summary": "Michael takes his son Jimmy to the premiere of Solomon Richards' film 'Meltdown', but Devin Weston — avenging Molly Schultz's death — sends Merryweather mercenaries to attack the De Santa house, forcing Michael to race home and fight through the mansion to save Amanda and Tracey.",
+   "objectives": [
+    "Buy a tuxedo at Ponsonbys (skip if already owned)",
+    "Change into the tuxedo",
+    "Meet Jimmy outside",
+    "Get in the limousine",
+    "Walk the red carpet at the Oriental Theater premiere",
+    "Leave the theater and race home after Weston's threat",
+    "Fight through Merryweather agents outside the house",
+    "Take out the hostage-taker without hitting Amanda or Tracey",
+    "Clear the remaining Merryweather agents from inside the house",
+    "Go upstairs to check on the family"
+   ],
+   "fail_conditions": [
+    "Michael is killed or busted",
+    "Amanda or Tracey is killed — either shot by Michael during the rescue shot or killed by the enemy holding them",
+    "Failing to reach the house in time (implied by the drive-home urgency, exact hard-fail unconfirmed)"
+   ],
+   "tips": [
+    "Use Michael's bullet-time special ability when lining up the shot on the hostage-taker so you don't accidentally hit Amanda or Tracey",
+    "Drive at top speed on the way home — reaching top speed in a vehicle is a gold requirement",
+    "Expect Merryweather dug in both outside and inside the house on the ground floor and stairwell; use cover",
+    "Land headshots on the hostage-taker and on remaining agents for the gold medal (12 headshots total)"
+   ],
+   "crew_or_companions": [
+    "Jimmy De Santa",
+    "Solomon Richards",
+    "Amanda De Santa (rescued)",
+    "Tracey De Santa (rescued)"
+   ],
+   "vehicles_involved": [
+    "Stretch limousine (provided for the premiere)",
+    "Mesa (Merryweather vehicle)",
+    "Vacca"
+   ],
+   "unlocks_next": "Reuniting the Family",
+   "notes": "Same access issue as Lamar Down: gta.fandom.com returned HTTP 402 on every fetch attempt. Compiled from GTABase and search summaries citing GTA Wiki; the exact hard-fail trigger for 'too slow getting home' could not be confirmed from available sources. | start_zone (raw): Ponsonbys clothing store, Portola Drive/Rockford Hills (buy tuxedo) — then the Oriental Theater, Vinewood, for the premiere"
+  },
+  {
+   "name": "Planning the Big Score",
+   "order": 64,
+   "protagonist": "Michael De Santa, Franklin Clinton",
+   "giver": "Lester Crest",
+   "start_zone": "Vanilla Unicorn strip club, Strawberry, Los Santos",
+   "summary": "The crew meets Lester at the Vanilla Unicorn to lock in the plan for robbing the Union Depository, choosing between an Obvious approach (drill into the vault behind a diversion) and a Subtle approach (impersonate Gruppe 6 guards to walk the gold out), then hiring supporting crew.",
+   "objectives": [
+    "Meet the crew at the Vanilla Unicorn",
+    "Hear Lester's pitch on the Union Depository job",
+    "Choose an approach: Obvious (drill + diversion) or Subtle (Gruppe 6 disguise)",
+    "Pick two gunmen and two drivers (plus a hacker if Subtle is chosen)",
+    "Confirm the finished plan"
+   ],
+   "fail_conditions": [
+    "No combat or wasted/busted risk reported — this is a planning/menu mission; the only way to not progress is failing to pick an approach and crew"
+   ],
+   "tips": [
+    "The Obvious approach pays out roughly $6 million more per protagonist because it needs a smaller, cheaper crew, but plays out longer and messier",
+    "The Subtle approach is quieter and shorter but costs more in crew cuts plus a $300,000 police bribe",
+    "Cheaper/less experienced crew keeps more of the take for you but raises the odds of complications in the heist itself",
+    "More experienced picks (e.g. Packie McReary, Taliana Martinez, Paige Harris) reduce lost gold and mistakes at the cost of a bigger cut"
+   ],
+   "crew_or_companions": [
+    "Lester Crest",
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Trevor Philips"
+   ],
+   "vehicles_involved": [
+    "None required to drive in this mission itself — it sets up the Bravado Gauntlet (Subtle branch) or the drill rig/helicopter/train (Obvious branch) used in later missions"
+   ],
+   "unlocks_next": "Subtle approach leads to Stingers then Gauntlet; Obvious approach leads to Getaway Vehicle then Driller and Sidetracked",
+   "notes": "gta.fandom.com returned HTTP 402 on every fetch attempt and could not be read directly. Compiled from GTABase, GrandTheftWiki, and search summaries citing GTA Wiki. Since this mission list continues with Stingers and Gauntlet, the Subtle approach appears to be the branch relevant to this playthrough. | protagonist (raw): Michael De Santa, Franklin Clinton, and Trevor Philips (crew meeting; no single player character — this is a dialogue/choice mission)",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Stingers",
+   "order": 65,
+   "protagonist": "Player's choice of Michael De Santa, Franklin Clinton, or Trevor Philips",
+   "giver": "Lester Crest (via text message after choosing the Subtle approach in Planning the Big Scor",
+   "start_zone": "South Los Santos Police Station car park",
+   "summary": "Setup mission for the Subtle approach to the Union Depository job: the chosen protagonist steals an LSPD transport van holding spike strips from the South LS police station and delivers it undamaged to a hideout under the Olympic Freeway behind the strip club.",
+   "objectives": [
+    "Go to the South LS police station car park",
+    "Get into the van (climb the wall, deal with or avoid the patrolling guard)",
+    "Steal the police van",
+    "Drive the van to the hideout under the Olympic Freeway",
+    "Leave the van and walk away"
+   ],
+   "fail_conditions": [
+    "Being busted or wasted",
+    "Wrecking or losing the van instead of delivering it",
+    "Getting spotted on the wall triggers an immediate 2-star wanted level, escalating the escape"
+   ],
+   "tips": [
+    "Try to climb the wall unseen — being spotted gives an automatic 2-star wanted level the moment you get in the van",
+    "Drive carefully: hitting walls, traffic, or scenery damages the van and costs the 'Not a Scratch' gold objective",
+    "If chased, escape via the LS River route for the 'Escapee' gold time bonus (under 2:00)"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (contact only, not physically present)"
+   ],
+   "vehicles_involved": [
+    "Police Transporter / police prisoner van (Declasse)"
+   ],
+   "unlocks_next": "Gauntlet",
+   "notes": "gta.fandom.com returned HTTP 402 on every fetch attempt and could not be read directly. Compiled from GTABase and search summaries citing GTA Wiki. | giver (raw): Lester Crest (via text message after choosing the Subtle approach in Planning the Big Score)",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Gauntlet",
+   "order": 66,
+   "protagonist": "Player's choice of Michael De Santa, Franklin Clinton",
+   "giver": "Lester Crest (via text/email after Stingers, Subtle approach)",
+   "start_zone": "Three separate pickup points around Los Santos",
+   "summary": "Continuing Subtle-approach prep for the Union Depository job: the crew must each retrieve a Bravado Gauntlet muscle car, take it to Los Santos Customs for the heist's required mods, then stash it in the lockup.",
+   "objectives": [
+    "Find and get into the marked Gauntlet",
+    "Drive it to Los Santos Customs",
+    "Pay for the required vehicle modifications",
+    "Drive the modified Gauntlet to the lockup",
+    "Leave the vehicle inside the lockup"
+   ],
+   "fail_conditions": [
+    "Being busted or wasted",
+    "Taking damage to the Gauntlet before/after modding can block the no-damage gold objective and, per player reports, can force a restart of that leg",
+    "Abandoning the vehicle away from the marked delivery route"
+   ],
+   "tips": [
+    "Drive cautiously — even small scrapes before reaching Los Santos Customs can cost the 'Not a Scratch' gold medal",
+    "Spend up to $17,000 on mods for the 'Pimped Out' gold objective (Franklin's free LSC access counts toward this)",
+    "Each protagonist collects a different Gauntlet, so the three legs can be tackled in separate sessions if needed"
+   ],
+   "crew_or_companions": [
+    "Lester Crest (remote contact)"
+   ],
+   "vehicles_involved": [
+    "Bravado Gauntlet (muscle car) x3"
+   ],
+   "unlocks_next": "The Big Score (Subtle Approach)",
+   "notes": "gta.fandom.com returned HTTP 402 on every fetch attempt and could not be read directly. Compiled from GTABase and search summaries citing GTA Wiki; the exact third pickup location and the precise hard-fail trigger for vehicle damage could not be independently confirmed. | protagonist (raw): Player's choice of Michael De Santa, Franklin Clinton, or Trevor Philips (each has their own Gauntlet to fetch) | start_zone (raw): Three separate pickup points around Los Santos, including a Pillbox Hill parking structure and behind the Vangelico store in Rockford Hills",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Driller",
+   "order": 67,
+   "protagonist": "Player's choice of Michael, Franklin, or Trevor",
+   "giver": "Lester Crest (contacts by text/phone, not present in person)",
+   "start_zone": "A guarded yard/depot in East Los Santos (La Mesa)",
+   "summary": "Heist-setup mission for the Obvious Approach to The Big Score: the crew must sneak into a guarded yard and steal the industrial drilling rig (the Cutter) needed to bore into the Union Depository's vault.",
+   "objectives": [
+    "Steal the driller (the Cutter, loaded on a truck/trailer) from the guarded yard",
+    "Get the driller out of the yard",
+    "Drive the truck to the parking lot near the Union Depository"
+   ],
+   "fail_conditions": [
+    "The truck carrying the driller is destroyed",
+    "You are killed during the theft or escape",
+    "Going over the 5:00 gold-medal time limit costs the Gold Medal but does not by itself fail the mission (sources did not spell out a hard fail beyond death/vehicle loss)"
+   ],
+   "tips": [
+    "Approach and clear the yard with stealth: use a suppressed weapon or sniper rifle and take out guards one at a time before anyone spots you",
+    "Use rooftops/elevated positions to pick off guards without being seen",
+    "Knock out or kill all guards before boarding the truck so no alarm is raised",
+    "Skip cutscenes if you're going for the Gold Medal time limit",
+    "Avoid picking up a wanted level on the drive out"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Cutter (industrial drilling rig, on a trailer)",
+    "Truck/Packer hauling the Cutter"
+   ],
+   "unlocks_next": "Sidetracked (the other Obvious Approach setup mission) — once both Driller and Sidetracked are complete, The Big Score (Obvious Approach) unlocks",
+   "notes": "gta.fandom.com/wiki/Driller could not be fetched directly (WebFetch returned HTTP 402; a direct curl hit a Cloudflare bot-check page), so this entry is built from gtabase.com's Driller guide and powerpyx.com's gold-medal walkthrough, cross-checked via web search. Content should be broadly consistent with the wiki but exact on-screen wording may differ slightly.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Sidetracked",
+   "order": 68,
+   "protagonist": "Player's choice of Michael, Franklin, or Trevor",
+   "giver": "Lester Crest",
+   "start_zone": "Davis Quartz, Grand Senora Desert",
+   "summary": "The other Obvious Approach setup mission: the crew ambushes a freight train's railway workers, then uses a magnet-equipped Skylift helicopter to lift the engine and a flatbed carriage off the tracks and fly them to Trevor's airstrip for use as the Big Score's escape train.",
+   "objectives": [
+    "Incapacitate the railway workers guarding the train",
+    "Wait for the train to stop in the sidings",
+    "Pick up the freight engine with the Skylift's magnet",
+    "Fly the freight engine to Trevor's airstrip",
+    "Go back and pick up a flatbed carriage",
+    "Fly the flatbed carriage to Trevor's airstrip"
+   ],
+   "fail_conditions": [
+    "Sources did not explicitly list fail triggers; based on the mission's shape, likely fails include losing/dropping the train cargo before reaching the airstrip, crashing or losing the Skylift, or dying"
+   ],
+   "tips": [
+    "Use a sniper rifle to drop the railway workers quickly and quietly",
+    "Fly the Skylift low so it moves faster while carrying cargo",
+    "Favor suppressed weapons to avoid raising an alarm before the train stops"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Freight train (engine + flatbed carriage)",
+    "Skylift (magnet/crane helicopter)"
+   ],
+   "unlocks_next": "The Big Score (Obvious Approach) — the heist finale, once both setup missions are done",
+   "notes": "Primary source was gtabase.com's Sidetracked guide (the fandom wiki page itself was unreachable: HTTP 402 via WebFetch). Fail conditions are not explicitly confirmed by any source consulted and are flagged as inferred, not verified.",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "The Big Score",
+   "order": 69,
+   "protagonist": "Michael, Franklin, and Trevor (all three are controlled in sequence)",
+   "giver": "Lester Crest",
+   "start_zone": "unknown",
+   "summary": "The heist finale. Which version plays depends on the approach picked back in Planning the Big Score: the Obvious Approach drills into the Union Depository vault and fights out; the Subtle Approach has the crew disguise as Gruppe Sechs guards and quietly walk the gold out.",
+   "objectives": [
+    "[Obvious Approach] Get into the car",
+    "[Obvious Approach] Go to the Union Depository",
+    "[Obvious Approach] Drill through the wall into the vault",
+    "[Obvious Approach] Park the Cutter out of the way by the wall",
+    "[Obvious Approach] Place explosive charges on the vault doors",
+    "[Obvious Approach] Stand back and detonate the charges",
+    "[Obvious Approach] Defend the first gunman from the NOOSE team",
+    "[Obvious Approach] Keep defending against the NOOSE assault",
+    "[Obvious Approach] Fly the helicopter out of the city",
+    "[Obvious Approach] Escape with the second gunman",
+    "[Obvious Approach] Get into the getaway car",
+    "[Obvious Approach] Lose the cops",
+    "[Obvious Approach] Follow the getaway driver",
+    "[Obvious Approach] Drop the gold onto the train car before it passes under the bridge",
+    "[Obvious Approach] Land at the airfield (McKenzie Field Hangar)",
+    "[Subtle Approach] Get into the car",
+    "[Subtle Approach] Reach the tunnel entrance before 8:00 am",
+    "[Subtle Approach] Deploy the stinger device to disable the Securicars",
+    "[Subtle Approach] Wait for the vans to arrive",
+    "[Subtle Approach] Travel to the Union Depository",
+    "[Subtle Approach] Follow the bank manager",
+    "[Subtle Approach] Get into the Securicar",
+    "[Subtle Approach] Follow Trevor",
+    "[Subtle Approach] Control the traffic lights to keep the roads clear for the vans",
+    "[Subtle Approach] Defend the crew from Merryweather",
+    "[Subtle Approach] Follow the rest of the crew",
+    "[Subtle Approach] Go to Michael's house"
+   ],
+   "fail_conditions": [
+    "A hired crew member (driver or gunman) dies",
+    "[Obvious] Failing to hold off the NOOSE assault on the vault/rooftop",
+    "[Obvious] Not dropping the gold onto the train before it passes the bridge",
+    "[Obvious] The Buzzard helicopter crashing",
+    "[Subtle] Arriving at the tunnel after the 8:00 am deadline",
+    "[Subtle] Failing to disable the Securicars with the stinger before they reach the bank",
+    "[Subtle] Merryweather destroying the escape vehicles"
+   ],
+   "tips": [
+    "Pick experienced hired crew (e.g. an experienced pilot for the helicopter driver, an experienced getaway driver, a reliable gunman) — cheaper/inexperienced picks can crash vehicles or cost a much larger cut of the take",
+    "[Obvious] Practice good aim/headshots and keep an eye on the timer if you want the Gold Medal",
+    "[Subtle] Control the traffic lights promptly so the escort vans aren't delayed reaching the tunnel",
+    "[Subtle] Requires paying a bribe and vehicle upgrades beforehand, and a bigger, pricier crew than the Obvious approach"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa",
+    "Franklin Clinton",
+    "Trevor Philips"
+   ],
+   "vehicles_involved": [
+    "[Obvious] Cutter (drilling rig)",
+    "[Obvious] Buzzard attack helicopters",
+    "[Obvious] Escape car (Oracle/Tailgater)",
+    "[Obvious] Freight train (drop-off point)",
+    "[Obvious] NOOSE Grangers (enemy vehicles)",
+    "[Subtle] Securicars",
+    "[Subtle] Gauntlets (tuned muscle cars for the getaway)",
+    "[Subtle] Flatbed and Packer trucks",
+    "[Subtle] Police Maverick, Stockade (enemy vehicles)"
+   ],
+   "unlocks_next": "Leads into the game's final choice: one of the three possible endings — The Third Way (spare both), Something Sensible (kill Trevor), or The Time's Come (kill Michael)",
+   "notes": "gta.fandom.com/wiki/The_Big_Score could not be fetched directly (HTTP 402 via WebFetch). This entry combines gtabase.com's separate Obvious Approach and Subtle Approach guides plus web-search corroboration (gold medal criteria, financial notes). Because gtabase's pages are themselves AI-condensed summaries of the wiki, treat exact objective wording as approximate/paraphrased rather than verbatim on-screen text; the start_zone (Vanilla Unicorn) is the weakest-confirmed field here. | start_zone (raw): Vanilla Unicorn (crew reconvenes there before the job) — per secondary sources; not independently confirmed against the original wiki text",
+   "branch": "approach-dependent (see notes)"
+  },
+  {
+   "name": "Something Sensible",
+   "order": 70,
+   "protagonist": "Franklin Clinton (Michael assists partway through)",
+   "giver": "Steve Haines (FIB)",
+   "start_zone": "Franklin's house, 3671 Whispymound Drive, Vinewood Hills, Los Santos",
+   "summary": "One of GTA V's three possible endings (Ending A, non-canonical relative to later GTA Online lore): Franklin decides Trevor is too unpredictable a liability and, with Michael's help, hunts him down and kills him.",
+   "objectives": [
+    "Meet Trevor at El Burro Heights",
+    "Chase Trevor as he flees in his Bodhi pickup truck across Los Santos toward the oil fields",
+    "Corner Trevor at the Murrieta Oil Field (Michael rams Trevor's truck into a gas tanker)",
+    "Shoot the spilled fuel to kill Trevor"
+   ],
+   "fail_conditions": [
+    "Trevor escapes during the chase"
+   ],
+   "tips": [
+    "Sources did not give specific combat/driving tips for this mission beyond the scripted chase-and-ram sequence"
+   ],
+   "crew_or_companions": [
+    "Michael De Santa"
+   ],
+   "vehicles_involved": [
+    "Bodhi (Trevor's pickup truck)",
+    "Franklin's vehicle (chase car)",
+    "Michael's Premier",
+    "A gasoline tanker (environmental hazard used to kill Trevor)"
+   ],
+   "unlocks_next": "Ends Trevor's story arc — he becomes unplayable and most of his missions/properties close (the Vanilla Unicorn stays usable); the game moves into its end-credits sequence. Mutually exclusive with The Time's Come and The Third Way.",
+   "notes": "gta.fandom.com/wiki/Something_Sensible could not be fetched directly (HTTP 402 via WebFetch). Built from gtabase.com, grandtheftwiki.com, and web-search snippets referencing the GTA Wiki. Sources differed slightly on who 'gives' the mission (Devin Weston vs. FIB pressure) since both factor into the choice; this is noted rather than picking one silently. | giver corrected from \"Devin Weston presents the choice at Franklin's house, following earlier pressure from FIB agents Steve Haines and Dave Norton to eliminate Trevor\" (QA)"
+  },
+  {
+   "name": "The Time's Come",
+   "order": 71,
+   "protagonist": "Franklin Clinton",
+   "giver": "Devin Weston presents the choice at Franklin's house",
+   "start_zone": "Franklin's house, 3671 Whispymound Drive, Vinewood Hills, Los Santos",
+   "summary": "The other of GTA V's two 'betrayal' endings (Ending B, non-canonical relative to later GTA Online lore): pressured by Devin Weston over Michael's past actions, Franklin lures Michael out and kills him.",
+   "objectives": [
+    "Meet Michael at the satellite dishes off Route 68",
+    "Chase Michael to the Palmer-Taylor Power Station",
+    "Chase Michael up the scaffolding and chimney",
+    "Let Michael fall / finish him off (killing Michael)"
+   ],
+   "fail_conditions": [
+    "Michael escapes during the chase"
+   ],
+   "tips": [
+    "At the final confrontation you're given a choice to let Michael fall or try to save him, but in this ending he falls (after headbutting Franklin) regardless"
+   ],
+   "crew_or_companions": [],
+   "vehicles_involved": [
+    "Franklin's vehicle",
+    "Michael's Tailgater (used during the chase)"
+   ],
+   "unlocks_next": "Ends the game via Michael's death — he becomes unplayable and his properties/missions close, Trevor and Jimmy sever ties with Franklin (Lamar remains available); leads into the end-credits sequence. Mutually exclusive with Something Sensible and The Third Way.",
+   "notes": "gta.fandom.com/wiki/The_Time's_Come could not be fetched directly (HTTP 402 via WebFetch). Built from gtabase.com's 'Ending B' guide, grandtheftwiki.com, and web search. No explicit companion presence was found in sources beyond Franklin himself."
+  },
+  {
+   "name": "The Third Way",
+   "order": 72,
+   "protagonist": "Franklin Clinton (switches to Michael De Santa and Trevor Philips during the mission)",
+   "giver": "unknown",
+   "start_zone": "unknown",
+   "summary": "The final main-story mission (Deathwish/Ending C): instead of killing Michael or Trevor as Weston and Haines each demand, Franklin has Lester devise a plan for all three protagonists to wipe out every enemy in one night — FIB agents and Merryweather mercenaries at a foundry, then Stretch, Steve Haines, and Wei Cheng separately, before kidnapping and killing Devin Weston.",
+   "objectives": [
+    "Pick up Lamar Davis at his place",
+    "Drive to the Grand Banks Steel Inc. foundry",
+    "Enter the foundry and meet up with Michael and Trevor",
+    "Ambush the incoming FIB team inside the foundry",
+    "Help Lamar, who is pinned down outside",
+    "Fight off several waves of FIB/Merryweather attackers",
+    "Rescue Trevor from FIB suppressing fire",
+    "Regroup with Michael and Trevor at the main doors",
+    "As Michael: kill Stretch (melee kill for gold medal) and escape the Ballas",
+    "As Trevor: kill Steve Haines (headshot from a sniper rifle near the Del Perro Pier ferris wheel for gold) and lose the police",
+    "As Franklin: kill Wei Cheng/Mr. Cheng (sticky bomb for gold) and escape the Triads",
+    "Go to Devin Weston's mansion and kidnap him (fighting through his Merryweather guards)",
+    "Drive Devin to the cliffside rendezvous point",
+    "Push Devin's car off the cliff"
+   ],
+   "fail_conditions": [
+    "Michael, Franklin, or Trevor dies or gets arrested",
+    "Lamar dies during the foundry section",
+    "The wrong protagonist kills the wrong target / targets escape",
+    "Devin Weston or his car is destroyed before reaching the cliff rendezvous",
+    "Drawing excessive police/gang attention during the escape phases"
+   ],
+   "tips": [
+    "Use cover heavily during the foundry firefight — multiple waves of FIB and Merryweather attack from different angles",
+    "Prioritize freeing Lamar and then Trevor when they're pinned down before pushing forward",
+    "For the gold medal, use each protagonist's specialty on their assigned target: Michael melees Stretch, Trevor headshots Haines from range, Franklin sticky-bombs Wei Cheng",
+    "Move quickly between the three assassination sequences to keep mission time low",
+    "Approach Devin's mansion carefully — it's guarded by multiple Merryweather mercenaries",
+    "Don't let Devin's car take too much damage on the drive to the cliff, or the final scripted kill can fail"
+   ],
+   "crew_or_companions": [
+    "Lamar Davis",
+    "Lester Crest",
+    "Michael De Santa",
+    "Trevor Philips",
+    "Franklin Clinton"
+   ],
+   "vehicles_involved": [
+    "Each protagonist's personal vehicle to reach the foundry",
+    "Enemy Granger trucks and Mesa SUVs (Merryweather/FIB)",
+    "A Buzzard attack helicopter (enemy air support)",
+    "Devin Weston's Tornado (the car pushed off the cliff at the end)"
+   ],
+   "unlocks_next": "End of the main story — triggers the credits and the 'To Live and Die in Los Santos' / 'The Third Way' achievement or trophy; one source also lists a post-game mission called 'Mrs. Philips' becoming available afterward, but this could not be confirmed on the primary wiki.",
+   "notes": "The primary source, GTA Wiki (gta.fandom.com/wiki/The_Third_Way), returned an HTTP 402 Payment Required error on four separate fetch attempts and could not be read at all, so none of this entry is drawn from it. This is built from four secondary sources instead (gtabase.com, the gta.wiki mirror, grandtheftwiki.com, and powerpyx.com's gold-medal walkthrough), which disagree on several details: the exact start location (El Burro Heights/Lester's bungalow vs. Murrieta Heights vs. Franklin's house in Vinewood Hills), who technically 'gives' the mission (Lester vs. Devin Weston's choice vs. player-initiated), and — in one outlier source (powerpyx) only — which protagonist kills which target (it swaps Franklin/Michael/Trevor's assignments relative to the other three sources). Objectives, fail conditions, and target assignments above follow the 3-source majority. Treat all specifics here as moderately-confirmed secondary-source consensus, not primary-source verified. | giver (raw): Lester Crest (three of four secondary sources agree on this; one source names Devin Weston as the trigger and one names it player-initiated by Franklin — see notes) | start_zone (raw): Lester's house area, El Burro Heights (sources disagree on the exact address — see notes)"
+  }
+ ],
+ "qa": {
+  "reviewed_by": "Opus verifier 2026-09-02",
+  "corrections_applied": [
+   "order 25",
+   "Something Sensible giver",
+   "Complications protagonist",
+   "Hang Ten protagonist/crew",
+   "Dead Man Walking crew",
+   "crew hygiene",
+   "provenance->notes",
+   "branch flags",
+   "inserted Did Somebody Say Yoga? after Dead Man Walking (order unverified)"
+  ],
+  "known_gaps": [
+   "optional Lester assassinations beyond The Hotel Assassination not included"
+  ]
+ }
+}

@@ -1,0 +1,818 @@
+{
+  "domain": "random_events",
+  "items": [
+    {
+      "id": "blip_colour_semantics",
+      "category": "detection",
+      "cue": "A small coloured dot appears on the minimap that is not a mission marker, usually while driving: light blue, red, or flashing blue/red.",
+      "context": "Free-roam Story Mode only, after the early unlock gate. Blip appears when the agent gets within streaming range of the event, typically a few hundred metres — often only one or two seconds of driving at highway speed.",
+      "meaning": "That dot IS the random event. Light blue = a non-hostile person who wants something (a lift, help, a returned wallet). Red = hostile participants who will shoot. Flashing blue/red = an event where the agent can choose to help or hinder (e.g. help the victim or rob them).",
+      "suggested_action": "On seeing a non-mission dot appear: immediately drop speed to ~20-30 km/h, keep the dot inside the minimap, and route toward it while deciding. Decide in under two seconds; the decision can be refined after stopping.",
+      "avoid": "Continuing at cruise speed while reasoning about what the dot is. At 100 km/h the event is 200m behind before the first thought finishes and the participants stream out.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Blue/red dots also mark some non-event things (other blips, shops). If the dot is stationary and matches a known static blip position, it is not an event. Blip colour tells nothing about reward size.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "immediate_reaction_slow_dont_stall",
+      "category": "policy",
+      "cue": "Any sudden change in the free-roam state while driving: new blip, a ped cluster flipping to hostile, gunfire audio, a stopped vehicle with peds around it on a rural road.",
+      "context": "Applies whenever no mission is active and the agent is in a vehicle above ~40 km/h.",
+      "meaning": "Random events are streamed in around the player and stream back out when he leaves. The window between 'noticed' and 'gone' is measured in seconds of driving, not minutes.",
+      "suggested_action": "Reflex first, reasoning second: issue a slow/stop task (or drive_to a point ~30m from the blip) BEFORE classifying the event. Once stationary within ~50m, the agent has effectively unlimited time to think — nearly no random event has a timer that starts before he engages.",
+      "avoid": "Spending a full inference turn classifying the event while still travelling. Also avoid slamming to a full stop in the middle of a highway lane — pull to the shoulder or the kerb.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "If a wanted level is active, ignore events entirely and keep fleeing; engaging with cops on scene compounds the problem.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "event_despawn_and_respawn",
+      "category": "detection",
+      "cue": "The blip that just appeared drops off the minimap, or the peds around it stop being reported.",
+      "context": "After the agent has driven past an event without engaging.",
+      "meaning": "The event's peds and vehicles have streamed out. The immediate opportunity is lost. Most repeatable events (security vans, muggings, thief chases) come back at the same or another location after a couple of in-game days; unique character events (Crash Rescue, Getaway Driver, Drug Shootout, Altruist shootout, Monkey Mosaic) are one-shot per playthrough and can effectively be lost if the trigger conditions pass.",
+      "suggested_action": "Do not U-turn and grind the same block hunting a despawned generic event; resume the previous plan and treat the next blip as a fresh chance. Only backtrack immediately (within a few seconds) if the blip is still on the minimap.",
+      "avoid": "Looping the same street repeatedly trying to re-trigger a vanished event — it wastes stream time and produces no commentary payoff.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Exact despawn radius and respawn cooldown are not documented in the sources; gta.wiki mentions security vans returning every 2-3 in-game days and 'weekly cooldowns' for some events, which is the only quantitative claim found. Treat all timing numbers here as approximate.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "unlock_gate_early_story",
+      "category": "meta",
+      "cue": "Early in a fresh playthrough, no random-event blips appear anywhere despite long free-roam drives.",
+      "context": "Before the first few Franklin/Michael story missions are done.",
+      "meaning": "Random events are gated behind early story progress; they are not available from minute one. Later 'sets' of events unlock as more story missions complete, and a few have explicit story windows.",
+      "suggested_action": "If free-roam is producing zero events, check story progress and push a story mission rather than driving more laps.",
+      "avoid": "Concluding events are broken and changing wander behaviour.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Sources disagree on the exact gate: gta.wiki's article body says the first events unlock after Franklin's mission 'Complications', another passage on the same wiki says after 'Pulling Favors', and gtabase says 'most' unlock after Complications or Pulling Favors. All are early Franklin-era missions, so the practical answer is 'after the opening few missions'.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "fourteen_events_for_completion",
+      "category": "meta",
+      "cue": "Planning what free-roam activity is worth doing between missions.",
+      "context": "Story Mode 100% completion tracking.",
+      "meaning": "There are 57 random events in the original release and 60 in the Enhanced/next-gen version, but only 14 completions are required for 100% game completion. They are cheap completion points.",
+      "suggested_action": "Treat random events as the highest-value default free-roam filler: they advance completion, pay money, and are the best unscripted source of stream drama.",
+      "avoid": "Treating them as optional flavour and always driving past.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None found; both sources agree on 14.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "security_van_robbery",
+      "category": "robbery_target",
+      "cue": "A white-and-green armoured van (Securicar/security van) parked or driving, with one or two uniformed guards, often outside a store or bank; red blip.",
+      "context": "Ten locations across the map including La Puerta (Globe Oil), Little Seoul (Lucky Plucker), Paleto Bay, Vespucci Canals, and the San Chianski Mountain Range. Any protagonist. Repeatable after roughly 2-3 in-game days.",
+      "meaning": "The most reliably repeatable money event. Guards are armed and shoot back. If the agent is quick enough he can kill the guard while the cash briefcase is still in his hands; if the money is already loaded, the rear doors must be blown or shot open (assault rifle or sticky bomb).",
+      "suggested_action": "Approach fast, engage guards with combat_hated_targets_around while the briefcase carrier is still outside; otherwise blow the rear doors, collect the cash pickup by walking over it, then immediately flee_police. Payout $3,000-$8,000.",
+      "avoid": "Standing in the open trading fire with two armed guards, or starting the robbery on a busy street with a police cruiser in sight. Also avoid destroying the van with too much explosive before the cash spawns.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Attacking the van gives a wanted level — sources say 2-3 stars in Story Mode; the 3-star figure and $25,000 payouts on gta.wiki's 'Armored Trucks' page are GTA Online, not Story Mode, and must not be used.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events",
+        "https://www.gamepressure.com/gtav/security-vans-1-10/z15534"
+      ]
+    },
+    {
+      "id": "mugging_event",
+      "category": "chase",
+      "cue": "A ped shoves or attacks another ped on a sidewalk and then sprints away on foot; a victim ped is left standing/kneeling. Blip flashes.",
+      "context": "Three variants, in Chamberlain Hills, Hawick and Pillbox Hill. Repeatable.",
+      "meaning": "A street mugging. The thief is the runner; the victim is non-hostile. The agent can chase the thief down, kill or tackle him, take the wallet, then choose to return it or keep it.",
+      "suggested_action": "Chase on foot only if the thief is within ~30m and the agent is already out of a vehicle; otherwise stay in the car and cut him off — cars beat sprinting peds easily. Keeping the wallet pays $200-$2,000; returning it pays $20-$200 plus a full special-ability meter.",
+      "avoid": "Firing wildly on a crowded sidewalk — killing bystanders or being seen by police turns a free $2,000 into a wanted level. Also avoid a long on-foot chase from a standing start; the thief has a head start.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "One variant is the reverse setup where the 'victim' is the aggressor; check hostility flags before shooting rather than assuming the runner is the criminal.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "atm_robbery",
+      "category": "chase",
+      "cue": "A ped is standing at an ATM, another ped rushes them and runs off; flashing blip.",
+      "context": "Various ATM locations across San Andreas. Repeatable.",
+      "meaning": "Same shape as a mugging but anchored to an ATM. Non-hostile victim, fleeing thief.",
+      "suggested_action": "Cut off the runner with the vehicle or a short walk_to intercept, take the wallet. Keep it for $500-$2,000, or return it to the victim for a small cut plus a full special meter.",
+      "avoid": "Running the victim over while trying to intercept the thief.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Reward ranges differ slightly between sources ($500-$2,000 kept on gta.wiki); treat the exact number as approximate.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "shop_robbery",
+      "category": "chase",
+      "cue": "Standing outside Bob Mulét barber shop (Rockford Hills) or the SubUrban clothing store (Del Perro) and a blip appears; armed peds are inside about to exit.",
+      "context": "Two fixed locations. The event starts before the robbers come out.",
+      "meaning": "Armed robbers are inside a store. They exit with a money bag and flee; they are hostile and armed.",
+      "suggested_action": "Wait outside for them to emerge rather than walking into the store, then engage. Recover the bag: keep it for about $2,000, or return it to the SubUrban clerk for a 25% discount on the next purchase.",
+      "avoid": "Entering the shop mid-robbery and taking fire in a confined space. Returning the cash at Bob Mulét gives nothing, so keep it there.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Only the SubUrban return gives a documented benefit; the discount is worth less than $2,000 in almost every case.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "chase_thieves_vehicle",
+      "category": "chase",
+      "cue": "A ped snatches something and escapes on a motorcycle or in a car, not on foot; a moving blip pulls away.",
+      "context": "Four variants around Hawick, Textile City, Grapeseed and Route 68. Thieves are often Lost MC members and are hostile.",
+      "meaning": "A vehicle pursuit event. Unlike a mugging, this cannot be resolved on foot.",
+      "suggested_action": "Only take this if the agent is already in a reasonably fast vehicle. Use follow_entity/drive to close, then ram or shoot the rider. Rewards $120-$2,000 if kept, $12-$200 plus special meter if returned.",
+      "avoid": "Abandoning a car to chase a motorcycle on foot — it is unwinnable. Also avoid a long high-speed pursuit through downtown that ends in a wreck for a $200 payout.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Country variants pay far less than city variants; the Route 68/Grapeseed versions are usually not worth a long chase.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "bike_thief_bicycle",
+      "category": "chase",
+      "cue": "A ped rides off on a Scorcher bicycle while another ped shouts; on Little Bighorn Avenue (Rancho) or Bridge Street (Hawick).",
+      "context": "Two city variants. Non-hostile owner.",
+      "meaning": "Bicycle theft. The thief is slow relative to a car but fast relative to a walking player.",
+      "suggested_action": "Recover the bicycle and return it to the owner: +3 Stamina. The Little Bighorn variant additionally gives a stock tip email from Gray Nicholson worth a large investment return (reported around $100,000 if invested).",
+      "avoid": "Shooting the thief in traffic and drawing police for a stat point. Also avoid keeping the bicycle — it forfeits the reward and the bike is near-worthless.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The stock-tip payout depends on how much the agent invests and when he sells; the '$100,000' figure is a typical outcome, not a fixed reward.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "car_theft_event",
+      "category": "chase",
+      "cue": "A ped jumps into a parked car and drives off while the owner protests; on the Great Ocean Highway near Hookies (North Chumash) or at Los Santos International Airport.",
+      "context": "Two variants. Any protagonist.",
+      "meaning": "A stolen-car chase with a choice at the end: give it back or keep it. The cars involved are unique-coloured (a pink Peyote, a dark red Rocoto).",
+      "suggested_action": "Chase in whatever vehicle the agent already has, force the thief out, then decide: keeping the car gets a unique-liveried vehicle; returning it gives +5 Driving skill and, for one variant, a luxury suit emailed later.",
+      "avoid": "Wrecking the target car during the chase — a destroyed car ends the event with nothing.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Unique colours only matter if the vehicle is stored in a garage afterwards.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "sports_bike_thief",
+      "category": "chase",
+      "cue": "A ped steals a Bati sports motorcycle in Richman and rides away.",
+      "context": "Single location, Richman.",
+      "meaning": "High-speed motorcycle chase. The Bati is one of the fastest bikes in the game, so the thief outruns most traffic.",
+      "suggested_action": "Only pursue with a genuinely fast vehicle; cut corners rather than tailing. Keep the Bati, or return it for +5 Driving skill.",
+      "avoid": "Starting the chase in a slow vehicle — the thief will simply leave and the event ends.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "None noted.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "getaway_driver_mcreary",
+      "category": "crew_unlock",
+      "cue": "Two men run out of a building with bags at the corner of Strawberry Avenue and Forum Drive, Strawberry, and flag down a passing vehicle.",
+      "context": "One-time character event. Any protagonist.",
+      "meaning": "This is Patrick 'Packie' McReary's introduction. Driving them clear unlocks Packie as a permanent heist crew gunman — one of the most valuable non-money rewards in the whole event list.",
+      "suggested_action": "Stop, let them in, and drive them away; expect an immediate two-star wanted level, so plan a route away from police and lose the stars. Payout $1,000 plus Packie unlocked.",
+      "avoid": "Killing them for the $800-$2,000 they drop — that permanently loses a good heist gunman and is a bad trade. Also avoid driving them into a police cordon; failing the escape loses the unlock.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Trevor can instead take them to the Altruist Cult for $1,000, which also forfeits Packie. Not recommended.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "crash_rescue_taliana",
+      "category": "rescue_timed",
+      "cue": "A wrecked car off the Great Ocean Highway near Mount Chiliad with an injured woman lying beside it; non-hostile blip.",
+      "context": "One-time character event, available after the Jewel Store Job mission. Any protagonist.",
+      "meaning": "This is Taliana Martinez. She is dying and there is a hard timer: get her to the hospital in Sandy Shores before she bleeds out, and she becomes a permanent heist getaway driver — the best driver available cheaply.",
+      "suggested_action": "Put her in the vehicle immediately and drive_to the Sandy Shores hospital at maximum sustainable speed. Prioritise a clean, fast route over a short technical one.",
+      "avoid": "Stopping to loot, taking a detour, or writing commentary before starting the drive. This is one of the few events with a real timer running from the moment it starts, and the failure state is permanent — she dies and the crew slot is lost for the playthrough.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "If the agent is on foot with no vehicle nearby, the event is likely already lost; do not waste minutes hunting a car.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "burial_paleto",
+      "category": "rescue_combat",
+      "cue": "Two men with shovels and a woman at North Point, Paleto Bay, Blaine County; red blip.",
+      "context": "Blaine County, north of the map. Any protagonist.",
+      "meaning": "Two armed criminals are burying a woman alive. They are hostile. Saving her and driving her to her destination results in her family wiring a very large sum later.",
+      "suggested_action": "Kill both attackers (they drop up to about $600 each and fill the special meter), then drive the woman where she asks. The family payment reported is around $60,000, making this the best money-per-minute rescue in the game.",
+      "avoid": "Driving off after the kill without delivering her — the big payout requires the delivery. Trevor can sell her to the Altruist Cult for $1,000, which trades roughly $60,000 for $1,000; do not do that.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "The $60,000 figure comes from both sources but is a delayed payment and can be missed if the save/delivery is not completed.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "snatched_lost_mc",
+      "category": "rescue_combat",
+      "cue": "Lost MC bikers forcing a woman into a van on South Mo Milton Drive, Vinewood Hills; red blip.",
+      "context": "Vinewood Hills. Any protagonist.",
+      "meaning": "A kidnapping by The Lost MC. The bikers are hostile and more of them ambush along the drive after the rescue.",
+      "suggested_action": "Kill the kidnappers, put her in the car, and expect a second wave of Lost bikers on the route — keep a weapon ready and prefer speed over fighting from a stop.",
+      "avoid": "Treating the drive as safe after the first fight. There is no cash reward here, so do not spend a long firefight on it unless the stream value is worth it.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Trevor can take her to the Altruist Cult for $1,000, which is actually the only monetary reward this event offers.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "countryside_gang_fight",
+      "category": "combat",
+      "cue": "Lost MC members holding a man at gunpoint near the Alamo Sea; red blip.",
+      "context": "Alamo Sea region. Michael and Franklin.",
+      "meaning": "Hostile bikers with a hostage. After the rescue and once the man reaches his car, a second wave of Lost arrives on motorcycles.",
+      "suggested_action": "Engage with combat_hated_targets_around from cover, clear the first group, then hold position for the bike wave rather than being caught in the open. $1,000 on completion.",
+      "avoid": "Declaring the event finished after the first group dies and walking into the second wave unaware.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Reported as Michael/Franklin availability; Trevor may not get it.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "ambush_trap_flagged_down",
+      "category": "trap",
+      "cue": "A lone ped, often a woman, waves the agent down or asks for help near an alley or a quiet corner — El Burro Heights (Gang Intimidation) or La Mesa (Luring Girl into Alley).",
+      "context": "City backstreets. Peds initially read as neutral/friendly, not hostile.",
+      "meaning": "These are ambushes. Approaching flips one or more previously neutral peds to hostile at close range, often with the player unarmed or with weapon holstered.",
+      "suggested_action": "Approach these with a weapon already selected and stay near cover or the vehicle. Kill all attackers; dropped money is $200-$500 (Gang Intimidation) or a trivial $10-$50 (alley).",
+      "avoid": "Walking right up to a lone ped who beckons from a back alley with no weapon out. Do not shoot the woman in the Gang Intimidation event — that alone gives a 1-star wanted level.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "gta.wiki notes Gang Intimidation requires approaching unarmed to trigger, so the trap may need the agent weaponless to fire at all — treat 'weapon ready' as 'able to draw fast', not necessarily 'aiming'.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "abandoned_van_smoke_tree_trap",
+      "category": "trap",
+      "cue": "An apparently abandoned van with a surfer-looking ped on Smoke Tree Road in the desert.",
+      "context": "Grand Senora Desert, Smoke Tree Road. Any protagonist.",
+      "meaning": "The most dangerous random event to blunder into. The man stuns the player; the agent wakes up stripped to his underwear, weapons gone, lying on railroad tracks with a train approaching.",
+      "suggested_action": "If already stunned and the state shows the player prone near tracks: get off the tracks immediately, on any heading perpendicular to the rails, before doing anything else — then walk to the nearest road and re-arm. If not yet triggered, approach with the special ability available (Trevor can shoot the man before being stunned, yielding a stun gun).",
+      "avoid": "Investigating an isolated abandoned vehicle in the desert casually, and — after waking — spending a turn on commentary or looking for lost weapons while still on the tracks. Being hit by the train is death.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Weapons are lost in this event; assume the loadout is empty until re-verified from game state.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "abandoned_van_wind_farm",
+      "category": "trap",
+      "cue": "A parked Journey van near the wind farm with two peds inside.",
+      "context": "Ron Alternates Wind Farm area, Blaine County.",
+      "meaning": "Two rednecks in a compromising situation. Disturbing them makes them hostile and starts a shootout. There is no reward at all.",
+      "suggested_action": "Skip it, or engage only for stream comedy value. There is nothing to gain mechanically.",
+      "avoid": "Spending health, ammo and time on a zero-reward firefight in the middle of nowhere.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "It still counts toward the 14 events needed for 100%.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "border_patrol_ambush",
+      "category": "combat",
+      "cue": "A group of rednecks on motorcycles converge on the agent in the desert and open fire, apparently unprovoked; red blips clustering.",
+      "context": "Three desert locations. Any protagonist.",
+      "meaning": "An ambush event, not something the agent walks into — they come to him. Killing all attackers across the three variants totals about $699 in dropped money.",
+      "suggested_action": "Stop the vehicle, take cover behind it, and clear them with combat_hated_targets_around. Bikers are fragile but fast; fighting from a moving car is worse than fighting from cover.",
+      "avoid": "Trying to outrun bikes in a slow desert vehicle while being shot at, and forgetting to walk over the dropped cash afterwards.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Payout figures vary by source (up to ~$700 total).",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "countryside_robbery_route68",
+      "category": "robbery_target",
+      "cue": "An active shootout between park rangers/police and criminals beside Route 68 near Harmony, with briefcases on the ground.",
+      "context": "Route 68, Harmony. Any protagonist. Police are already on scene.",
+      "meaning": "A three-way choice: let the cops win and loot the criminals' briefcases (about $5,000 each), or help the criminals and collect up to $10,000 in dropped money at the cost of a 3-star wanted level.",
+      "suggested_action": "Preferred line: hang back, let the firefight resolve, then grab a briefcase and drive away. Sources note taking only one briefcase can let the money respawn on a later visit.",
+      "avoid": "Opening fire on the police for the bigger pile — a 3-star chase in open desert with no cover is a common death. Also avoid standing in the crossfire while the NPCs fight.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The 'money respawns if only one briefcase is taken' behaviour comes from a single source and is unverified.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "deal_gone_wrong_chiliad",
+      "category": "robbery_target",
+      "cue": "Bodies and a dying man with a briefcase in the Chiliad Mountain State Wilderness, off the Great Ocean Highway.",
+      "context": "Chiliad Mountain State Wilderness. Any protagonist.",
+      "meaning": "A drug deal that ended badly. The briefcase holds roughly $25,000. A short time after taking it, two Triad enforcers spawn and hunt the agent for it.",
+      "suggested_action": "Take the briefcase and leave the area immediately; when the Triads appear, either kill them (they drop up to about $1,000) or simply outrun them in a vehicle.",
+      "avoid": "Lingering at the scene on foot. Also, the money is only banked once the agent survives — do not go straight into another fight while holding it.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "One source claims the money can respawn if invested in stocks before dying; unverified.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "drug_shootout_trevor",
+      "category": "robbery_target",
+      "cue": "An armed camp/farm on Mount Chiliad north of Grapeseed with multiple hostile peds guarding it.",
+      "context": "Trevor only. One-time event, no respawn once completed.",
+      "meaning": "The single largest cash grab among the ordinary random events: kill the bandits and take a briefcase from a nearby shed, reported anywhere from about $10,000 to over $70,000.",
+      "suggested_action": "Engage from range and from cover with a rifle; there are several armed defenders. Afterwards search the shed for the briefcase — the money is not on the bodies.",
+      "avoid": "Killing everyone and leaving without entering the shed. Also avoid rushing in with a pistol at close range.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The payout range is wide across sources; treat the upper figure as best case.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "altruist_cult_deliveries",
+      "category": "faction",
+      "cue": "Playing as Trevor with a rescued or picked-up passenger in the vehicle, and a compound marker in the Chiliad Mountain State Wilderness.",
+      "context": "Trevor only. Applies to the passengers from Burial, Domestic, both Drunk Driver events, Escape Paparazzi, Getaway Driver, three Hitch Lifts (Ursula, the girl hitchhiker, the runaway bride) and Snatched.",
+      "meaning": "Trevor can drive these people to the Altruist Cult camp instead of their destination for $1,000 each (the drunk couple counts as two, so $2,000). Doing so cancels the event's normal reward.",
+      "suggested_action": "Only deliver passengers whose normal reward is worthless: Snatched (no cash reward) and the low-value lift/domestic drops. Deliver four total to trigger the payoff event below.",
+      "avoid": "Selling the Burial woman (forfeits ~$60,000), the Getaway Driver robbers (forfeits Packie as a heist gunman), or Ursula (forfeits a recurring companion) for $1,000.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Cult members are not hostile to Trevor during normal deliveries and do not chase outside their camp.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://gta.wiki/wiki/Altruist_Cult"
+      ]
+    },
+    {
+      "id": "altruist_cult_shootout",
+      "category": "combat",
+      "cue": "Delivering a fourth victim as Trevor: cult members take him at gunpoint inside the camp instead of paying.",
+      "context": "Chiliad Mountain State Wilderness compound. Trevor only, one-time.",
+      "meaning": "A large scripted-feeling firefight against the whole cult. Four briefcases of $25,000 each ($100,000 total) are in the camp, plus weapons and armour pickups.",
+      "suggested_action": "Go in with full armour and a rifle before making the fourth delivery. Fight from cover, clear the camp, then sweep it for all four briefcases and the weapon/armour pickups before leaving.",
+      "avoid": "Making the fourth delivery unprepared, and leaving after the fight without collecting all four briefcases — this is the biggest single random-event payout in the game.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "After this the cult is effectively wiped out and the deliveries stop; the event does not repeat.",
+      "sources": [
+        "https://gta.wiki/wiki/Altruist_Cult",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "hitch_lift_events",
+      "category": "transport",
+      "cue": "A ped standing at the roadside with a thumb out; blue blip. Locations: Ineseno Road (Banham Canyon), North Calafia Way (Mount Chiliad), East Joshua Road, Route 68 (Great Chaparral).",
+      "context": "Four variants, mostly rural highways. Non-hostile, though two variants have pursuing men (a boyfriend, a groom) who turn hostile.",
+      "meaning": "Passenger delivery events. Rewards vary: +5 Driving skill, $100 plus a stock tip, and one variant unlocks Ursula as a recurring booty-call contact.",
+      "suggested_action": "Stop, let them in, drive to the marked destination without wrecking. One variant (Timm) is timed at roughly two real minutes, so drive it directly.",
+      "avoid": "Reckless driving with a passenger aboard, and getting out mid-delivery. Do not shoot the pursuing boyfriend/groom peds unless they actually turn hostile.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Which specific variant is timed and how long it allows differs slightly by source; assume any passenger delivery may be timed and drive accordingly.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "drunk_driver_events",
+      "category": "transport",
+      "cue": "An obviously drunk ped staggering near a parked car on Aguja Street (La Puerta) or Armadillo Avenue (Sandy Shores), asking for a ride; blue blip.",
+      "context": "Two variants — a lone drunk and a drunk couple. Non-hostile.",
+      "meaning": "Drive them home (Alta Place in Hawick, or the Motor Motel). The cash reward is small ($40-$80) but the agent gets to keep the vehicle involved (a Baller or an Emperor).",
+      "suggested_action": "Take it when already nearby and short on transport — the free vehicle is the real reward. As Trevor, these are prime Altruist Cult candidates ($1,000, or $2,000 for the couple).",
+      "avoid": "Detouring across the map for an $80 payout.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "None noted.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "prisoner_lift_two_variants",
+      "category": "trap",
+      "cue": "A ped in an orange prison jumpsuit at the roadside near Bolingbroke Penitentiary in the Grand Senora Desert; one variant north of the prison, one south.",
+      "context": "Michael and Franklin. Two distinct variants that look identical at a glance.",
+      "meaning": "The two variants have opposite outcomes. In one, the escapee is a genuine passenger and the agent must drive him clear while police pursue (+3 Driving skill). In the other it is an ambush — the prisoner attacks and tries to steal the agent's vehicle, with no reward.",
+      "suggested_action": "Approach either variant with the expectation of a fight; do not exit the vehicle. If the ped turns hostile, kill him and drive on; if he gets in, expect police and drive to lose them.",
+      "avoid": "Assuming a jumpsuit ped by the prison is safe because the last one was. Also avoid getting out of the car — that is how the vehicle gets stolen.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Reported as Michael/Franklin only; Trevor may not see these.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "arrests_choice",
+      "category": "choice",
+      "cue": "Park rangers or police chasing a fleeing criminal on foot in a rural area; flashing blip.",
+      "context": "Two locations. Any protagonist.",
+      "meaning": "An explicit take-a-side event. Helping the police (shooting the criminal in the leg) pays nothing. Helping the criminal (killing the officer) pays $250 and gives a 2-star wanted level.",
+      "suggested_action": "Default to helping the police: it completes the event, counts toward the 14, and costs nothing. Take the criminal's side only if a chase is wanted for the stream and the agent is equipped to survive 2 stars.",
+      "avoid": "Killing a cop for $250 while low on health or armour, or near a police station.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Whether a non-lethal leg shot is reliably achievable through the harness's high-level combat task is uncertain; a lethal shot on the criminal likely still resolves it but may anger the police.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "domestic_golf_club",
+      "category": "transport",
+      "cue": "A man on Didion Drive, Vinewood Hills, arguing at a house; he asks for a lift once he fetches his golf club.",
+      "context": "Vinewood Hills. Non-hostile.",
+      "meaning": "A short, safe delivery to the Los Santos Golf Club. Pays $80 and unlocks Castro Lagano as a hard golf opponent.",
+      "suggested_action": "Wait at the kerb for him to return with the club before driving off, then deliver.",
+      "avoid": "Driving off during the wait — the event fails. Trevor selling him to the Altruists for $1,000 is a fine trade here since the normal reward is negligible, but it loses the golf partner.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Low priority overall; skip if anything else is happening.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "escape_paparazzi",
+      "category": "transport",
+      "cue": "A celebrity ped on Vinewood Boulevard being chased by photographers, asking for help; blue blip.",
+      "context": "Downtown Vinewood. Paparazzi are non-hostile unless attacked.",
+      "meaning": "A pure driving event: get her in a car, lose the paparazzi, then drive her home. Pays $750.",
+      "suggested_action": "Use speed and cornering to break line of sight rather than combat. Complete the drop-off.",
+      "avoid": "Shooting or ramming the paparazzi — using violence makes the celebrity refuse to continue and forfeits the reward. This is a case where the aggressive default is wrong.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Trevor can divert her to the Altruist Cult for $1,000, which slightly beats the $750.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "simeon_yetarian_window",
+      "category": "combat",
+      "cue": "Armed goons outside Premium Deluxe Motorsport (Adam's Apple Boulevard and Power Street, Strawberry).",
+      "context": "Michael and Franklin, and only during the story window between the missions Friend Request and The Jewel Store Job.",
+      "meaning": "A time-limited event: Simeon's armed men are hostile and must be killed. Simeon himself can optionally be killed with no story consequence at this point.",
+      "suggested_action": "If the playthrough is inside that mission window and the agent passes the dealership, take it — the window closes permanently once The Jewel Store Job is done.",
+      "avoid": "Deferring it to 'later'. Unlike most events, this one expires with story progress rather than distance.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "No cash reward; value is completion credit and stream content.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "stag_do_running_man",
+      "category": "rescue_timed",
+      "cue": "A man tied to a signpost or stranded at the roadside on Route 68, Great Chaparral.",
+      "context": "Any protagonist. Multi-stage with a hard global timer.",
+      "meaning": "A three-leg chain: free him, take him home, then to Hookies bar, then to his wedding in Paleto Bay — all within about five in-game hours, roughly ten real minutes. Completing it in time awards a white Super Diamond.",
+      "suggested_action": "Commit only if the agent has a fast vehicle and no competing objective; the route is long (Route 68 to the coast to Paleto Bay). Drive each leg directly.",
+      "avoid": "Starting this and then getting distracted by another event mid-chain — the timer runs across all legs and there is no partial reward.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Exact time budget is reported as ~10 real minutes by one source; treat it as tight rather than exact.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "construction_accident",
+      "category": "rescue_timed",
+      "cue": "A utility truck pinned by fallen pipes at a Little Seoul construction site with a trapped worker; a Dozer is parked nearby.",
+      "context": "Little Seoul. Non-hostile, but on a timer — the trapped vehicle explodes.",
+      "meaning": "A puzzle-shaped event: the agent must get into the Dozer and push the pipes clear before the truck blows up. Reward +2 Driving skill.",
+      "suggested_action": "Immediately enter the Dozer (not any other vehicle) and push the obstruction away. This is one of the few events requiring a specific vehicle already on scene.",
+      "avoid": "Trying to shoot or ram the pipes with a car, or spending the timer walking around the site.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Exact fuse length not documented.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "rogue_altruists_rescue",
+      "category": "rescue_combat",
+      "cue": "An Altruist Cult member (ragged, rural) attacking a young woman in the Grand Senora Desert; red blip.",
+      "context": "Grand Senora Desert. Michael and Franklin.",
+      "meaning": "Kill the cultist, then drive the woman home. Small reward ($80).",
+      "suggested_action": "Take it opportunistically when passing; it is one kill plus a short drive.",
+      "avoid": "Crossing the map for it.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Not related to the Trevor Altruist delivery chain.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "duel_desert_ambush",
+      "category": "trap",
+      "cue": "An unattended, tempting car parked on Route 68 in the Grand Senora Desert near the gas station west of Los Santos Customs.",
+      "context": "Enhanced/next-gen editions only, after the early unlock. Any protagonist.",
+      "meaning": "Taking the car triggers an ambush by a redneck gang in two Phantoms and three Rancher XLs — a rolling five-vehicle fight. Surviving or killing them all causes two Duke O'Death armoured cars to spawn permanently at El Burro Heights and in the Grand Senora Desert.",
+      "suggested_action": "Only take the bait with health, armour and a decent weapon; the reward (a bulletproof car available thereafter) is genuinely good. Fight from cover or outrun them, then go collect a Duke O'Death.",
+      "avoid": "Grabbing a lone desert car at low health assuming it is free transport, and forgetting to go pick up the Duke O'Death afterwards.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Does not exist in the original last-gen release; if the game build is the older one, this event will never appear.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "sea_plane_cave",
+      "category": "combat",
+      "cue": "A coastal cave near the wind farm with armed gangsters, speedboats, and a Dodo seaplane inside.",
+      "context": "Enhanced/next-gen editions only.",
+      "meaning": "Clear the hostiles and escape to complete it; two more Dodo seaplanes then spawn permanently elsewhere on the map.",
+      "suggested_action": "Approach by water or land with a rifle; fight the guards, then leave the area to register completion.",
+      "avoid": "Assuming the plane itself is the objective — completion comes from clearing and escaping.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Enhanced Edition only.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "monkey_mosaic_artist",
+      "category": "non_combat",
+      "cue": "A street artist in a monkey mask painting a mural in Burton; non-hostile blip.",
+      "context": "Enhanced/next-gen editions only. Tied to the Monkey Mosaics collectibles.",
+      "meaning": "A completely non-violent event: startle/approach the artist to complete it, which unlocks the Go Go Monkey Blista in every garage.",
+      "suggested_action": "Walk up to him — no weapons needed.",
+      "avoid": "Shooting him. The reward is a free unique vehicle for a zero-risk interaction.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Sources describe the trigger loosely ('spook him'); the exact interaction and whether all Monkey Mosaic collectibles must be found first is unverified.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "bus_tour_skip",
+      "category": "non_combat",
+      "cue": "A Vinewood tour bus in Downtown Vinewood, daytime only; blue blip.",
+      "context": "Daytime only — the only random event with a time-of-day restriction found in the sources.",
+      "meaning": "the agent pays $40 to ride a slow scripted sightseeing loop. There is no gameplay reward.",
+      "suggested_action": "Skip it in almost all cases. It is negative money and many minutes of nothing.",
+      "avoid": "Boarding it 'for completion' during a live stream — the loop must be ridden to the end and cannot be usefully interrupted.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "It does count toward the 14 events, so it is a legitimate last resort if 13 are done and nothing else is spawning.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "loot_the_bodies",
+      "category": "policy",
+      "cue": "A random-event firefight ends; hostile peds are down and the objective blip clears.",
+      "context": "Any combat random event (border patrol, gang fight, deal gone wrong, muggings, countryside robbery).",
+      "meaning": "Most of the money in combat events is dropped cash and briefcases on the ground, not an automatic payout. Amounts range from tens of dollars up to $5,000 per briefcase.",
+      "suggested_action": "Before leaving, walk over each downed hostile's position and any briefcase location to pick the money up. Budget about ten seconds for this.",
+      "avoid": "Driving off the moment the shooting stops. Also avoid a long loot sweep while a wanted level is active — cash is worthless if the agent is busted.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "A few events (Drug Shootout) hide the cash in a container nearby rather than on the bodies.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "wanted_level_events_ranked",
+      "category": "risk",
+      "cue": "Deciding whether to engage an event while already low on health/armour or near police.",
+      "context": "Story Mode wanted system.",
+      "meaning": "Known wanted-level costs by event: Security Van robbery = 2-3 stars; Getaway Driver (helping) = 2 stars; Arrests (killing the officer) = 2 stars; Countryside Robbery (siding with the criminals) = 3 stars; Gang Intimidation (shooting the woman) = 1 star.",
+      "suggested_action": "Only start a wanted-generating event with a serviceable escape vehicle nearby and a plan to break line of sight. Otherwise pick the non-wanted branch of the event.",
+      "avoid": "Chaining two wanted-generating events, or starting one while a wanted level is already active.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Any event can produce a wanted level incidentally if a bystander or police witness is killed, regardless of the branch chosen.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gamepressure.com/gtav/security-vans-1-10/z15534"
+      ]
+    },
+    {
+      "id": "event_priority_ranking",
+      "category": "policy",
+      "cue": "Two events, or an event and an existing plan, competing for attention.",
+      "context": "Free-roam decision-making, no mission active.",
+      "meaning": "Not all events are worth the same. Rough tiers — Tier 1 (always take): Crash Rescue (Taliana, timed, permanent crew), Getaway Driver (Packie, permanent crew), Burial (~$60k), Altruist shootout ($100k), Drug Shootout (up to ~$70k), Deal Gone Wrong (~$25k). Tier 2 (take when convenient): Security Vans ($3-8k, repeatable), Countryside Robbery ($5k/case), muggings and thief chases, Duel. Tier 3 (skip unless idle): Bus Tour, Domestic, Drunk Driver, Rogue Altruists, Wind Farm van.",
+      "suggested_action": "When a Tier 1 event appears, abandon the current free-roam plan for it. When a Tier 3 appears, keep driving unless nothing else is happening.",
+      "avoid": "Treating every blip as equally urgent and burning the stream on $80 deliveries, or ignoring a one-time crew-unlock event because a $3,000 van was closer.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Stream value can override money value — a chaotic Tier 2 shootout may be better content than a quiet Tier 1 delivery. This ranking is a synthesis of the source reward data, not a documented in-game ordering.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events",
+        "https://gta.wiki/wiki/Altruist_Cult"
+      ]
+    },
+    {
+      "id": "passenger_events_drive_clean",
+      "category": "transport",
+      "cue": "An NPC is riding in the agent's vehicle as part of an event (hitchhiker, drunk, rescued victim, escaping robbers).",
+      "context": "All delivery/transport random events.",
+      "meaning": "The event stays alive only while the passenger is in the car and the car is intact. Wrecking the vehicle, getting out, or drifting far off-route puts the completion at risk, and for timed variants a slow route is an outright failure.",
+      "suggested_action": "Once a passenger is aboard, switch to a conservative driving profile: fewer collisions, no sightseeing, direct route to the marked destination, and do not exit the vehicle en route.",
+      "avoid": "Fighting other hostiles from the driver's seat mid-delivery unless attacked, and stopping to investigate a second blip while carrying a passenger.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "The exact fail conditions (does the passenger bail after N collisions?) are not documented in the sources; the timed cases (Crash Rescue, Stag Do, the Timm hitch lift) are the only confirmed hard failures.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "hostility_flag_is_the_ground_truth",
+      "category": "detection",
+      "cue": "Nearby-ped list shows a cluster where one or more peds are flagged hostile, but no blip has been reported.",
+      "context": "Harness receives ped hostility flags plus positions; the blip may not always be exposed to the bridge.",
+      "meaning": "A sudden cluster of hostile-flagged peds in free roam, away from a mission, is almost always a random event (ambush, gang fight, robbery in progress) rather than ambient traffic. Ambient peds are neutral by default.",
+      "suggested_action": "Treat 2+ hostile peds appearing within ~60m in free roam as an event: stop, take cover, identify, then engage or leave. Do not wait for a blip to confirm it.",
+      "avoid": "Ignoring hostility flags because no objective blip was published — several events (ambushes, Border Patrol) come to the agent and may be noticed by flags first.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Gang territory peds (Ballas, Vagos, Lost) can be hostile without an event being active; that is ambient gang behaviour, not a random event, and carries no reward.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "events_and_active_missions",
+      "category": "meta",
+      "cue": "A blip or hostile cluster appears while a story mission or cutscene flag is active.",
+      "context": "Mission state exposed to the harness.",
+      "meaning": "Random events belong to free roam. Anything appearing during an active mission is far more likely to be mission content than a random event, and diverting will fail the mission.",
+      "suggested_action": "While mission_active or cutscene flags are set, ignore non-mission blips entirely and stay on the mission objective.",
+      "avoid": "Breaking off a story mission to chase a side blip.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "Whether the game hard-blocks random-event spawning during missions is not confirmed by the sources consulted; this is a safe operating rule rather than a verified mechanic.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "forcing_events_to_spawn",
+      "category": "meta",
+      "cue": "A long stretch of free roam produces no events at all despite the unlock gate being passed.",
+      "context": "Between story missions, during a long unattended run.",
+      "meaning": "Events that fail to spawn naturally can be prompted by changing game state: completing a story mission, engaging in an activity/hobby, letting in-game hours pass, or reloading a save.",
+      "suggested_action": "If ~15 minutes of varied driving produces nothing, switch activity — do a mission, a hobby, or move to a different region — rather than continuing identical wander_drive laps.",
+      "avoid": "Driving the same loop hoping for a spawn.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Reloading a save is not appropriate for a live continuous stream; prefer the mission/hobby/time-passing options.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "return_vs_keep_choice",
+      "category": "choice",
+      "cue": "After recovering a stolen wallet, bag, bicycle, or car from a thief, the game offers a return-or-keep decision (flashing blue/red event).",
+      "context": "Muggings, ATM robberies, shop robberies, bike/car thefts.",
+      "meaning": "Keeping pays cash (roughly $200-$2,000 depending on the event). Returning pays a token amount plus a full special-ability meter, and in specific cases something better: a stock tip (Little Bighorn bike thief), a luxury suit (airport car theft), +3 Stamina or +5 Driving, or a 25% SubUrban discount.",
+      "suggested_action": "Default to keeping the money for generic muggings/ATM thefts; return the item in the four named cases where the return reward is clearly better (bike thief stock tip, car theft suit/skill, SubUrban discount).",
+      "avoid": "Returning wallets reflexively for the special meter when the agent's special ability is not going to be used, or keeping the bicycle whose return unlocks the stock tip.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Skill and stat gains compound over a long playthrough; if the agent's Driving or Stamina stat is low, the skill rewards may beat a one-off $500.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "bar_brawl_road_rage_unverified",
+      "category": "meta",
+      "cue": "Looking for 'bar brawl', 'road rage', or 'hostage' style events by name.",
+      "context": "Cataloguing the event list.",
+      "meaning": "No distinct 'bar brawl' or 'road rage' random event exists in the documented GTA V Story Mode list. The nearest real equivalents are the ambush events (Gang Intimidation, Luring Girl into Alley, Abandoned Vehicle, Border Patrol) and the kidnap/hostage events (Snatched, Burial, Rogue Altruists, Countryside Gang Fight). Aggressive drivers and bar-area ped fights are ambient AI behaviour, not scored random events.",
+      "suggested_action": "Do not narrate ambient ped scuffles or aggressive drivers as 'random events'; they carry no reward and no completion credit.",
+      "avoid": "Claiming completion credit or a reward for ambient brawls, and confusing GTA Online freemode events (which do include different content) with Story Mode.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Absence of evidence: the two sources consulted enumerate 57/60 events and none matches those names, but neither claims the list is exhaustive of unnamed ambient behaviours.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/random-events"
+      ]
+    },
+    {
+      "id": "online_only_content_exclusion",
+      "category": "meta",
+      "cue": "Reference material describing armoured trucks paying $25,000, RP rewards, freemode events, or ranks.",
+      "context": "Distinguishing Story Mode from GTA Online.",
+      "meaning": "GTA Online armoured trucks pay about $25,000, apply an immediate 3-star wanted level, and are gated behind a player rank. Story Mode security vans pay $3,000-$8,000 with a 2-3 star wanted level. Mixing these up produces wrong expectations and wrong commentary.",
+      "suggested_action": "Treat any payout figure attached to RP, ranks, or freemode as Online-only and discard it. Use the Story Mode figures.",
+      "avoid": "Quoting Online payouts on stream, or expecting Online-only random events (which do not exist in Story Mode) to appear.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None — Story Mode and Online random event tables are separate content.",
+      "sources": [
+        "https://gta.wiki/wiki/Armored_Trucks",
+        "https://www.gamepressure.com/gtav/security-vans-1-10/z15534"
+      ]
+    }
+  ],
+  "notes": "VERIFICATION STATUS\n\nVerified against two or more sources (high confidence): blip colour semantics (blue = non-hostile/needs help, red = hostile, flashing blue/red = help-or-hinder choice) — gta.wiki and gtabase agree; 14 random events required for 100% completion — both agree; 57 events in the original release plus 3 added in the PS4/Xbox One/PC (Enhanced) version = 60 — both agree; security van payout $3,000-$8,000 across 10 locations and a 2-3 star wanted level after taking the cash — gta.wiki, gtabase and gamepressure agree; Altruist Cult mechanics ($1,000/victim, four victims trigger the camp shootout, four briefcases at $25,000 each = $100,000) — gta.wiki article and gta.wiki Altruist Cult page agree.\n\nCOULD NOT VERIFY\n- Despawn radius and timing. No source states how far the agent must travel, or how long, before an event's peds stream out and the blip clears. The \"slow down immediately, decide after\" policy is a safe operating rule derived from the fact that events spawn near the player and are missable, not a documented number. Item event_despawn_and_respawn is marked low confidence for this reason.\n- Respawn cooldowns. gta.wiki mentions security vans returning every 2-3 in-game days and \"weekly cooldowns\" for some events; gtabase only says security vans and muggings \"respawn multiple times\". No authoritative table exists.\n- Whether random events are hard-blocked from spawning during active story missions. Not addressed by any source consulted; events_and_active_missions is marked low confidence and framed as an operating rule.\n- Passenger-delivery fail conditions other than the explicit timers. Only Crash Rescue (victim dies if slow), Stag Do (~5 in-game hours / ~10 real minutes) and one Hitch Lift (Timm, ~2 in-game hours / ~2 real minutes) have documented timers. Whether a passenger bails after collisions is undocumented.\n- Monkey Mosaic trigger detail (\"spook him\") and whether the collectible mosaics must be found first — described loosely by both sources; marked low confidence.\n- Whether the harness's high-level combat task can perform the non-lethal leg shot the Arrests event's police-siding branch describes.\n\nSOURCE DISAGREEMENTS\n- Unlock gate: the gta.wiki article body says the first events unlock after Franklin's mission \"Complications\"; another passage on the same wiki says after \"Pulling Favors\"; gtabase says \"most\" unlock after Complications OR Pulling Favors. All are early-game Franklin-era missions, so the practical statement is \"after the opening handful of missions\". Confidence set to medium.\n- Reward ranges vary between the gtabase table and the gta.wiki article body for several minor events (mugging, ATM, chase-thieves country variants, Border Patrol totalling \"$699\" vs \"up to $700\"). Where they differ I used the wider range and flagged the number as approximate.\n- Burial's $60,000 family payment and the bike thief's ~$100,000 stock outcome are both delayed/conditional rewards rather than fixed payouts; the stock figure in particular depends on how much is invested and when it is sold.\n\nDELIBERATELY EXCLUDED\n- All GTA Online content. gta.wiki's \"Armored Trucks\" page describes Online only ($25,000 payout, immediate 3-star, rank 19 gate, San Andreas Mercenaries update) and is cited only in the item that warns against confusing it with Story Mode.\n- \"Bar brawl\" and \"road rage\" as named event types: no such events appear in either source's enumeration of the 57/60 Story Mode events. Covered explicitly in bar_brawl_road_rage_unverified rather than invented.\n- gta.fandom.com was not used (returns HTTP 402 to this fetcher). gta.wiki is a mirror of the same wiki content, so gta.wiki and gtabase are only partly independent for wiki-derived facts; gamepressure was used as a third, independent check on the security van numbers. IGN could not be fetched (blocked), and the WebSearch budget was exhausted before a fourth source could be brought in."
+}

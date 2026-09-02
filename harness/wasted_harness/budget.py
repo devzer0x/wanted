@@ -11,7 +11,9 @@ from __future__ import annotations
 import time
 from collections.abc import Callable
 from dataclasses import dataclass, field
+from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any
 
 import yaml
 
@@ -133,10 +135,21 @@ class BudgetGovernor:
     hourly_cap_usd: float
     on_change: Callable[[int, int, str], None] | None = None
     clock: Callable[[], float] = time.monotonic
+    #: Wall clock, used ONLY for the UTC-day rollover and for persisting the
+    #: rolling window across a restart — never for the window arithmetic
+    #: itself. This box's wall clock is a headless server's and is known to
+    #: drift; a jump must not empty (or extend) the window the cap is enforced
+    #: on, which is why `_spend` stays on the monotonic clock.
+    wall_clock: Callable[[], float] = time.time
     _spend: list[tuple[float, float]] = field(default_factory=list)  # (ts, usd)
     _level: int = 0
     _total_usd: float = 0.0
     _started_at: float | None = None
+    #: UTC date the day ledger belongs to. `cost_today_usd` is published from
+    #: it, so "today" has to mean today: without a rollover a 40-hour run
+    #: reported 40 hours of spend under a field named `today`.
+    _day: str = ""
+    _day_usd: float = 0.0
 
     def __post_init__(self) -> None:
         if self.hourly_cap_usd <= 0:
@@ -145,12 +158,61 @@ class BudgetGovernor:
                 f"Set WASTED_HOURLY_CAP_USD."
             )
         self._started_at = self.clock()
+        self._day = self._utc_date()
+
+    def _utc_date(self) -> str:
+        return datetime.fromtimestamp(self.wall_clock(), UTC).strftime("%Y-%m-%d")
+
+    def _roll_day(self) -> None:
+        today = self._utc_date()
+        if today != self._day:
+            log.info(
+                "budget day rolled over",
+                extra={"kv": {"from": self._day, "to": today, "spent_usd": round(self._day_usd, 4)}},
+            )
+            self._day, self._day_usd = today, 0.0
 
     def record(self, usd: float) -> int:
         now = self.clock()
         self._spend.append((now, usd))
         self._total_usd += usd
+        self._roll_day()
+        self._day_usd += usd
         return self._recompute("hourly_cap")
+
+    def seed(self, state: dict[str, Any]) -> None:
+        """Adopt the previous process's day ledger and rolling-hour window.
+
+        Called once at startup from the on-disk totals, BEFORE `on_change` is
+        wired, so adopting an already-throttled state does not announce a level
+        change that never happened in this process. Without this a restart
+        resets the window the hourly cap is enforced on, and a restart loop
+        (which is the normal shape of a watchdog day here) can spend the cap
+        again from zero every few minutes.
+        """
+        day = str(state.get("cost_day", ""))
+        if day == self._utc_date():
+            self._day_usd = max(0.0, float(state.get("cost_day_usd", 0.0)))
+        now_mono, now_epoch = self.clock(), self.wall_clock()
+        for epoch, usd in state.get("recent_spend", ()):
+            age = now_epoch - float(epoch)
+            if 0.0 <= age < 3600.0:
+                self._spend.append((now_mono - age, float(usd)))
+        self._spend.sort()
+        # Deliberately no on_change here: `_level` is set to match the spend so
+        # the very first `.level` read does not report a transition.
+        self._level = self._level_for(self.hourly_spend_usd())
+
+    def snapshot(self) -> dict[str, Any]:
+        """The persistable ledger: today's spend and the last hour of calls."""
+        self._roll_day()
+        now_mono, now_epoch = self.clock(), self.wall_clock()
+        self._prune(now_mono)
+        return {
+            "cost_day": self._day,
+            "cost_day_usd": self._day_usd,
+            "recent_spend": [(now_epoch - (now_mono - t), usd) for t, usd in self._spend],
+        }
 
     def _prune(self, now: float) -> None:
         cutoff = now - 3600.0
@@ -164,13 +226,17 @@ class BudgetGovernor:
     def level(self) -> int:
         return self._recompute("reset")
 
-    def _recompute(self, raise_reason: str) -> int:
-        spend = self.hourly_spend_usd()
+    def _level_for(self, spend: float) -> int:
         frac = spend / self.hourly_cap_usd
-        new = 0
+        level = 0
         for i, threshold in enumerate(LEVEL_THRESHOLDS):
             if frac >= threshold:
-                new = i + 1
+                level = i + 1
+        return level
+
+    def _recompute(self, raise_reason: str) -> int:
+        spend = self.hourly_spend_usd()
+        new = self._level_for(spend)
         if new != self._level:
             old, self._level = self._level, new
             reason = raise_reason if new > old else "reset"
@@ -193,9 +259,31 @@ class BudgetGovernor:
     # -- reporting -------------------------------------------------------------
 
     def total_usd(self) -> float:
+        """Spend since this process started. Not published: see `day_usd`."""
         return self._total_usd
 
+    def day_usd(self) -> float:
+        """Spend so far in the current UTC day — the `cost_today_usd` column.
+
+        Rolls over at UTC midnight and is seeded from disk at startup, so it
+        survives the several restarts a watchdog day contains and means what
+        its name says on both counts.
+        """
+        self._roll_day()
+        return self._day_usd
+
     def cost_per_hour_usd(self) -> float:
-        assert self._started_at is not None
-        elapsed_h = max((self.clock() - self._started_at) / 3600.0, 1e-9)
-        return self._total_usd / elapsed_h
+        """Spend in the trailing 60 minutes — the `cost_per_hour_usd` column.
+
+        Deliberately the SAME window `hourly_spend_usd` throttles on, so the
+        published rate and the governor can never disagree. It used to be a
+        lifetime mean (`total / uptime`), which (a) averaged in breaks, L3
+        sleep and quiet hours so a run at the cap could report far below it,
+        and (b) with its 1e-9 denominator clamp reported an absurd rate on the
+        first heartbeat after the first decision — the $2.24/h on a five-minute
+        session in the recorded data is that artefact. Inside the first hour of
+        a process this is a floor (there is less than an hour of history to
+        measure), never an extrapolation: measuring 30 seconds and multiplying
+        by 120 is exactly how a number the game never produced gets published.
+        """
+        return self.hourly_spend_usd()

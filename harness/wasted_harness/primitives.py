@@ -45,12 +45,20 @@ class PrimitivesUnavailableError(RuntimeError):
 
 
 # DirectInput scan codes (US layout, set 1) for the keys the primitives use.
+# "enter"/"esc" (standard set-1: Enter 0x1C, Escape 0x01) are used ONLY by the
+# blocking-screen watchdog (behavior/recovery.py BlockingScreenWatchdog) via
+# `Primitives.press_key` below, NOT by the decision-schema action catalog
+# (CONTRACTS §2's primitive list is closed and unrelated to this — this is
+# infrastructure recovery, never a brain-chosen action, so it does not bump
+# the contract version).
 SCAN: dict[str, int] = {
     "w": 0x11,
     "s": 0x1F,
     "a": 0x1E,
     "d": 0x20,
     "e": 0x12,
+    "enter": 0x1C,
+    "esc": 0x01,
 }
 
 _KEYEVENTF_SCANCODE = 0x0008
@@ -132,6 +140,20 @@ def _u32() -> Any:
             ctypes.c_int,
         )
         _user32.SendInput.restype = ctypes.c_uint
+        # Explicit argtypes/restype for the window-focus calls
+        # (BlockingScreenWatchdog's `press_key` -> `focus_game_window`):
+        # FindWindowW takes two LPCWSTR params that ctypes cannot marshal
+        # correctly from a bare Python str without `c_wchar_p` argtypes, and
+        # every HWND-typed value below is explicitly `c_void_p` rather than
+        # ctypes' 32-bit-`int` default — HWNDs are guaranteed by Windows to
+        # fit in 32 bits even on x64, but there is no reason to rely on that
+        # guarantee when the correct pointer type costs nothing.
+        _user32.FindWindowW.argtypes = (ctypes.c_wchar_p, ctypes.c_wchar_p)
+        _user32.FindWindowW.restype = ctypes.c_void_p
+        _user32.ShowWindow.argtypes = (ctypes.c_void_p, ctypes.c_int)
+        _user32.ShowWindow.restype = ctypes.c_int
+        _user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
+        _user32.SetForegroundWindow.restype = ctypes.c_int
     return _user32
 
 
@@ -188,6 +210,32 @@ def foreground_window_title() -> str:
         return buf.value or "<untitled window>"
     except Exception as exc:  # diagnostics must never raise
         return f"<unavailable: {type(exc).__name__}>"
+
+
+#: Confirmed live as the reason a blocking-screen recovery keypress can miss
+#: entirely: SendInput reaches only the FOREGROUND window of the caller's
+#: desktop, and the foreground window was observed empty ('') at the moment
+#: a recovery keypress needed to land. The exact window title below is the
+#: game's own top-level window title on Windows for both editions this
+#: package targets (Legacy/Enhanced, D1) — NOT independently confirmed
+#: against a running game from this dev machine; if it ever stops matching,
+#: `focus_game_window` logs loudly rather than guessing at a different HWND.
+GAME_WINDOW_TITLES: tuple[str, ...] = ("Grand Theft Auto V",)
+
+#: ShowWindow's SW_RESTORE — un-minimizes without changing maximized state,
+#: unlike SW_SHOW which can leave a previously-maximized window resized.
+_SW_RESTORE = 9
+
+
+def _find_game_window() -> int:
+    """HWND of the game window by title, or 0 if none of
+    :data:`GAME_WINDOW_TITLES` matches anything currently open."""
+    u32 = _u32()
+    for title in GAME_WINDOW_TITLES:
+        hwnd = u32.FindWindowW(None, title)
+        if hwnd:
+            return int(hwnd)
+    return 0
 
 
 def session_diagnostics() -> dict[str, Any]:
@@ -284,6 +332,71 @@ class Primitives:
 
     def _press_prompt(self, _params: dict) -> None:
         _hold_key("e", self._rng.randint(80, 140))
+
+    def focus_game_window(self) -> bool:
+        """Restore + foreground the game window before sending input.
+
+        Confirmed live: SendInput reaches only the FOREGROUND window of the
+        caller's desktop, and the foreground window was observed empty ('')
+        at the exact moment a blocking-screen recovery keypress needed to
+        reach the game — nothing else in this harness ever changes window
+        focus, so a keypress with no window focused would land nowhere.
+        Restores first (`SW_RESTORE`, in case the game window was
+        minimized) then calls `SetForegroundWindow`, and verifies the result
+        via `foreground_window_title()` rather than trusting the return
+        code — Windows can refuse a foreground-focus request outright
+        (foreground-lock-timeout rules) with no error the caller sees.
+        Returns whether the game window is confirmed foreground afterward;
+        `press_key` presses the key either way (a wrong-window press is
+        harmless, a skipped one guarantees nothing happens) but logs loudly
+        when this returns `False`. UNVERIFIED against a real GTA V window
+        from this dev machine — see `GAME_WINDOW_TITLES`.
+        """
+        u32 = _u32()
+        hwnd = _find_game_window()
+        if not hwnd:
+            log.error(
+                "could not find the game window by title; cannot focus it "
+                "before sending input",
+                extra={"kv": {"titles": GAME_WINDOW_TITLES}},
+            )
+            return False
+        u32.ShowWindow(hwnd, _SW_RESTORE)
+        u32.SetForegroundWindow(hwnd)
+        title = foreground_window_title()
+        focused = any(t in title for t in GAME_WINDOW_TITLES)
+        if not focused:
+            log.warning(
+                "SetForegroundWindow did not appear to focus the game window",
+                extra={"kv": {"foreground": title}},
+            )
+        return focused
+
+    def press_key(self, key: str, ms: int = 120) -> None:
+        """Focus the game window, then press-and-release one raw key by
+        name (the `SCAN` table above).
+
+        This is infrastructure recovery, called by
+        `behavior.recovery.BlockingScreenWatchdog` to try to clear a modal
+        screen (pause menu / MISSION FAILED / retry prompt) that has stopped
+        the SHVDN script thread from ticking at all — confirmed live that
+        `System.Windows.Forms.SendKeys` is silently discarded by GTA V (it
+        reads raw/DirectInput), so this goes through the exact same
+        `SendInput`/`KEYEVENTF_SCANCODE` path as every other primitive here,
+        never a synthetic window message. It is deliberately NOT part of
+        `execute()`'s action dispatch: it is not a decision-schema action
+        (CONTRACTS §2's primitive list is closed and unrelated), so adding it
+        here does not bump the contract version.
+        """
+        if not self.focus_game_window():
+            log.warning(
+                "proceeding with the keypress despite an unconfirmed window "
+                "focus (an attempt that might miss beats one that never "
+                "tries at all)",
+                extra={"kv": {"key": key}},
+            )
+        log.info("raw keypress (blocking-screen recovery)", extra={"kv": {"key": key, "ms": ms}})
+        _hold_key(key, max(30, min(500, int(ms))))
 
     @staticmethod
     def _wait(params: dict) -> None:

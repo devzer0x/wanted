@@ -39,6 +39,41 @@ def test_action_catalog_documents_exactly_the_schema_actions() -> None:
         assert f"`{action}`" in catalog
 
 
+def test_catalog_tells_the_truth_about_where_coordinates_come_from() -> None:
+    """The catalog used to promise positions that /state never carries.
+
+    CONTRACTS §1 gives `nearby.vehicles[]`/`nearby.peds[]` a `distance` and a `handle`
+    and no `pos`, but the catalog's "WHERE COORDINATES COME FROM" block listed "a
+    `nearby` entity's position" as a source. Telling the model to read a field that
+    does not exist is how it ends up inventing one.
+    """
+    catalog = _prompt_text("action_catalog.md")
+    block = catalog.split("WHERE COORDINATES COME FROM", 1)[1].split("### wander_drive", 1)[0]
+    assert "player.pos" in block
+    assert "mission.objective_blip.pos" in block
+    # CONTRACTS v1.6: nearby entities DO carry pos now - the block must say so, not the reverse.
+    assert "NO positions" not in block, "v1.6 gives nearby entities a pos; the old claim is false"
+    assert "nearby.peds[].pos" in block, "the block must name nearby positions as a source"
+    assert "Never invent coordinates" in block
+    assert "follow_entity" in block, "the only legal way to approach a nearby entity"
+    assert "nearby` entity's position" not in block
+
+
+def test_crewmates_are_covered_where_the_tactical_tier_will_see_them() -> None:
+    """CONTRACTS v1.5: `relationship` can be `friendly` — the engine's own companion
+    flag, i.e. mission crew. Observed live: he could not follow his crewmates, so the
+    mission failed. The word has to reach the assembled prefix, not just a file."""
+    assert "friendly" in tactical_static_prefix()
+    situations = _prompt_text("situations.md")
+    assert "friendly" in situations
+    crew = situations.split("Stay with the crew", 1)[1].split("\n- ", 1)[0]
+    assert "follow_entity" in crew
+    assert "in_vehicle" in crew
+    assert "objective_blip" in crew, "the blip must be named as outranking the crew"
+    # The director sets goals from the same fact, so it must be in its prefix too.
+    assert "friendly" in director_static_prefix()
+
+
 def test_catalog_names_no_cheat_actions() -> None:
     catalog = _prompt_text("action_catalog.md").lower()
     for forbidden in ("teleport", "god mode", "spawn vehicle", "give weapon", "add money"):
@@ -82,3 +117,100 @@ def test_persona_keeps_the_ai_thing_in_proportion() -> None:
     rules = _prompt_text("rules.md").lower()
     for forbidden in ("slur", "real, living people", "no politics of the real world"):
         assert forbidden in rules
+
+
+def test_radar_legend_is_in_both_prefixes_and_maps_icons_to_state_fields() -> None:
+    """The user's ask: yellow / red / blue points and the GPS route. The legend must translate
+    each icon into the /state field the brain actually receives."""
+    from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
+
+    for prefix in (tactical_static_prefix(), director_static_prefix()):
+        assert "Yellow dot" in prefix and "objective_blip" in prefix
+        assert "Red dots" in prefix and "hostile" in prefix
+        assert "Blue dots" in prefix and "friendly" in prefix
+        assert "GPS" in prefix
+        assert "Re-read the yellow dot every decision" in prefix
+
+
+def test_mechanics_brief_teaches_losing_stars_retry_and_health() -> None:
+    from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
+
+    for prefix in (tactical_static_prefix(), director_static_prefix()):
+        assert "Losing them" in prefix and "line of sight" in prefix
+        assert "Retry from the last checkpoint" in prefix
+        assert "never take it" in prefix  # Skip
+        assert "regenerates only up to half" in prefix
+        assert "Michael = **blue**, Franklin = **green**, Trevor = **orange**" in prefix
+        assert "no fixed search circle" in prefix
+
+
+def test_follow_missions_and_locked_controls_are_taught() -> None:
+    """Live failure: he waited for a marker that never comes in a follow mission and lost Lamar."""
+    from wasted_harness.brain.prompts import tactical_static_prefix
+
+    p = tactical_static_prefix()
+    assert "there is NO marker" in p or "NO marker" in p
+    assert "follow_entity" in p and "friendly" in p
+    assert "getting further away" in p, "must teach that a widening gap is the mission failing"
+    assert "control_enabled" in p, "must teach what locked controls mean"
+
+
+def test_the_gps_route_is_taught_as_a_coordinate_source() -> None:
+    """CONTRACTS v1.8 route_blips: the bridge emitted it for a day before anything read it."""
+    from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
+
+    for prefix in (tactical_static_prefix(), director_static_prefix()):
+        assert "route_blips" in prefix, "the yellow GPS line must be reachable as data"
+        assert "four places" in prefix, "the coordinate-source list must still be exhaustive"
+    tactical = tactical_static_prefix()
+    assert '"kind": "entity"' in tactical, "must teach that a routed entity is a follow target"
+
+
+def test_the_anti_loop_discipline_is_in_both_prefixes() -> None:
+    """The most expensive observed failures were loops nobody inside the loop noticed:
+    the enter/exit-vehicle cycle, and fighting a cat for twenty seconds mid-mission."""
+    from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
+
+    for prefix in (tactical_static_prefix(), director_static_prefix()):
+        assert "anti-loop ladder" in prefix.lower(), "the ladder itself must be present"
+        assert "is this the same thing I tried last time" in prefix, "action memory"
+        assert "hypothesis" in prefix.lower(), "guess, act, then CHECK the guess"
+        assert "Do not invent coordinates" in prefix, "anti-hallucination, coordinates"
+        assert "do not assert it as fact" in prefix, "anti-hallucination, general"
+        assert "Critical" in prefix and "Low" in prefix, "urgency tiers"
+
+
+def test_the_catalog_states_what_he_cannot_do() -> None:
+    """Three adversarial critics found five knowledge domains building policy on abilities
+    the agent does not have (Caps Lock specials, aimed fire, weapon select). Knowledge was fixed;
+    the prompt has to say it too, or he narrates actions the viewer can see did not happen."""
+    from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
+
+    for prefix in (tactical_static_prefix(), director_static_prefix()):
+        assert "What you CANNOT do" in prefix
+        assert "You cannot aim" in prefix
+        assert "no special ability" in prefix.lower()
+        assert "cannot pick a weapon" in prefix
+
+
+def test_the_police_rule_is_scoped_to_free_roam_not_absolute() -> None:
+    """Stated absolutely, the rule fails eight scripted missions (Prologue, Blitz Play, The
+    Paleto Score, The Bureau Raid, ...) whose objective IS surviving a police assault. Stated
+    with no rule at all, he farms stars in free roam and the stream dies. It has to be scoped."""
+    from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
+
+    for prefix in (tactical_static_prefix(), director_static_prefix()):
+        assert "In free roam you never start a fight with police" in prefix
+        assert "mission.active" in prefix, "he must be told which flag decides"
+        assert "fails the mission" in prefix, "the cost of refusing to fight a scripted assault"
+
+
+def test_area_combat_warns_about_who_is_inside_the_radius() -> None:
+    """Two mission states called for an area combat task with Amanda and Tracey, and Franklin
+    and Chop, inside it. He cannot choose the target, so the only defence is not issuing it."""
+    from wasted_harness.brain.prompts import tactical_static_prefix
+
+    p = tactical_static_prefix()
+    assert "You cannot choose who this hits" in p
+    assert "this is the wrong action, and there is no right one" in p
+

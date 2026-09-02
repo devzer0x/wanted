@@ -7,7 +7,7 @@ game server (`-Force` overrides the marker checks where that is sensible).
 
 ## The machine these scripts target
 
-**Ordered 2026-08-29 (Hetzner Server Auction, ref B20260829-3496963), awaiting delivery.**
+**Ordered 2026-08-29 (Hetzner Server Auction), awaiting delivery.**
 
 | | |
 |---|---|
@@ -161,14 +161,22 @@ Batched, in order. Nobody but the human types these passwords — always in the 
 ### 5. Leaving the server running
 
 ```powershell
-pwsh -File .\watchdog.ps1          # start alongside the stream, own console
-pwsh -File .\detach-rdp.ps1        # ALWAYS leave RDP this way
+pwsh -File .\install-focus-keeper.ps1   # once: the two recovery scheduled tasks
+pwsh -File .\watchdog.ps1               # start alongside the stream, own console
+pwsh -File .\leave-safely.ps1           # ALWAYS leave RDP this way
 ```
 
-**Never close the RDP window.** Closing it leaves the machine with no interactive desktop; the
-game loses its display and capture goes black. `detach-rdp.ps1` runs an elevated
-`tscon <session> /dest:console`, which hands the desktop back to the console session instead.
-Your RDP window closing is the success signal.
+**Never close the RDP window.** Closing it parks the session; a parked session has no display
+output at all (Desktop Duplication fails with `DXGI_ERROR_SESSION_DISCONNECTED`), the game loses
+its display and capture goes black. `leave-safely.ps1` checks that the show will actually survive
+your leaving — game up, `/health` ticking with `game_fps` advancing **while the game is not
+focused**, nothing that can lock or blank the desktop, both recovery tasks present — and only
+then hands the desktop to the console session via `detach-rdp.ps1`. If any check fails it refuses
+to detach and tells you what to fix. **Your RDP window closing is the success signal.**
+
+The agent is deliberately **not** started by any of this. Start him only after you have disconnected,
+so his screen capture binds to the virtual display rather than the RDP display adapter. See
+`docs/RUNBOOK.md` section 6 for the full procedure and the symptom table.
 
 ---
 
@@ -451,11 +459,75 @@ your RDP window — that is the intended behavior.
 pwsh -File .\detach-rdp.ps1
 ```
 
+### leave-safely.ps1  *(new — the one command before you walk away)*
+
+Preflight first, detach last. Refuses to detach unless the show is provably able to survive your
+leaving, and prints exactly what to fix when it refuses. In order: session/elevation; anti-lock,
+screen-saver (registry **and** live via `SystemParametersInfo`, because the registry values only
+bind at next logon), lock-screen, `ForegroundLockTimeout`, `powercfg` monitor/standby/hibernate
+timeouts and the RDS session time limits, each read back after being written; game process and a
+≥1280×720 display target; **several `/health` samples a few seconds apart, with the foreground
+owner recorded alongside each one** — `tick_hz` > 0 and `game_fps` *changing* while the game does
+**not** have focus is direct proof that pause-on-focus-loss will not bite; `settings.xml`
+`PauseOnFocusLoss`/`Windowed`; both recovery tasks (installing them if missing); a report of
+whether the harness is running; then focus the game window and call `detach-rdp.ps1`.
+
+`-CheckOnly` is a full dry run that changes and detaches nothing. Touches no OBS setting; never
+starts the harness.
+
+```powershell
+pwsh -File .\leave-safely.ps1 -CheckOnly
+pwsh -File .\leave-safely.ps1
+```
+
+### assert-game-foreground.ps1  *(new)*
+
+Puts the game window back in the foreground after the session is re-attached, and **verifies it
+by foreground PID** — the return value of `SetForegroundWindow` is logged and never believed,
+because Windows can refuse a foreground change with no error. Sequence:
+`SPI_SETFOREGROUNDLOCKTIMEOUT=0` → `SW_RESTORE` → `AttachThreadInput` → `BringWindowToTop` +
+`SetForegroundWindow` → detach → verify → `SwitchToThisWindow` as a documented-unsupported
+fallback. Aborts (exit 2) when the input desktop is not `Default`, i.e. the session is locked.
+Silent when nothing needs doing; never steals focus from a connected operator unless
+`-EvenIfOperatorConnected`. Logs to `C:\wasted\logs\foreground-assert.log`.
+
+**Must run in the interactive session.** A SYSTEM task lives in session 0 on a non-interactive
+window station and cannot see, activate or attach to a session-1 window at all — that is why this
+is a separate task from the keepalive rather than code inside it.
+
+### install-focus-keeper.ps1  *(new)*
+
+Registers `WASTED-ForegroundAssert` with **`LogonType=Interactive`** as the autologon user (read
+from `HKLM\…\Winlogon\DefaultUserName`), triggered at logon, on `ConsoleConnect` (exactly what
+`tscon /dest:console` raises), on `SessionUnlock`, and on a one-minute backstop — then reads the
+task back and **fails** if Windows did not honour the Interactive logon type. Also registers
+`WASTED-ConsoleKeepalive` (SYSTEM, every minute) if it is missing, which until now existed only
+as a hand-made task in no repo file. Optionally adds an event-triggered re-attach on
+TerminalServices `EventID=24`, but only after confirming this machine has actually logged one.
+
+### console-keepalive.ps1
+
+SYSTEM task, every minute: `tscon <id> /dest:console` when the game's session is parked as `Disc`.
+The session id is **derived** — it is the session the game process is actually in, falling back to
+the single disconnected user session, and refusing to guess when that is ambiguous (`-SessionId`
+pins it). tscon's exit code is checked, so a failure can no longer be logged as a success. After a
+successful re-attach it asks Task Scheduler to start `WASTED-ForegroundAssert`, which is the only
+way a session-0 process can get focus work done in session 1.
+
+### window-focus.ps1
+
+Dot-source library behind the two scripts above: the user32 P/Invoke surface, input-desktop name,
+foreground owner (hwnd/pid/title), game-window discovery (process handle first, window title only
+as a fallback), the verified foreground-taking sequence, and a live screen-saver disable. Not
+runnable on its own.
+
 ### common.ps1
 
 Shared helper library, dot-sourced by every PowerShell 7 script here: environment guards
 (`Assert-WastedEnvironment`), structured logging, transcript start/stop, elevation test, python
-resolution, SHA256. Not runnable on its own. Also disables
+resolution, SHA256, and the session table (`Get-WastedSessionTable`, `Test-WastedOperatorConnected`
+— `query session` parsed by header column offsets into objects, so nothing downstream hardcodes
+"session 1"). Not runnable on its own. Also disables
 `$PSNativeCommandUseErrorActionPreference` (see Conventions).
 
 ### obs-profile/

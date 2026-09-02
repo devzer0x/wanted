@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { fetchMissions, fetchStats } from "@/lib/data";
-import { formatCompact, formatDuration, formatUtcStamp } from "@/lib/format";
+import { formatDuration, formatUtcStamp } from "@/lib/format";
 import { routeMetadata } from "@/lib/metadata";
 import type { MissionRow } from "@/lib/types";
 
@@ -55,7 +55,6 @@ function MissionCard({ m }: { m: MissionRow }) {
         </div>
         <div>
           <dt className="ticker text-[0.52rem]">Tokens</dt>
-          <dd className="text-bone">{formatCompact(m.tokens)}</dd>
         </div>
       </dl>
       {m.summary && (

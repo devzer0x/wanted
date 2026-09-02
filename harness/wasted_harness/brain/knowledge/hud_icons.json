@@ -1,0 +1,742 @@
+{
+  "domain": "hud_icons",
+  "items": [
+    {
+      "id": "radar_position_shape",
+      "category": "minimap",
+      "cue": "A rectangular map panel anchored in the bottom-left corner of the screen, with thin coloured bars along its bottom edge.",
+      "context": "Persistent in GTA V Story Mode whenever the player has control and the HUD is not suppressed by a cutscene, a phone/menu screen, or a scripted mission moment.",
+      "meaning": "This is the radar/minimap. It is the primary spatial sense the agent has: roads, water, rail lines, blips, and (during a chase) police awareness are all encoded here. Its disappearance means a cutscene or menu has taken control, not that the game crashed.",
+      "suggested_action": "Treat radar-absent as 'no agency': if the bridge reports cutscene/menu flags with the HUD gone, issue stop and wait rather than queueing drive_to or combat tasks that will be swallowed.",
+      "avoid": "Do not keep issuing movement tasks while the HUD is hidden for a cutscene — inputs are dropped and the agent will narrate actions that never happened.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Rockstar Editor, first-person mode with HUD options changed, and some mission scripts hide or move the radar. Ultrawide/eyefinity resolutions push the radar to the far-left edge of the leftmost panel.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "radar_perspective_onfoot_vs_vehicle",
+      "category": "minimap",
+      "cue": "The minimap renders flat top-down while walking, and tilts into a slanted/pitched perspective the moment the player is in a vehicle.",
+      "context": "Automatic, on every vehicle entry and exit. Also the fastest visual confirmation that an enter_vehicle task actually succeeded.",
+      "meaning": "Top-down = on foot. Slanted = seated in a vehicle (driver or passenger). The tilt also stretches the view further ahead of travel, which is why the radar 'sees' further down the road when driving.",
+      "suggested_action": "Use the perspective flip as a cheap corroboration of the bridge's in-vehicle flag. If the agent issued enter_vehicle and the radar is still flat after a few seconds, the entry failed (door locked, ped in seat, vehicle too far) — retry or pick another vehicle.",
+      "avoid": "Do not assume the tilt means the agent is driving. A passenger seat gives the same slanted radar with zero control over the car.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Aircraft and submersibles override this with altimeter/depth displays instead of the plain slanted view.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "radar_rotates_with_heading_north_blip",
+      "category": "minimap",
+      "cue": "The map rotates under a fixed player marker; a small 'N' indicator slides around the radar edge.",
+      "context": "Default behaviour in Story Mode. The player's facing direction is always toward the top of the radar.",
+      "meaning": "The radar is heading-up, not north-up. The 'N' marker is the only absolute-north reference on the HUD. Everything else — blips, roads, cones — is relative to where the player is currently looking or driving.",
+      "suggested_action": "When reasoning about direction, convert world headings from the bridge into 'relative to my facing' before narrating, because that is what the viewer sees. Use the 'N' marker only for orientation commentary, never as a navigation input.",
+      "avoid": "Do not tell viewers to 'head north on the radar' as if the map were north-up — the map spins, and the instruction will look wrong on stream.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "The full-screen pause-menu map is north-up and grayscale in the Enhanced edition, the opposite convention from the radar.",
+      "sources": [
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "radar_interior_floorplan",
+      "category": "minimap",
+      "cue": "The road network on the radar is replaced by a small architectural floor plan — walls, rooms, doorways — usually with far less visible area.",
+      "context": "Triggers on entering an interior the game models as an enterable space (shops, Ammu-Nation, safehouses, mission interiors).",
+      "meaning": "the agent is indoors. Roads and long-range blips vanish or become unreliable, GPS routing is meaningless, and vehicles cannot be reached without exiting first.",
+      "suggested_action": "Suspend drive_to and long-range navigation while the floor plan is showing; use walk_to toward the exit blip or the doorway, then re-plan outside. Good moment for commentary — viewers can see the map changed.",
+      "avoid": "Do not issue drive_to to a distant waypoint from inside a building — the path solver has no road to grab and the agent will jitter against a wall.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Many 'interiors' in Los Santos are fake shells with no floor-plan switch. Absence of a floor plan does not prove the agent is outdoors.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "radar_tunnel_gps_loss",
+      "category": "minimap",
+      "cue": "The GPS route line and distance readout drop out while the radar still shows a road; usually right after driving into a tunnel mouth or a long underpass.",
+      "context": "Driving through tunnels, the Los Santos storm drains' covered sections, and underground freeway segments.",
+      "meaning": "The game models satellite loss: 'connection to the GPS satellites is lost until the player exits the tunnel.' Navigation guidance is temporarily gone, not the destination itself.",
+      "suggested_action": "Hold the current heading and keep driving through; do not re-issue drive_to or recompute a route mid-tunnel. Wait for the route to reappear at the exit. This is excellent, low-risk commentary material.",
+      "avoid": "Do not interpret a vanished route line as 'objective lost' and abandon a mission or start wandering. Do not U-turn inside a tunnel to 'reacquire signal'.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "A route can also vanish because the destination was genuinely cleared or the mission advanced — check the objective/blip state from the bridge before concluding it was the tunnel.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "radar_altimeter_aircraft_parachute",
+      "category": "minimap",
+      "cue": "A vertical altitude meter appears alongside the radar, showing height above ground/sea level.",
+      "context": "Appears whenever the player controls any aircraft (plane, helicopter) or is falling under a parachute.",
+      "meaning": "the agent is airborne. The altimeter is the primary survival instrument: low reading plus downward motion means imminent terrain impact. Its appearance is also a reliable 'I am in an aircraft' signal.",
+      "suggested_action": "Treat a low and falling altimeter as critical narration and, if piloting an aircraft under an active bridge task, a reason to prefer levelling off over pressing on. There is NO parachute-deploy action available to the agent (not in the bridge tasks or harness primitives) — if he is ever in on-foot freefall, there is nothing the harness can do about it; narrate it and rely on the game's own scripted/automatic handling of that situation, never invent a deploy action.",
+      "avoid": "Do not confuse the altimeter with the health or ability bars — it is a separate vertical gauge next to the radar, not one of the horizontal bars under it. Do not write a suggested_action that deploys a parachute; that capability does not exist for the agent.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "In a submersible the same real estate shows distance to surface and to sea floor instead, which inverts the meaning of a small number.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "radar_submersible_depth",
+      "category": "minimap",
+      "cue": "Two numeric readouts near the radar giving distance to the surface and distance to the sea floor, replacing the normal altimeter.",
+      "context": "Only while piloting a submersible (Kraken, Submersible) underwater.",
+      "meaning": "Depth instrumentation. Distance-to-surface is the oxygen-relevant number when the agent leaves the sub; distance-to-floor warns of grounding.",
+      "suggested_action": "Surface before the ability/oxygen bar (see ability_bar_becomes_oxygen) runs down if the agent ever exits the vehicle underwater.",
+      "avoid": "Do not read the depth number as altitude — the semantics are inverted versus an aircraft.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Rarely relevant to Story Mode free-roam; only a handful of missions and the underwater collectibles use it.",
+      "sources": [
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "blip_elevation_arrow",
+      "category": "minimap",
+      "cue": "A blip drawn as a coloured circle with a small arrow inside it, pointing up or down.",
+      "context": "Appears on mission targets and objective blips whenever the target is on a different vertical level from the player.",
+      "meaning": "'The target is higher or lower than you.' Up arrow = above (upper floor, rooftop, freeway overpass, hillside). Down arrow = below (basement, storm drain, street under an overpass, parking garage).",
+      "suggested_action": "When the objective blip carries an elevation arrow, stop trying to close horizontal distance and find the vertical transition first — stairs, a ramp, an off-ramp, an elevator, or a helicopter. Distance-to-blip will stop shrinking otherwise.",
+      "avoid": "Do not treat 'blip is 15m away' as 'I have arrived' when an elevation arrow is present; the agent can stand directly under a target on an overpass and loop forever.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "A plain circle with no arrow means same level, not necessarily reachable — a fence or building can still block a same-level path.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "blip_colour_semantics",
+      "category": "minimap",
+      "cue": "Coloured dots/circles on the radar: red, blue, green, yellow, white.",
+      "context": "Persistent. Colour is the fastest classifier of a blip's intent, ahead of shape.",
+      "meaning": "The naive 'red=hostile, blue/green=friendly, yellow=destination' rule is FALSE as a general rule in GTA V — see map_markers/marker_disambiguation_algorithm, which is authoritative here: blue is Michael's own mission colour, red also marks some story-mission and police blips, and the player's own route is purple, not yellow. Resolve a blip's meaning with that algorithm's order (sprite shape -> flashing state -> size -> colour -> objective text), never by colour alone.",
+      "suggested_action": "Do not decide hostility from radar colour. Cross-check against the bridge's own hostile|friendly|neutral classification for nearby peds; that field is ground truth and colour is not. If the bridge says neutral, treat the ped as neutral regardless of blip colour.",
+      "avoid": "Do not fire on, or treat as hostile, a blip purely because it is red on the radar — the agent has no fire action anyway (combat_hated_targets_around lets the engine pick targets), and mission-scripted red blips can be objectives to follow or protect. Do not tell viewers 'red means enemy' as a flat rule.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "GTA V reuses colours heavily and mission scripts override them freely. Colour is, at best, the last-resort tiebreaker in map_markers' disambiguation order, never the first check.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "mission_blip_protagonist_letters",
+      "category": "minimap",
+      "cue": "A large map blip carrying a letter, coloured blue, green, or orange.",
+      "context": "Story Mode free-roam only. These are the mission-start markers on the pause map and the radar.",
+      "meaning": "The COLOUR is what identifies the protagonist who can start the mission — blue = Michael, green = Franklin, orange = Trevor (confirmed: gtabase's mission guide states the game 'indicates with unique colours on the map the missions that can be started by the different characters'). The LETTER is NOT the protagonist — per map_markers/mission_blip_letter_is_giver_initial it is the initial of the mission-GIVER (e.g. L=Lester, D=Devin, S=Haines), which is a different fact from who plays the mission. Treat map_markers/marker_disambiguation_algorithm as authoritative for reading any blip.",
+      "suggested_action": "Filter candidate story blips by COLOUR matching the currently controlled protagonist, never by letter. The agent also has no character-switch action at all — it is not in the bridge task list or the harness primitives — so a blip whose colour does not match the current protagonist cannot be pursued by the agent under any circumstance right now, not merely 'after a switch'. Only drive_to a colour-matching blip.",
+      "avoid": "Do not drive across the map to a blip whose colour does not match the current protagonist — it will not start, and there is no in-harness action to fix that by switching. Do not read the letter as protagonist identity, and do not confuse these with the yellow/purple generic destination or route blip.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some story beats gate missions behind progress or time of day, so a colour-matching blip is not always startable. Strangers-and-Freaks use question-mark blips lettered by the stranger's initial. The letter=giver-initial claim is carried over from the map_markers domain and was not independently re-verified with a third source in this pass; the colour=protagonist claim was directly confirmed against gtabase's mission guide.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/missions/",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "radar_flashes_red_blue",
+      "category": "wanted",
+      "cue": "The whole radar border/background pulses alternating red and blue.",
+      "context": "Only while the player has a wanted level of at least one star. This is the single most important chase cue on the HUD.",
+      "meaning": "In-game tutorial wording: 'The Radar flashes red and blue when the Cops can see you.' Police currently have line of sight. The escape timer is NOT running; it will not start until this stops.",
+      "suggested_action": "Break line of sight immediately — turn off the main road, enter an alley, a tunnel, a multi-storey car park, or swap vehicles out of sight. Prefer flee_police toward cover-dense geometry over raw top speed on an open freeway.",
+      "avoid": "Do not just outrun them in a straight line on the freeway; helicopters and the 3+ star response maintain sight, so the flashing never stops and the timer never starts. Do not stop to fight at 3+ stars unless cornered.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Cover from ground units still leaves helicopter sight lines at 3+ stars — going indoors or under cover is required, not merely turning a corner.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wanted_stars_flashing_search_mode",
+      "category": "wanted",
+      "cue": "The wanted stars in the top-right of the screen begin blinking on and off instead of sitting solid.",
+      "context": "Occurs the moment police lose sight of the player at any wanted level.",
+      "meaning": "Search mode. Police no longer know where the agent is and the escape timer is running. Critically: 'the slower they are flashing, the closer the player is to escaping.' Flash rate is a live progress bar for evasion.",
+      "suggested_action": "Stay still or move slowly away from the search cones. Do not re-enter open sightlines. Keep going until the stars clear entirely, then re-plan. Narrate the slowing flash — it is genuinely good stream tension.",
+      "avoid": "Do not resume the previous objective while stars are still flashing. Do not accelerate hard or drive erratically past cones; being spotted resets the escape timer to full.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Solid (non-flashing) stars mean police can see the player right now — the opposite state. Confusing solid for flashing is the most costly misread on this HUD.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "police_search_cones_on_radar",
+      "category": "wanted",
+      "cue": "Wedge/cone shapes fanning out from police blips on the radar.",
+      "context": "Appears only in search mode — i.e. together with flashing stars, never during active pursuit.",
+      "meaning": "Each cone is that officer's field of view. 'Cones will appear on the Radar to show the area they are searching.' Entering a cone re-establishes sight and resets the escape timer.",
+      "suggested_action": "Treat the cones as hard no-go polygons. Route away from cone apexes; move perpendicular to a cone's axis rather than along it. Cones sweep, so a corridor that is clear now may not be in two seconds — prefer static cover to weaving.",
+      "avoid": "Do not path straight through a gap between two cones at speed; sweep motion closes gaps. Do not assume a cone-free radar means no police — officers outside radar range still exist.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Helicopter cones are much larger and originate above; ground cover that defeats a patrol car does not defeat a Maverick spotlight at 3+ stars.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "wanted_stars_position_and_count",
+      "category": "wanted",
+      "cue": "One to five star icons rendered at the top-right of the screen, above/near the money readout.",
+      "context": "Contextual — the stars are absent entirely at zero wanted level and appear the instant a crime is witnessed.",
+      "meaning": "Number of stars = severity of police response. 1 star: officers try to arrest, will shoot if resisted. 2 stars: police shoot to kill, at least three cars, ramming and roadblocks. 3 stars: spike strips, vested officers, a Police Maverick helicopter joins. 4 stars: NOOSE tactical teams in Granger/Sheriff SUVs, up to three helicopters, armoured roadblocks. 5 stars: an indefinite number of police vehicles plus a much higher proportion of NOOSE TRU units, and up to three Police Mavericks. There is NO open-world military response and NO Rhino tank at 5 stars — the army, including the Rhino, only engages inside Fort Zancudo's own footprint (confirmed on gta.wiki's wanted-level page). Civilian traffic thins noticeably at 5 stars but 'almost no, if any' is not the same as guaranteed zero.",
+      "suggested_action": "Pick strategy by star count, not by feel. At 1-2 stars, flee_police by vehicle is usually survivable. At 3+, prioritise getting under cover or indoors because of air support. At 4-5, disengage from combat entirely; a stand-up fight is not winnable for long. Do not plan around tanks or army units appearing outside Fort Zancudo at any star level.",
+      "avoid": "Do not escalate from 1 star to 3 by returning fire at the first officer — a 1-star arrest attempt is survivable and cheap; a 3-star chase is not.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Some story missions script a fixed wanted level that cannot be evaded until a scripted beat completes; evasion tactics will simply fail there.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "escape_timer_reset_on_resight",
+      "category": "wanted",
+      "cue": "Flashing stars abruptly go solid again and the radar resumes its red/blue flash.",
+      "context": "Any moment during search mode when a pursuer regains line of sight.",
+      "meaning": "'If a police pursuer spots the player and the chase reverts to active mode, the escape timer will reset.' All evasion progress is lost, not paused.",
+      "suggested_action": "React instantly: break sight again by the shortest available route into cover. Accept losing ground rather than staying visible.",
+      "avoid": "Do not treat a brief re-sight as harmless and continue toward the objective — the timer is back to zero and the higher the star level the longer the reset costs.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Escape duration scales with wanted level; the reset is proportionally more punishing at 4-5 stars.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "mask_toggle_reduces_wanted",
+      "category": "wanted",
+      "cue": "Stars are flashing (search mode) and the agent has a mask or sunglasses available.",
+      "context": "Story Mode. Works only while the search is in cone/search mode, not during active pursuit.",
+      "meaning": "Putting on or taking off a mask or sunglasses during search mode drops the wanted level by one star, because the police description of the suspect no longer matches. This is a genuine classic-GTA mechanic, not something borrowed from Online.",
+      "suggested_action": "NOT AN AVAILABLE ACTION: there is no clothing/mask-equip task in the bridge's 11 tasks or the harness's 8 primitives, and no menu access at all (no phone, no menus) to reach a wardrobe or Interaction Menu. The agent cannot toggle this on request. Keep this as passive knowledge only — narrate it if a mask happens to already be on for other reasons — and build evasion plans on flee_police / seek_cover / cover-dense geometry instead.",
+      "avoid": "Do not include mask-toggling in any evasion plan or recovery ladder step; it is not executable. Do not attempt it while stars are solid even hypothetically — it only matters in search mode.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The star-drop mechanic itself is confirmed on the GTA V wanted-level wiki page; what changed in this pass is the action, not the fact — the harness has no way to equip or toggle a mask, so this can never be a suggested_action regardless of how well the mechanic is verified.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "los_santos_customs_clears_wanted",
+      "category": "wanted",
+      "cue": "A Los Santos Customs / mod-shop blip on the radar while wanted stars are flashing.",
+      "context": "Story Mode free-roam, in a vehicle, wanted level active.",
+      "meaning": "'The player is able to lose any wanted level by entering Los Santos Customs.' But the garage door will not open if police have spotted the player on approach — it requires search mode, not active pursuit.",
+      "suggested_action": "Only route to a mod shop once the stars are already flashing. Approach from the quiet side, and if the door does not open, leave, break sight again, and return.",
+      "avoid": "Do not drive to the mod shop with the radar flashing red and blue — the door stays shut and the agent gets cornered in a dead-end forecourt, which is worse than open road.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Requires a driveable vehicle. Some story missions disable mod shops entirely.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Customs",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "health_bar_green_left_half",
+      "category": "status_bars",
+      "cue": "A thin green horizontal bar directly under the radar, filling the left half of the radar's bottom width.",
+      "context": "Persistent whenever the radar is shown.",
+      "meaning": "Current health. Empty = Wasted. This bar is the single most decision-relevant gauge on the HUD.",
+      "suggested_action": "Map bar fraction to policy: above ~50% fight or continue; below ~50% break contact and let regeneration work; near-empty treat as an emergency and disengage from everything.",
+      "avoid": "Do not confuse it with the blue armour bar to its right. Green depleting means real damage; blue depleting is the buffer doing its job.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Maximum health rises with the Strength/health stat, so 'half a bar' is a larger absolute pool late in the game than early.",
+      "sources": [
+        "https://gta.wiki/w/Health",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "health_regen_below_half_standing_still",
+      "category": "status_bars",
+      "cue": "The green bar is under half and slowly refilling — or conspicuously not refilling while the agent is moving.",
+      "context": "Story Mode, out of combat damage. Regeneration only reaches the halfway point, never full.",
+      "meaning": "GTA V auto-regenerates health up to 50% only. gta.wiki's Health page states this directly and specifically: 'Standing still or driving a vehicle will slowly regenerate their health, taking cover makes the regeneration slightly faster. However, running or walking interrupts the regeneration process.' So the requirement is 'not on-foot moving', not strictly 'motionless' — being seated in a moving vehicle regenerates too.",
+      "suggested_action": "After a firefight, prefer getting into a vehicle and driving away (regen continues while driving) over stopping on foot in the open. If on foot, issue seek_cover — cover both protects and speeds the regen — and only stand and hold position if the bridge shows no hostile or police line of sight; never hold a stationary on-foot position that is still exposed just to bank regen. Above 50%, stop waiting — it will never fill further without a snack, drink, or first aid kit, none of which are actions the agent can take (no purchase/menu action).",
+      "avoid": "Do not stand still waiting for regeneration above 50% — it will not come, and idling on stream is dead air. Do not hold an exposed on-foot position with a hostile or police cone able to see the agent just to let health tick up; break contact into a vehicle or cover first.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "This is a direct quote from a cited source (gta.wiki/w/Health), not an inference, so it is verified rather than a prior. 'Driving a vehicle' regenerating too is the detail most useful for keeping the agent moving safely instead of parked in the open.",
+      "sources": [
+        "https://gta.wiki/w/Health"
+      ]
+    },
+    {
+      "id": "health_bar_flashes_red_stamina",
+      "category": "status_bars",
+      "cue": "The health bar starts flashing red while the agent is sprinting or swimming hard, with no enemy nearby.",
+      "context": "On foot, sustained sprint/swim, before the Stamina stat is maxed.",
+      "meaning": "Stamina exhaustion, not gunfire. Running past exhaustion drains health. Once the Stamina stat is full the player has effectively infinite stamina and this stops happening.",
+      "suggested_action": "Drop from sprint to run/walk when this appears, or get into a vehicle. Do not diagnose it as being shot.",
+      "avoid": "Do not call combat or seek_cover because of this flash — the agent will look confused on stream reacting to an enemy that does not exist. Also do not confuse it with the flashing wanted stars, which are a completely different signal in a different screen corner.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Swimming out of stamina is far more dangerous than running out of it — health drains to drowning with no cover available.",
+      "sources": [
+        "https://gta.wiki/w/Health"
+      ]
+    },
+    {
+      "id": "armour_bar_blue",
+      "category": "status_bars",
+      "cue": "A blue horizontal bar occupying the right portion of the strip under the radar, next to the green health bar.",
+      "context": "Only present when the player has body armour equipped; absent at zero armour.",
+      "meaning": "Body armour. Incoming gunfire consumes armour before health. In GTA V armour also mitigates falls and impacts.",
+      "suggested_action": "Treat 'blue bar present' as a licence to accept a firefight the engine puts him in via combat_hated_targets_around; 'blue bar gone' as a strong signal to disengage instead of continuing to fight. There is no purchase action available to the agent (no shop-menu interaction exists in the harness), so 'buy armour' is not an executable plan — treat low/no armour as a reason to flee_police/seek_cover rather than a shopping trip to plan around.",
+      "avoid": "Do not read the blue bar as health. The agent can be at full armour and near-zero health, which looks fine at a glance and is one hit from Wasted. Do not write a suggested_action that 'buys' or 'restocks' armour — that requires a shop menu the agent cannot open.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Armour tiers at Ammu-Nation run Super Light 20% ($500), Light 40% ($1,000), Standard 60% ($1,500), Heavy 80% ($2,000), Super Heavy 100% ($2,500) — the bar length reflects the tier bought.",
+      "sources": [
+        "https://gta.wiki/w/Body_Armor",
+        "https://gta.wiki/w/Health"
+      ]
+    },
+    {
+      "id": "ability_bar_yellow",
+      "category": "status_bars",
+      "cue": "A yellow/gold bar sharing the strip beneath the radar with the blue armour bar.",
+      "context": "Story Mode only; each of the three protagonists has one. Fills through play, drains while the ability is active.",
+      "meaning": "The Special Ability meter — how much ability time is left. It fills from character-appropriate actions: Michael from headshots, stealth kills and high-speed driving; Franklin from high-speed driving, near-misses and driving against traffic; Trevor from kills, headshots, speed and taking damage.",
+      "suggested_action": "NOT AN ACTIVATABLE RESOURCE FOR WANTED: there is no Special Ability action in the bridge tasks or harness primitives (no Caps Lock equivalent), so the agent can never 'spend' this bar on request. Read the bar level purely for narration ('the ability's nearly full, but there's no way to trigger it') and, on the rare screenshot where the ability visibly activates on its own (a scripted mission beat), use it only to explain what viewers are seeing.",
+      "avoid": "Do not confuse the yellow ability bar with the blue armour bar or read it as a second health pool. Do not write or imply any suggested_action that activates the ability — that capability does not exist for the agent.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "gta.wiki describes the bar as yellow for all three protagonists, while some guides describe it as tinted per character (blue/green/orange). The per-character colours are certainly true of the character-switch wheel and mission blips; treat the bar itself as yellow.",
+      "sources": [
+        "https://gta.wiki/w/Special_Ability",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-player-stats-special-abilities-guide",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "ability_bar_becomes_oxygen",
+      "category": "status_bars",
+      "cue": "The bar under the radar that normally reads as Special Ability is draining steadily while the agent is underwater.",
+      "context": "Swimming or diving below the surface, on foot.",
+      "meaning": "The special ability meter is repurposed as an oxygen/breath meter while diving. Empty = drowning, which is a Wasted, not a warning.",
+      "suggested_action": "Treat any sustained drain on this bar underwater as a hard countdown: surface immediately, well before it empties. Never start an underwater objective on a partly drained bar.",
+      "avoid": "Do not read it as 'ability charging down' and ignore it. Do not push for one more underwater collectible on a nearly empty bar.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The Lung Capacity stat lengthens the meter, so absolute time varies with progression. Scuba gear removes the constraint.",
+      "sources": [
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "special_ability_screen_tint",
+      "category": "status_bars",
+      "cue": "The whole screen tints and time visibly slows: blue for Michael, a dark green hue with light trails for Franklin, a red/orange ripple with a buzzing sound for Trevor.",
+      "context": "Only while the special ability is active; lasts up to about 30 seconds fully upgraded.",
+      "meaning": "The ability is running and burning the yellow bar. Michael: bullet-time aiming. Franklin: slowed driving for precise weaving. Trevor: takes no damage and cannot die while it is active (re-verified this pass against gta.wiki AND gtabase, both stating plainly he 'cannot die' / 'will not die' during it, surviving even explosions, falls, and trains), while dealing double damage — this is stronger than 'near-invincibility', it is full damage/death immunity for the ability's duration. He remains subject to physics reactions (being thrown, run over afterward) and to non-damage hazards like drowning, and is vulnerable again the instant the bar empties.",
+      "suggested_action": "OBSERVATION ONLY: the agent has no action that activates any protagonist's special ability (no Caps Lock equivalent exists in the bridge tasks or harness primitives). If this tint is ever seen on a screenshot (e.g. a scripted mission moment forced it), use it purely to narrate — for Trevor's red/orange tint, it explains why he just survived something that should have been fatal; do not treat it as a plan the agent chose.",
+      "avoid": "Do not mistake Trevor's red/orange tint for a damage/low-health screen effect and start fleeing — it means the opposite. Do not write a suggested_action that 'activates' any ability, waits for one, or plans combat around triggering one — that capability does not exist for the agent regardless of how the ability itself behaves.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Two independent sources (gta.wiki's Special Ability page and gtabase's special-abilities guide) agree Trevor cannot die while active; this is stronger than the previous 'near-invincibility, do not rely on it against explosions' hedge, which this pass found to be contradicted by both sources and has removed.",
+      "sources": [
+        "https://gta.wiki/w/Special_Ability",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-player-stats-special-abilities-guide"
+      ]
+    },
+    {
+      "id": "wasted_screen",
+      "category": "screens",
+      "cue": "The action continues for about a second, then the image desaturates to grayscale and slows, with the word 'WASTED' centred on screen and a metallic impact sound. NOTE: 'Michael died' / 'Franklin died' / 'Trevor died' is a MISSION FAILED reason line, not this screen's text — see mission_failed_and_retry_prompt. Do not read a died-line banner as this WASTED screen; they are visually different and have different consequences.",
+      "context": "Health reached zero. Happens in free-roam and in missions alike.",
+      "meaning": "the agent is dead. In free-roam this costs 5% of money up to a maximum of $5,000 and respawns him outside the nearest hospital, but weapons are kept. In a mission it offers a retry from the last checkpoint.",
+      "suggested_action": "Stop issuing tasks the moment the screen desaturates — nothing lands. On a mission, take the retry prompt. On respawn, re-read position from the bridge before planning; the agent is at a hospital, not where he died, and his car is gone.",
+      "avoid": "Do not keep narrating the previous plan after death, and do not try to 'return to the car' — it will not be there. Do not confuse this grayscale screen with BUSTED, which has different consequences.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The '<Character> died' text (and its Prologue-abbreviated form 'M died'/'T died'/'F died') is the Mission Failed reason line, confirmed by gta.wiki's Wasted page to be distinct from free-roam death — do not attach it to this item's cue. The Enhanced edition drops the steel-rod sound and differs slightly visually on the true WASTED screen. Declining a mission retry loses the checkpoint and the money.",
+      "sources": [
+        "https://gta.wiki/w/Wasted",
+        "https://gta.wiki/wiki/Wasted"
+      ]
+    },
+    {
+      "id": "busted_screen",
+      "category": "screens",
+      "cue": "The screen turns gray, then a brief character-coloured flash, then the word 'BUSTED' appears centred.",
+      "context": "Police arrest completes — the agent stayed near officers at gunpoint at a low wanted level, or was dragged from a vehicle.",
+      "meaning": "Arrested. Respawn is outside the nearest police station with money deducted as bail. In GTA V specifically only ammo and body armour are confiscated, plus any weapon that was drawn at the moment of arrest; the rest of the arsenal is kept. Any mission in progress fails.",
+      "suggested_action": "Prefer Wasted over Busted when both are imminent in free-roam — Busted costs the armour and ammo. During an arrest attempt, sprinting breaks the surrender and officers open fire, so it is an escape option with a real cost.",
+      "avoid": "Do not stand still near officers at 1 star assuming it is safe — that is exactly how a Busted happens. Do not assume all weapons are lost; that is a general-series claim, not GTA V's behaviour.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Specific weapons such as the Carbine Rifle and Nightstick are confiscated on arrest. Sources for the exact GTA V confiscation rules are single-source; treat the details as provisional and verify against a recorded session.",
+      "sources": [
+        "https://gta.wiki/w/Busted",
+        "https://gta.wiki/wiki/Busted"
+      ]
+    },
+    {
+      "id": "mission_failed_and_retry_prompt",
+      "category": "screens",
+      "cue": "A failure banner with a short reason line, followed by a prompt offering to restart from the last checkpoint.",
+      "context": "Any scripted mission failure: dying, being arrested, losing a followed target, destroying a required vehicle, leaving the mission area.",
+      "meaning": "The mission ended unsuccessfully. The reason line is often '<Character> died' or similar (see wasted_screen) rather than a bare description — read it, it names the cause. GTA V offers a checkpoint retry rather than a full restart. Accepting the retry disables some gold-medal objectives (time, accuracy) for that run only, but gold medals are NOT required for 100% completion — the actual 100% checklist is 69 story missions, 20 Strangers and Freaks, 14 random events, 42 hobbies/pastimes and 16 misc content (see failure_recovery/skip_does_not_destroy_100pct), and any mission can be replayed later regardless of medal.",
+      "suggested_action": "Take the retry to keep the story moving on a 24/7 stream. Read the stated failure reason and change the specific behaviour that caused it — most failure lines name the cause exactly.",
+      "avoid": "Do not blindly retry the same approach; the same failure will repeat and stall the stream. Do not treat a mission failure as a game crash — the world is still live once the prompt clears.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Missions can also be replayed later from the pause menu's Game tab (the agent cannot do this himself — no menu access — but it means a missed gold medal is never a permanent loss). Some failures (leaving the area) can be undone by returning before a countdown expires rather than failing outright.",
+      "sources": [
+        "https://gta.wiki/w/Wasted",
+        "https://gta.wiki/w/Busted",
+        "https://www.gtabase.com/grand-theft-auto-v/missions/"
+      ]
+    },
+    {
+      "id": "mission_passed_medal_screen",
+      "category": "screens",
+      "cue": "An end-of-mission panel listing objectives with ticks and a medal — Bronze, Silver or Gold.",
+      "context": "After every story mission completes successfully.",
+      "meaning": "Bronze is the default for finishing; Silver for meeting at least one gold-medal objective; Gold requires all of them (time, accuracy, damage and similar). This is scoring only — the story advances regardless of medal, and medals are not part of GTA V's 100% completion requirement.",
+      "suggested_action": "Treat the medal as commentary material, not a goal, unless the show is explicitly chasing 100%. Read the listed objectives aloud; they explain to viewers what the agent did and did not do.",
+      "avoid": "Do not restart missions chasing Gold on a live stream unless that is the declared segment — it is repetitive and burns hours of airtime.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Retrying from a checkpoint after death or arrest permanently disables some gold objectives for that attempt.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/missions/"
+      ]
+    },
+    {
+      "id": "weapon_wheel_appearance",
+      "category": "weapons",
+      "cue": "A radial wheel of eight segments overlays the screen centre, the world slows but does not stop, and the wheel's centre shows the weapon name, count and attachments.",
+      "context": "Opened by holding the weapon wheel key. Contextual — never persistent.",
+      "meaning": "Weapon selection. Eight categories fill the wheel; each slot shows the current ammunition for that category. Stat bars in the centre use blue lines for an attachment-increased stat and red for a decreased one. A parachute indicator sits in the wheel's bottom-right when one is carried.",
+      "suggested_action": "OBSERVATION ONLY: the agent has no action that opens the weapon wheel and no action that selects within it — no weapon wheel, no number keys, and no aim/fire actions exist in the harness (combat_hated_targets_around hands targeting to the engine). If a screenshot happens to show this wheel open, it is scripted or ambient, not something the agent triggered; use it only to narrate what is on screen.",
+      "avoid": "Do not assume the game is paused while the wheel is open — time only slows, exposure continues. Do not write or imply a suggested_action that opens the wheel or presses a number key; that capability does not exist for the agent.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources disagree on which category sits in which segment (one wiki places handguns at the top and melee at the bottom; in-game experience commonly reports melee/unarmed at the top). Do not encode segment positions; use the number keys instead.",
+      "sources": [
+        "https://gta.wiki/w/Weapon_Wheel"
+      ]
+    },
+    {
+      "id": "weapon_number_keys",
+      "category": "controls",
+      "cue": "Reference only — a viewer or the harness author wants to know what a number key does on screen; this is NOT something the agent can trigger.",
+      "context": "PC, default key bindings, on foot.",
+      "meaning": "CAPABILITY FACT FIRST: 'No weapon selection. No weapon wheel, no number keys, no reload action' and 'No arbitrary keypresses' are stated as frozen, authoritative limits on the agent's action set. No bridge task and no harness primitive presses a number key or selects a weapon category — this is true regardless of which table below is correct. Reference table (re-verified this pass against bisecthosting.com, which explicitly enumerates 'Select Unarmed: 1' through 'Select Sniper Rifle: 9'): 1 Unarmed, 2 Melee, 3 Shotgun, 4 Heavy Weapon, 5 Special/Thrown, 6 Pistol, 7 SMG, 8 Assault Rifle, 9 Sniper Rifle. A rival table exists in controls_interactions/weapon_number_keys_direct_select; a further attempt to arbitrate the two against a third independent source (gta.wiki's controls page, IGN) failed — both are unreachable to this fetcher. The disagreement is moot operationally: neither table may ever be turned into an action.",
+      "suggested_action": "NEVER emit a number-key weapon-selection action — there is no such action to emit. When a specific weapon class matters, the only lever available is combat_hated_targets_around, which hands targeting and (implicitly) armament choice to the engine's own AI; the agent cannot request a class. If the two domains' tables are ever reconciled against the show machine's real bindings, that reconciliation is reference data for narration, never a trigger.",
+      "avoid": "Do not build any suggested_action around holstering (key 1) or switching classes — no holster/draw/switch action exists. A drawn-weapon state is a side effect of engine behaviour (e.g. after combat_hated_targets_around), not something the agent chooses or can undo on command.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "All bindings are user-remappable in Settings; even if raw keypresses existed, the harness would need to verify against the actual settings file on the show machine rather than trusting any default table. They don't exist, so this is moot for behaviour and kept only as background reference.",
+      "sources": [
+        "https://tutorialtactic.com/blog/gta-v-cheats-shortcuts/",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad"
+      ]
+    },
+    {
+      "id": "core_pc_keys_for_hud_actions",
+      "category": "controls",
+      "cue": "Reference only — this catalogues what a human player's keyboard does; it is NOT a menu of actions available to the agent.",
+      "context": "PC, default bindings, GTA V Story Mode. Included for narration/context, e.g. explaining to viewers what a key on screen would do.",
+      "meaning": "Human-player default bindings, for reference: Cover Q, Special Ability Caps Lock, Weapon Wheel Tab (hold), Character switch wheel Left Alt (hold), Enter/exit vehicle F, Sprint Left Shift, Jump/handbrake Space, Aim right mouse, Fire left mouse, Reload R, Phone Up Arrow, Pause/map Esc. THE HARNESS HAS NO RAW KEYPRESS PRIMITIVE AT ALL except press_prompt_key, which presses only the contextual prompt key and nothing else. Cover, special ability, weapon wheel, character switch, aim, fire, reload, and phone have no bridge task or primitive equivalent whatsoever and cannot be triggered by the agent under any circumstance.",
+      "suggested_action": "Never construct a raw keypress for any of the above. Where a high-level task already covers the intent, use it instead: seek_cover(duration_s) for taking cover, enter_nearest_vehicle/exit_vehicle for the vehicle door, walk_to(run=true/false) for sprint vs walk. For special ability, weapon wheel/selection, character switch, aim, fire, reload, and phone — there is no substitute task either; when one of these would be the obvious human move, fall back to the recovery ladder (flee_police, seek_cover, stop) or narrate the limitation rather than inventing an action.",
+      "avoid": "Do not treat this item as a list of things the agent can do. Do not build behaviour on remembered bindings even for the few real substitute tasks — read the machine's actual key-binding config for anything that ever does become a raw keypress feature.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Sources conflict on some of these human-player bindings (one guide lists Q as special ability and X as ability switch and Z as character select; horn is listed as E by two sources and G by one) — irrelevant to the agent's behaviour since none of them are actions he has, but worth fixing before using this item for viewer-facing narration.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://tutorialtactic.com/blog/gta-v-cheats-shortcuts/",
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b"
+      ]
+    },
+    {
+      "id": "ammo_counter_top_right",
+      "category": "weapons",
+      "cue": "Two numbers in the top-right of the screen, one white and one grey, appearing when a weapon is drawn.",
+      "context": "Contextual — shows when a weapon is equipped and fades when holstered.",
+      "meaning": "The white figure is total rounds carried; the grey figure is the rounds in the current magazine. Re-verified this pass against two independent sources (gamepressure.com: 'the gray one is the number of bullets in the clip'; gtabase.com: the current-magazine count displays in grey) — both agree with the reading already in this item. Grey hitting zero forces a reload; white hitting zero means the weapon is dry.",
+      "suggested_action": "There is no reload action available to the agent (no reload primitive exists), so 'reload during a lull' is not something the harness can request — reloading is presumably automatic/engine-driven when the magazine empties. If the white total is low, treat it as a reason to disengage rather than a shopping trip: there is no Ammu-Nation purchase action available either (no shop-menu interaction in the harness), so 'restock' is not an executable plan, only a fact worth narrating.",
+      "avoid": "Do not read the grey magazine number as total ammo and assume the agent is out of bullets after one magazine. Do not start a firefight on a nearly empty white count. Do not write a suggested_action that 'plans a purchase' — buying ammo/weapons requires a shop menu the agent cannot open.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Sources describe the split slightly differently (one calls the first digit 'combined'); the white=total, grey=magazine reading is the consistent interpretation across both sources checked this pass. A critic review proposed inverting this reading; that proposal is rejected here because it is contradicted by both independently-fetched sources.",
+      "sources": [
+        "https://www.gamepressure.com/gtav/user-interface/z35707",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "money_display_top_right",
+      "category": "text_ui",
+      "cue": "A cash figure in white at the top-right of the screen, sometimes with a red figure beneath it.",
+      "context": "Story Mode: this is per-protagonist. It surfaces when money changes and around menus rather than sitting on screen constantly.",
+      "meaning": "White = the current protagonist's balance. Red beneath = a recent expenditure/debit. Each of the three protagonists has a separate wallet in Story Mode.",
+      "suggested_action": "Read the balance for narration and to explain any bail/hospital-fee deduction after a Busted or Wasted screen. Do not plan Ammu-Nation, Los Santos Customs, or clothing-store purchases around it — there is no shop-purchase action available to the agent (no menu access), so a 'shopping trip' can never be executed regardless of balance; entering Los Santos Customs to shed a wanted level (see los_santos_customs_clears_wanted) needs no purchase and is the one shop-adjacent action that actually works. Announce big swings — money changes are naturally interesting to viewers.",
+      "avoid": "Do not treat one protagonist's balance as shared across all three; switching characters changes the number. Do not confuse the red debit line with a damage indicator.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The exact persistence behaviour (always-on versus fade-on-change) in Story Mode is not confirmed by the sources consulted; verify from a recorded session.",
+      "sources": [
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "subtitles_and_dialogue",
+      "category": "text_ui",
+      "cue": "White dialogue text on a dark strip near the bottom centre of the screen during conversations, phone calls and cutscenes.",
+      "context": "Contextual, tied to spoken lines. Only shows when subtitles are enabled in settings.",
+      "meaning": "Character speech. In missions this is often the only place the actual instruction is given — many objectives are spoken, not printed as an objective line.",
+      "suggested_action": "Keep subtitles enabled on the show machine and pipe them into the harness; they are the richest source of mission intent, and they give the agent something to react to for commentary.",
+      "avoid": "Do not act on dialogue as if it were a hard objective — characters banter constantly. Cross-check against the actual objective text or blip before changing plan.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Subtitles are off by default in some configurations and must be turned on in Settings. Radio chatter is not subtitled.",
+      "sources": [
+        "https://gta.wiki/wiki/Heads-Up_Display",
+        "https://www.grandtheftwiki.com/Heads-Up_Display"
+      ]
+    },
+    {
+      "id": "objective_and_help_text",
+      "category": "text_ui",
+      "cue": "Short instruction text appearing on screen outside of dialogue — the current objective line, plus tutorial/hint boxes that pop in and fade.",
+      "context": "Missions and scripted free-roam events. Objective text is contextual and changes as the mission advances.",
+      "meaning": "The game's explicit statement of what it wants next. Hint/help text is advisory ('press X to…'), objective text is the actual goal. A change in objective text is the most reliable signal that a mission stage advanced.",
+      "suggested_action": "Treat a change in objective text as a trigger to re-plan: the previous target is done, and the blip has probably moved. Read the objective aloud for viewers — it is the clearest way for an audience to follow what the agent is doing.",
+      "avoid": "Do not confuse advisory help text with an objective and chase a tutorial hint as if it were the goal. Do not keep pursuing an old blip after the objective line changed.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some missions give no printed objective at all and rely purely on dialogue and the blip. Objective text placement on screen is not consistently documented across the sources consulted.",
+      "sources": [
+        "https://www.gamepressure.com/gtav/user-interface/z35707",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "area_and_vehicle_name_text",
+      "category": "text_ui",
+      "cue": "A short name appearing next to or just above the radar when entering a new district or a new vehicle.",
+      "context": "Contextual; fades after a few seconds.",
+      "meaning": "The name of the neighbourhood the agent just entered, or the make/model of the vehicle just boarded. In multi-protagonist missions this same area shows the protagonist icons.",
+      "suggested_action": "Excellent free commentary hooks — naming the district or the car the agent just stole makes the stream feel located and reduces silence.",
+      "avoid": "Do not use the area name as a position source; it lags and is coarse. Use the bridge's coordinates.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Not every vehicle or area triggers the label; it suppresses during some missions.",
+      "sources": [
+        "https://www.gamepressure.com/gtav/user-interface/z35707"
+      ]
+    },
+    {
+      "id": "radar_zoom_and_expanded_map",
+      "category": "minimap",
+      "cue": "The radar shows a much larger area with more blips, at lower detail, without anyone having pressed anything.",
+      "context": "GTA V's radar zoom is automatic — it scales with vehicle speed and with waypoint/objective distance. There is no player-controlled zoom action in single player; a manual zoom keybind is a misremembered feature (it exists in other Rockstar titles, not confirmed for GTA V here), and the agent has no raw-keypress capability regardless.",
+      "meaning": "Apparent blip distance on the radar is not stable between frames — it compresses at speed and stretches when slow, purely as a rendering effect, not a change in the world. Do not compare 'how close a blip looked' across two different moments.",
+      "suggested_action": "Do all distance and proximity reasoning from the bridge's actual coordinates (player pos, ped/vehicle distance fields), never from how close something looks on the radar. There is no zoom action to issue in either direction.",
+      "avoid": "Do not judge how close a hostile ped or a police cone is by radar appearance alone — the auto-zoom means the same real distance can look very different from one frame to the next. Do not write a suggested_action that 'zooms' the radar.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Some sources describe a manual zoom control from console/earlier titles; this could not be confirmed as a real GTA V PC single-player feature, and it is moot for the agent either way since no raw keypress exists.",
+      "sources": [
+        "https://www.gamepressure.com/gtav/user-interface/z35707",
+        "https://gta.wiki/w/Radar",
+        "https://tutorialtactic.com/blog/gta-v-cheats-shortcuts/"
+      ]
+    },
+    {
+      "id": "pause_map_vs_radar",
+      "category": "minimap",
+      "cue": "A full-screen map, north-up, in the Enhanced edition rendered grayscale and at higher resolution than the radar.",
+      "context": "Opened from the pause menu. The world is paused; nothing the agent does in-world happens here.",
+      "meaning": "The strategic map: all discovered blips, waypoint placement, mission markers. A human player sets a waypoint here to create the GPS route the radar then draws. The agent has no menu access at all, so he cannot open this map himself — the bridge's set_waypoint(x, y) task achieves the same practical outcome (a GPS route on the radar) directly, without ever opening the pause menu.",
+      "suggested_action": "Use set_waypoint(x, y) to create a route before a long drive_to; there is no need to ever pause the game. Treat any appearance of this map on screen as a scripted or player-adjacent event to narrate, not something the agent opened.",
+      "avoid": "Do not confuse the grayscale pause map with the grayscale WASTED/BUSTED screens; they look superficially similar in a screenshot but one is a menu and one is a death.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The Legacy edition's pause map is coloured rather than grayscale.",
+      "sources": [
+        "https://gta.wiki/w/Grand_Theft_Auto_V",
+        "https://www.gtabase.com/articles/grand-theft-auto-v/gta-5-features-guide-gameplay-hud-combat-money"
+      ]
+    },
+    {
+      "id": "gps_route_and_distance_readout",
+      "category": "minimap",
+      "cue": "A coloured line traced along the roads on the radar toward a destination blip, with a direction indicator and a distance/mileage readout.",
+      "context": "Present whenever a waypoint or an active mission destination exists. Disappears in tunnels (see radar_tunnel_gps_loss).",
+      "meaning": "The game's own road-following route to the current destination, plus how far it is. The route follows drivable roads, so it is a far better plan than a straight-line bearing.",
+      "suggested_action": "Follow the drawn route rather than the raw bearing to the blip, especially in the hills, at the docks, and around freeway interchanges where straight-line and road distance diverge wildly. Use the distance readout to decide whether to walk or steal a car.",
+      "avoid": "Do not steer toward the blip's compass bearing while the route line says otherwise — that is how the agent ends up nose-first against a freeway retaining wall.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The route assumes a road vehicle; it is misleading on foot in parks and off-road, and useless in aircraft. Route line colour in GTA V could not be confirmed from the sources consulted.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://www.gamepressure.com/gtav/user-interface/z35707"
+      ]
+    },
+    {
+      "id": "confusion_flashing_signals",
+      "category": "disambiguation",
+      "cue": "Something on screen is flashing.",
+      "context": "Three unrelated GTA V HUD elements flash, in three different places, meaning three different things. This is the highest-value disambiguation on the whole HUD.",
+      "meaning": "(1) Radar border flashing red/blue, bottom-left = police can SEE you, actively pursuing, timer not running. (2) Wanted stars flashing, top-right = police have LOST you, search mode, timer running, slower flash means closer to escape. (3) Health bar flashing red, under the radar = stamina exhaustion from sprinting/swimming, no police involved at all.",
+      "suggested_action": "Always resolve which element is flashing before reacting. Radar flash → break line of sight now. Star flash → hold still and stay hidden. Health flash → stop sprinting.",
+      "avoid": "Never collapse these into a generic 'something is flashing, panic'. Reacting to a stamina flash as though it were a police sighting, or resuming an objective during flashing stars, are both common and costly.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The radar flash and the star flash are mutually exclusive by design — active pursuit and search mode cannot both be true.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Health",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "confusion_three_bars_under_radar",
+      "category": "disambiguation",
+      "cue": "Three thin horizontal bars sit in one strip under the radar and are easy to misread at a glance.",
+      "context": "Persistent. Left half of the strip is health; the right half carries armour and ability.",
+      "meaning": "Green (left half) = health, the only one that kills. Blue (right) = body armour, a consumable buffer that also cushions falls. Yellow (right) = special ability charge, or oxygen while underwater. Only green empty means Wasted.",
+      "suggested_action": "Read colour before length. Base the fight-or-flee decision solely on the green bar; treat blue as a bonus and yellow as a tool.",
+      "avoid": "Do not read a full blue armour bar as 'healthy'. Do not read a draining yellow bar underwater as an ability discharge — it is drowning.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "When armour is zero its bar is absent, which makes the yellow ability bar sit where the blue one usually is — a real source of misreads.",
+      "sources": [
+        "https://gta.wiki/w/Health",
+        "https://gta.wiki/w/Body_Armor",
+        "https://gta.wiki/w/Special_Ability",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "confusion_grayscale_screens",
+      "category": "disambiguation",
+      "cue": "The screen has gone grayscale.",
+      "context": "At least four distinct GTA V states desaturate the screen.",
+      "meaning": "(1) WASTED — grayscale plus slow motion plus the word WASTED centred (NOT a protagonist-name line; '<Character> died' is the separate Mission Failed reason text, see mission_failed_and_retry_prompt); costs up to $5,000, respawn at a hospital, weapons kept. (2) BUSTED — gray plus a character-coloured flash plus the word BUSTED; bail money, ammo and armour confiscated, respawn at a police station. (3) The Enhanced edition's pause-menu map, which is grayscale by design and harmless. (4) A mission-failed transition, which is where the protagonist-name reason line actually appears.",
+      "suggested_action": "Distinguish by the accompanying text and by whether the world is paused. Only (1) and (2) require re-reading position and re-planning; (3) requires nothing.",
+      "avoid": "Do not report a death on stream because the pause map is grayscale. Do not apply Wasted's consequences (keeps weapons) to a Busted (loses ammo and armour). Do not classify a '<Character> died' mission-failure banner as case (1) WASTED — it is case (4), with retry-checkpoint consequences, not the $5,000/hospital-respawn consequences of a free-roam death.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The Enhanced edition renders the Wasted screen slightly differently from Legacy and drops the metallic sound cue, so audio is not a reliable discriminator across editions.",
+      "sources": [
+        "https://gta.wiki/w/Wasted",
+        "https://gta.wiki/w/Busted",
+        "https://gta.wiki/w/Grand_Theft_Auto_V"
+      ]
+    },
+    {
+      "id": "confusion_blip_vs_world_marker",
+      "category": "disambiguation",
+      "cue": "A destination is signalled twice: a coloured blip on the radar, and a translucent coloured cylinder or arrow standing in the world itself.",
+      "context": "Missions, mod shops, safehouses, and activity entry points.",
+      "meaning": "The radar blip tells the agent roughly where to go; the in-world corona/cylinder is the exact trigger volume he must physically stand or drive inside for anything to happen. Reaching the blip is not the same as entering the marker.",
+      "suggested_action": "After the radar distance stops shrinking, look for the world marker and drive/walk into its centre. If a mission will not start, the usual cause is being adjacent to the trigger rather than inside it — and on foot when the trigger wants a vehicle, or vice versa.",
+      "avoid": "Do not conclude a mission is broken or unavailable because standing next to the blip did nothing. Do not ignore a blip's elevation arrow while hunting for the marker.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some triggers require a specific protagonist, a specific vehicle type, or a story-progress gate, and will show the marker while refusing to fire.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/missions/",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "character_switch_wheel_colours",
+      "category": "screens",
+      "cue": "Holding the character-switch key opens a wheel with three protagonist portraits; the camera then pulls up and swoops across the map, Google-Earth style, before dropping onto the new character.",
+      "context": "Story Mode free-roam only. Blocked during most missions and while wanted.",
+      "meaning": "Character switching. Michael is blue, Franklin green, Trevor orange throughout the UI — the same colours as their mission blips. The swoop is a real transition of several seconds during which whoever is in control has no input. IMPORTANT: character switching has NO bridge task and NO harness primitive — it is not in the 11 bridge tasks or the 8 primitives. The agent cannot trigger this himself, ever, under the current action set.",
+      "suggested_action": "If a switch happens anyway (a scripted mission moment forces one), treat it purely as commentary: narrate the swoop, do not queue tasks during it, and re-read full state (position, health, armour, vehicle, wanted) the moment control returns, since the new protagonist can be doing something arbitrary. Never plan to 'use the switch' to reach a different-colour mission blip — that plan has no action behind it (see mission_blip_protagonist_letters).",
+      "avoid": "Do not write a suggested_action that triggers a character switch. Do not queue tasks during the swoop.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The new protagonist appears wherever the game left him, doing something arbitrary — the agent must re-read position, health, armour and wanted state from the bridge after every switch, on the rare occasion one happens via mission scripting.",
+      "sources": [
+        "https://gta.wiki/w/Grand_Theft_Auto_V",
+        "https://www.gtabase.com/grand-theft-auto-v/missions/",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad"
+      ]
+    },
+    {
+      "id": "enhanced_vs_legacy_hud",
+      "category": "edition_differences",
+      "cue": "The radar looks three-dimensional with a different colour scheme than older screenshots and guides show.",
+      "context": "The Enhanced edition of GTA V versus the Legacy edition. Both exist on PC and the show machine will be running one specific build.",
+      "meaning": "Enhanced changed the radar to a three-dimensional appearance with a new colour scheme, and made the pause-menu map grayscale and higher resolution. Wiki descriptions and older guides frequently describe Legacy visuals.",
+      "suggested_action": "Pin which edition the show machine runs and calibrate any pixel-level or colour-level HUD reading against that build specifically, from a real recorded session.",
+      "avoid": "Do not hard-code HUD colours, positions or shapes from wiki text or from screenshots of the other edition — this is exactly the kind of guessing the project's rules forbid.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The functional semantics described elsewhere in this domain (flashing stars, cones, bar ordering) are consistent across editions; only the rendering differs.",
+      "sources": [
+        "https://gta.wiki/w/Grand_Theft_Auto_V"
+      ]
+    },
+    {
+      "id": "hud_absent_means_no_agency",
+      "category": "minimap",
+      "cue": "The radar, bars, stars and all text vanish at once.",
+      "context": "Cutscenes, phone screens, menus, mission intros and outros, the Rockstar Editor.",
+      "meaning": "The game has taken control. Inputs are ignored or repurposed. This is the difference between 'the agent chose to do nothing' and 'the agent could not act', and viewers can see which is which.",
+      "suggested_action": "Switch to commentary mode: narrate the cutscene, do not issue tasks, and resume planning on the frame the HUD returns. Re-read full state on HUD return — position, vehicle, health and objective may all have changed during the scene.",
+      "avoid": "Do not spam tasks into a cutscene. Do not assume the world state after a cutscene matches the state before it.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Some scripted sequences hide only part of the HUD (radar only, or stars only) while control is retained; partial absence is not proof of a cutscene.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://www.gamepressure.com/gtav/user-interface/z35707"
+      ]
+    }
+  ],
+  "notes": "SEARCH BUDGET: this session exhausted its 200-call WebSearch budget partway through; later research was done with direct WebFetch only, which limited how many independent corroborating sources I could reach for the last third of the items. gta.fandom.com returns HTTP 402 as instructed, and the gta.wiki mirror is a partial mirror — several pages I wanted returned 404 (gta.wiki/w/Blip, /w/Blips, /w/Mission_Failed, /w/Checkpoint, /w/Grand_Theft_Auto_V_Enhanced). ign.com is blocked to this fetcher entirely and pcgamingwiki returned HTTP 403, so two of the suggested source domains contributed nothing.\n\nCOULD NOT VERIFY — treat these as gaps to close against a real recorded session on the show machine before anything depends on them:\n1. Exact on-screen COORDINATES of most HUD elements. Only three placements are well sourced: radar bottom-left, wanted stars top-right, health/armour/ability strip directly under the radar. Objective text, mission title banner, and subtitle positions are described only loosely and inconsistently across guides. I deliberately did not invent pixel positions.\n2. GPS route line COLOUR in GTA V (mission route vs user waypoint route). No source consulted stated it. The item gps_route_and_distance_readout says \"a coloured line\" rather than guessing.\n3. The MISSION TITLE / name banner. Multiple sources confirm a mission title is displayed at mission start, but none described its appearance, colour, or screen position. Not included as its own item for that reason.\n4. The MISSION FAILED screen's visual design. Confirmed to exist with a checkpoint-retry prompt and a stated failure reason, but no source described its colour, layout, or button prompt. Item is written at medium confidence around the behaviour only.\n5. Whether GTA V shows greyed-out/hollow \"unearned\" stars alongside earned ones in Story Mode (Online does show a five-star frame). Unverified — omitted rather than guessed.\n6. Whether the Story Mode money readout is persistent or fades on change. Flagged in the item's exceptions.\n7. Exact evasion durations per star level. Every source says only \"depends on the severity of the Wanted Level\" without numbers.\n\nSOURCE DISAGREEMENTS (all flagged inline in the relevant items' \"exceptions\"):\n- PC key bindings. gamepressure.com lists Q = special ability, X = ability switch, Z = character select, horn = E. bisecthosting.com and tutorialtactic.com agree with each other on Q = cover, Caps Lock = special ability, Tab = weapon wheel, Left Alt = character wheel. I went with the two agreeing sources but marked the whole item medium confidence, because bindings are user-remappable and the harness must read the machine's actual config rather than trust any of these.\n- Horn key: E (two sources) vs G (one source).\n- Radar/minimap zoom on PC: reported as Z by one source, which directly conflicts with another source assigning Z to character selection.\n- SPECIAL ABILITY BAR COLOUR. gta.wiki and gtabase both explicitly say the bar is YELLOW. Other guides describe it as tinted per protagonist (Michael blue, Franklin green, Trevor orange). I resolved this as: the bar is yellow; the per-character colours are real but belong to the character-switch wheel, the mission blips (M/F/T), and the screen tint during the ability — all of which are separately sourced. If a recorded session shows a tinted bar, this item needs correcting.\n- WEAPON WHEEL SEGMENT LAYOUT. gta.wiki places handguns at the top and melee at the bottom; this contradicts the layout commonly reported in play. I deliberately did NOT encode segment positions and pointed the item at the number keys instead, which are unambiguous.\n- BUSTED consequences. The general series-wide claim is \"all weapons and armour confiscated\"; the GTA V-specific page says only ammo and body armour are taken, plus any weapon drawn at the moment of arrest, plus a few named weapons. I used the GTA V-specific reading at medium confidence — this is a genuinely load-bearing difference for the agent's fight-or-surrender policy and should be confirmed empirically.\n- HEALTH REGENERATION. gta.wiki states regeneration up to 50% requires standing still, with cover speeding it up; gtabase describes it as simply automatic below 50%. I encoded the stricter rule as the safe assumption and flagged the conflict.\n\nSTRONGEST, MOST DECISION-CRITICAL FINDINGS (all double-sourced or quoted from in-game tutorial text on the GTA V wanted-level page): the radar flashes red/blue when police CAN see you, versus the wanted stars flashing when they CANNOT and the escape timer is running, with slower flashing meaning closer to escape, and police vision cones drawn on the radar only during that search mode. The agent's chase policy should be built on that three-state distinction more than on anything else in this domain.\n\nONLINE-ONLY CONTENT: deliberately excluded. Where a mechanic exists in both (the health/armour/ability strip, the weapon wheel), I described only the Story Mode behaviour — e.g. the yellow bar is the Special Ability in Story Mode but a specialised-vehicle function in Online, and Story Mode money is per-protagonist rather than a single shared balance.\n\nREPAIR PASS (against CAPABILITIES.md and three adversarial critic reviews): stripped every suggested_action that assumed an unavailable capability — raw keypresses (Caps Lock/special ability, weapon wheel, number-key weapon selection, aim/fire/reload, phone), shop/menu purchases (Ammu-Nation, armour, clothing/mask toggling), character switching, and parachute deployment — replacing each with either the correct bridge-task substitute (seek_cover, enter_nearest_vehicle/exit_vehicle, walk_to run-flag, set_waypoint) or an explicit 'observation/narration only, not an action' framing; corrected mission_blip_protagonist_letters and blip_colour_semantics to defer to map_markers' colour=protagonist / letter=giver and disambiguation-order facts; corrected wasted_screen and confusion_grayscale_screens to separate the true WASTED text from the '<Character> died' Mission Failed reason line; corrected mission_failed_and_retry_prompt's false gold-medal/100%-completion claim; corrected wanted_stars_position_and_count to remove open-world military/Rhino-tank claims (Rhino confirmed Fort-Zancudo-only); strengthened health_regen_below_half_standing_still with a directly-quoted source and added that driving a vehicle also regenerates, to reduce standing exposed in the open; corrected radar_zoom_and_expanded_map to state GTA V's radar zoom is automatic, not player-controlled. Re-verified and explicitly KEPT (rejected the critic's proposed change) on two points after independent WebFetch confirmation: ammo_counter_top_right's white=total/grey=magazine reading (two sources agreed with the original, contradicting the critic), and Trevor's Red Mist as true damage/death immunity rather than the critic's 'can absolutely be killed' claim (two sources confirm 'cannot die while active'). No items were deleted; all 46 ids preserved."
+}

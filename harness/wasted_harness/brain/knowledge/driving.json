@@ -1,0 +1,813 @@
+{
+  "domain": "driving",
+  "items": [
+    {
+      "id": "pc_default_vehicle_keybinds",
+      "category": "controls_bindings",
+      "cue": "A knowledge consumer needs to understand what a given vehicle control actually does in-game, to reason about physics/AI-driver behaviour or to map a harness primitive onto the game's real input scheme.",
+      "context": "GTA V on PC, default (unmodified) keyboard bindings, Story Mode. Reference only: the harness's frozen action vocabulary has no generic raw-keypress action, so this table cannot be 'used' directly by the agent — it exists to explain what the game's own bindings mean, for background reasoning.",
+      "meaning": "Confirmed default driving bindings, kept for reference: W = accelerate, S = brake/reverse, A/D = steer left/right, SPACE = handbrake, E = horn (also 'next radio station'), H = headlights, F = exit vehicle, C = look behind, X = duck in car, LMB = fire drive-by, RMB = aim drive-by, CAPS LOCK = special ability. None of the last five (H, C, X, LMB/RMB, CAPS LOCK) map to anything the harness can emit, and there is no raw W/A/S/D/SPACE/F key action either — only the primitives and bridge tasks below exist.",
+      "suggested_action": "Treat this table as background only, never as a callable action list. The harness's real vocabulary is 11 bridge tasks (drive_to, walk_to, enter_nearest_vehicle, exit_vehicle, wander_drive, flee_police, combat_hated_targets_around, seek_cover, follow_entity, set_waypoint, stop) plus 8 primitives (look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn). Map onto it like this: brake_tap approximates a momentary S, reverse_out(ms) approximates holding S past the reverse dead-zone, swerve(direction) approximates a brief A/D flick, press_prompt_key covers only the contextual prompt (never a chosen key), horn and radio are direct calls, and exit_vehicle replaces F. Prefer drive_to/wander_drive for all real navigation.",
+      "avoid": "Do not build or expect a generic raw-keypress action anywhere in this knowledge base — it does not exist. Do not write a suggested_action that assumes headlights, duck, look-behind, drive-by fire/aim or the special-ability key are emittable; they are not (see franklin_driving_focus). Do not reuse on-foot key meanings in a vehicle.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Cinematic/camera keys disagree between sources: one guide lists R as cinematic camera, another lists V as the 'movie camera' and Tab as slow-motion. Treat camera keys as unverified. Seat-shuffle and 'bail out' have no separately documented default key in either source consulted.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b",
+        "https://gta.wiki/w/Special_Ability"
+      ]
+    },
+    {
+      "id": "brake_and_reverse_share_one_key",
+      "category": "controls_bindings",
+      "cue": "the agent wants to reverse, or wants to slow down, using the harness's brake_tap or reverse_out primitives.",
+      "context": "Any land vehicle. In the underlying game, S is a single context-sensitive key (brake, then reverse); the harness instead exposes two separate primitives, brake_tap and reverse_out(ms), so the agent never has to disambiguate S himself — but the primitive that maps to reverse_out almost certainly still holds S internally, so the game's dead-zone behaviour still applies to it.",
+      "meaning": "In the game, S brakes while moving forward and only engages reverse once forward speed reaches roughly zero. Because reverse_out(ms) most likely implements this by holding S for the given duration, a short reverse_out call can be entirely consumed by the braking phase and produce little or no backward displacement.",
+      "suggested_action": "Use brake_tap (not reverse_out) to slow down or stop. Use reverse_out only when deliberate reverse is wanted, and expect a ~0.5-1s dead zone inside the call before the car actually moves backwards; measure displacement from /state after that point, not from when the call was issued.",
+      "avoid": "Do not interpret 'no displacement 300 ms into a reverse_out call' as stuck — that is the expected dead zone. There is no parking-brake primitive, so do not try to hold position with reverse_out; re-issue brake_tap or simply stop calling drive_to/wander_drive.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The transition timing is not documented in any source consulted; it is inferred from the shared binding. Calibrate the dead-zone empirically on the real machine before relying on the number.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b"
+      ]
+    },
+    {
+      "id": "keyboard_steering_is_binary",
+      "category": "controls_bindings",
+      "cue": "the agent needs to change heading in a land vehicle and only harness-level controls are being considered.",
+      "context": "The harness has no continuous steering primitive at all. Real navigation runs entirely through drive_to/wander_drive (the game's own AI driver handles steering); the only manual direction control is swerve(direction), a brief evasive nudge, not a held input.",
+      "meaning": "A raw held A/D keypress ramps toward full lock and is the single largest cause of oversteer and spinouts for a keyboard-driven car — but that failure mode is moot for the agent, because the harness cannot hold or pulse a steering key at all. All of the agent's actual heading changes come from drive_to's own pathing, not from anything resembling a keypress.",
+      "suggested_action": "Always route real navigation through drive_to or wander_drive. Reserve swerve for a single, short obstacle-avoidance nudge — issue it once per event, never repeatedly to 'steer' through a corner or hold a line.",
+      "avoid": "Never write a suggested_action anywhere in this knowledge base that assumes a held or pulsed steering key exists — it does not. Never treat swerve as a substitute for driving a whole corner or route.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "This item now documents an internal capability boundary rather than tunable physics: the underlying keyboard-steering-ramp behaviour is real for a human player, but it is not something the agent's action vocabulary is exposed to at all.",
+      "sources": [
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad"
+      ]
+    },
+    {
+      "id": "handbrake_is_a_rotation_tool_not_a_brake",
+      "category": "control_technique",
+      "cue": "A sharp turn (roughly 90 degrees or more) is coming up on the GPS route line, or the agent needs to reverse direction after overshooting.",
+      "context": "Land vehicles on paved surfaces. In the game, SPACE is the handbrake; the harness has no handbrake primitive and no held-steering primitive, so the human handbrake-turn technique cannot be executed by the agent directly.",
+      "meaning": "The handbrake locks the rear wheels: it barely shortens stopping distance compared with the footbrake, but it breaks rear traction and lets the car rotate. That is real physics, but the technique built on it (brake, tap handbrake with steering, release, accelerate out) is not in the agent's action vocabulary at all — there is no primitive for either half of it. The lever he actually has for a sharp turn is drive_to itself.",
+      "suggested_action": "For a sharp turn or a missed-turn correction, do not attempt manual handbrake technique. Instead cut the drive_to speed_mps target well before the corner (see corner_sequence_brake_turn_accelerate) and let the game's own AI driver execute the turn; use brake_tap as a manual assist only if the vehicle is clearly still carrying too much speed on approach.",
+      "avoid": "Do not write or expect a suggested_action that presses SPACE, holds a steer key, or times a handbrake-and-release sequence — none of that is callable. Do not assume brake_tap alone rotates the car; it only slows it.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Handbrake effectiveness varies hugely by class: it is nearly useless on heavy trucks, buses and loaded semis, and it will lay a motorcycle down. Sources confirm the binding but not the physics detail; the physics description is standard driving technique applied to GTA V's arcade-sim model.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b"
+      ]
+    },
+    {
+      "id": "franklin_driving_focus",
+      "category": "control_technique",
+      "cue": "A plan, another domain's item, or incoming research suggests activating Franklin's Driving Focus (or any protagonist special ability) to handle a hard driving moment.",
+      "context": "GTA V Story Mode has a real per-protagonist special-ability system (Franklin's Driving Focus among them), activated on PC with CAPS LOCK. The harness's frozen action vocabulary has no special-ability primitive and no raw-keypress action at all — CAPS LOCK is not emittable, and this holds across the whole knowledge base, not just driving.",
+      "meaning": "Whatever benefit Driving Focus gives a human player is simply not available to the agent. Any plan, hard-trigger, or timing rule built around 'popping the ability' is dead code that will either silently no-op or make the agent narrate an action that never happened — the single most damaging failure mode on a live stream. The ability's charge meter is also not exposed by /state, so there is nothing here for the harness to read or react to either.",
+      "suggested_action": "Delete Driving Focus from planning entirely. For the hard moments a human would spend the ability on — a tight corner sequence, threading dense traffic, a high-speed chase — the only real levers are: lower the drive_to speed_mps target in advance, pick a better-suited vehicle class ahead of time (see the class_* items), and use brake_tap/swerve as manual assists. Any cross-domain item that still gates a decision on this ability should be treated as broken and deferred to this one.",
+      "avoid": "Never write or leave in place a suggested_action that presses CAPS LOCK, spends a special-ability meter, or times anything against an ability charge or duration. Never treat 'ability is charged' as a state the agent can check.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None — this is a hard capability boundary, not a judgment call. If a future harness version adds a special_ability primitive, this item must be rewritten to match, not silently ignored.",
+      "sources": [
+        "harness action catalog (bridge tasks + primitives; see project CAPABILITIES reference)",
+        "https://gta.wiki/w/Special_Ability"
+      ]
+    },
+    {
+      "id": "driving_skill_stat",
+      "category": "vehicle_selection",
+      "cue": "Choosing which protagonist drives a long or stunt-heavy route, or evaluating why airborne landings keep ending in a crash.",
+      "context": "GTA V Story Mode character stats. Each protagonist has a Driving stat that grows with use.",
+      "meaning": "The Driving stat mainly improves airborne vehicle control and makes wheelies and big-jump landings survivable. It grows fastest from time spent driving, wheelies and landed stunt jumps. It is a modifier, not a fix — it does not turn a van into a sports car.",
+      "suggested_action": "If the show runs long, driving time will max the stat on its own; no special grinding needed. When a route involves a jump or a drop, prefer the character with the higher Driving stat, and prefer landing wheels-first and straight.",
+      "avoid": "Do not attribute ordinary cornering failures to a low Driving stat — the stat's documented effect is airborne handling, not grip.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The wiki does not state which protagonist starts highest, and does not separate bike from car effects. Franklin being the designated driver character is a reasonable inference but is not stated on the page consulted.",
+      "sources": [
+        "https://gta.wiki/w/Stats"
+      ]
+    },
+    {
+      "id": "class_super_and_sports",
+      "category": "handling_physics",
+      "cue": "Nearby vehicle list or current vehicle reports a Super or Sports class model.",
+      "context": "GTA V Story Mode. Super and Sports are the light, high-grip, high-power classes.",
+      "meaning": "Highest top speed and acceleration, strongest grip on dry tarmac, but very low ground clearance and a short suspension travel. They are the fastest way across the city on freeways and the worst choice for kerbs, dirt, ramps or ramming — they beach on obstacles, and the power will spin the rear on a wet or dusty surface.",
+      "suggested_action": "Pick these for a paved point-to-point run with a time pressure, or to catch a fleeing target on road. Keep them on the tarmac; route around off-road segments even if it adds distance.",
+      "avoid": "Do not take a supercar off-road, over a kerb-and-verge shortcut, or into a demolition-derby situation. Do not apply full throttle out of a slow corner — modulate.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "gtabase tracks per-vehicle top speed, acceleration, braking and traction, so individual models vary widely inside a class; the class label is a prior, not a measurement. Class handling descriptions are aggregated from a low-quality secondary source plus the class taxonomy on gta.wiki/gtabase, so treat specifics as guidance rather than fact.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "class_muscle",
+      "category": "handling_physics",
+      "cue": "Current or candidate vehicle is Muscle class.",
+      "context": "GTA V Story Mode.",
+      "meaning": "Heavy, rear-driven, strong straight-line acceleration but limited grip relative to power. They understeer into a corner and oversteer out of it, and they are the class most likely to spin from a clumsy throttle input. Their mass makes them good at surviving and dealing collisions.",
+      "suggested_action": "Use for ramming, roadblock-breaking and straight-road escapes. Enter corners slower than a sports car would and feed throttle in gradually on the exit.",
+      "avoid": "Do not full-throttle out of a corner or a standing start while the wheel is turned — that is a guaranteed spin. Do not pick a muscle car for a twisty canyon route when a sports car is available.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Per-model variation is large. Sourcing on class handling is weak; verify against per-vehicle traction figures on gtabase for any vehicle the agent uses often.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "class_suv_and_van",
+      "category": "handling_physics",
+      "cue": "Current or candidate vehicle is an SUV, Van, Commercial or Service class model.",
+      "context": "GTA V Story Mode.",
+      "meaning": "High centre of mass, pronounced body roll, slow acceleration, long braking distance. The single most important consequence is rollover risk: a hard direction change at speed, or clipping a kerb mid-corner, will put an SUV or van on its side or roof. They do tolerate rough ground and kerbs far better than low cars.",
+      "suggested_action": "Cut target cornering speed by roughly a third versus a sports car, brake earlier, and make direction changes one at a time rather than swerving. Good default for a mixed-surface route or when carrying passengers matters.",
+      "avoid": "Do not swerve to dodge traffic at speed in a tall vehicle — take the hit or brake instead. Do not handbrake-turn a van at speed.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Class-level generalisation; specific SUVs differ. Rollover thresholds are not documented numerically in any source consulted.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "class_offroad",
+      "category": "handling_physics",
+      "cue": "Current or candidate vehicle is Off-Road class, or the route ahead crosses dirt, sand, riverbed or hillside.",
+      "context": "GTA V Story Mode. Off-Road is a distinct vehicle class on both gta.wiki and gtabase.",
+      "meaning": "Off-road vehicles trade top speed for suspension travel, ground clearance and grip on loose surfaces. On dirt and sand they will out-corner and out-accelerate a supercar; on tarmac they are slower and roll more.",
+      "suggested_action": "Choose an off-road vehicle whenever the route leaves paved roads — Blaine County, hill trails, riverbeds, or a cross-country shortcut. On loose surfaces, the correct technique is a small amount of continuous throttle rather than on/off bursts.",
+      "avoid": "Do not take a low-clearance car onto sand or a riverbed; the likely outcome is beaching, which reads to the harness as 'stuck' and burns minutes of stream time.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Traction-by-surface is described only qualitatively in the sources consulted; there is no published grip multiplier for dirt vs tarmac in GTA V.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "class_industrial_truck_trailer",
+      "category": "handling_physics",
+      "cue": "Current vehicle is Industrial or Commercial class — a semi tractor, a tractor with trailer, a tipper or a bus.",
+      "context": "GTA V Story Mode.",
+      "meaning": "Very high mass, very long stopping distance, wide turning circle, and with a trailer attached the rig jack-knifes if the tractor is turned sharply or braked hard while the trailer is loaded. Reversing an articulated rig is close to impossible for an automated driver.",
+      "suggested_action": "Treat these as low-manoeuvrability: plan turns one intersection early, brake at roughly three times the distance used for a sedan, never reverse an articulated rig — drive forward in a wide loop instead. Excellent for smashing through roadblocks.",
+      "avoid": "Do not attempt a U-turn on a two-lane road, do not enter narrow alleys or parking structures, and do not handbrake — it will jack-knife.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Jack-knife behaviour is not described in the sources consulted; it is standard GTA V player knowledge and should be treated as unverified until observed on the real install.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "class_motorcycle",
+      "category": "motorcycle",
+      "cue": "Current or candidate vehicle is Motorcycle class, or the route requires threading dense traffic.",
+      "context": "GTA V Story Mode. Bikes have their own control quirks: W held is also 'sprint/lean forward', S is the front brake per the PC keybind guide.",
+      "meaning": "Bikes are the fastest way through congested city traffic and the most fragile option in every other respect. A meaningful collision, a hard front-brake input, or a bad landing throws the rider off; the rider is then on foot with a bike lying somewhere, and any pursuit or escort task collapses. Bikes also get no protection from gunfire.",
+      "suggested_action": "Use a bike for a fast urban traverse with no combat expected, or when the target being chased is on a bike. If a chase or firefight is likely, take a car. Slow with repeated brake_tap calls rather than one long one — the harness has no separate front/rear brake control, and a single held brake input is the closest analogue to the front-brake grab that throws a rider.",
+      "avoid": "Do not ride a bike into a police chase where PIT manoeuvres and spike strips are in play, and do not take a bike where the drive_to path may run over kerbs at speed.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The keybind guide lists 'front brake on a bike = S' and 'sprint on a bike = hold W'; the fall-off thresholds are not documented in any source consulted and vary with speed, angle and the Driving stat.",
+      "sources": [
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b",
+        "https://gta.wiki/w/Stats",
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "class_emergency",
+      "category": "vehicle_selection",
+      "cue": "the agent is considering stealing or is already driving a police cruiser, ambulance or fire truck.",
+      "context": "GTA V Story Mode. Emergency is a documented vehicle class.",
+      "meaning": "Police cruisers handle well and are fast, but stealing one in view of police is itself a crime that raises the wanted level, and driving one does not make the agent invisible to police. Fire trucks and ambulances are heavy and slow. Emergency vehicles also cannot be modified or stored like civilian ones.",
+      "suggested_action": "Take a police cruiser only when it is already abandoned and no officer has line of sight, and only when its speed genuinely matters. Otherwise prefer a civilian car of the right class.",
+      "avoid": "Do not jack an occupied police car to 'blend in' — it escalates the wanted level rather than reducing it, and it does not defeat the line-of-sight search system.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The wanted-level consequence of stealing a police vehicle specifically is not spelled out in the sources consulted; it is inferred from GTA V's crime-witnessed-by-police mechanic on the wanted level page.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wet_road_traction",
+      "category": "surface_traction",
+      "cue": "Weather state reports rain or thunderstorm, or road surfaces render wet/reflective.",
+      "context": "GTA V Story Mode dynamic weather, any land vehicle.",
+      "meaning": "Grip is highest on dry pavement and degrades on wet surfaces. In practice this means longer braking distances, easier wheelspin from a standing start, and a much narrower margin before a corner turns into a slide — worst on high-power rear-drive Muscle and Super class cars.",
+      "suggested_action": "When rain is active, reduce target cornering speed by roughly 25-30 percent, begin braking noticeably earlier, and feed throttle progressively out of corners. Prefer an all-wheel-drive or heavier vehicle if one is nearby.",
+      "avoid": "Do not carry the same corner-entry speed used in dry weather, and do not treat a rain-induced slide as a stuck condition — it is a control problem, not a geometry problem.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "GTA V's wet-grip penalty is not quantified in any authoritative source located; the only supporting statement came from a low-quality secondary article. Verify empirically by comparing braking distances in rain vs clear on the real install before tuning the speed reduction.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V"
+      ]
+    },
+    {
+      "id": "dirt_and_loose_surface",
+      "category": "surface_traction",
+      "cue": "Position leaves the paved road network — Blaine County trails, riverbeds, beach sand, construction lots, farmland.",
+      "context": "GTA V Story Mode, any land vehicle. Off-Road class exists specifically for these surfaces.",
+      "meaning": "On loose surfaces the car slides earlier and steering has less authority, but the slide is progressive rather than snap. Low-clearance cars bottom out on ruts and rocks and can beach with wheels off the ground, which no amount of throttle will fix.",
+      "suggested_action": "Drop the drive_to speed_mps target substantially before a turn rather than at the apex — there is no steering primitive to correct with mid-turn — and keep a small steady speed so the wheels stay loaded rather than pulsing on and off. If the harness is routing cross-country, swap to an Off-Road class vehicle first.",
+      "avoid": "Do not apply full throttle to escape a rut — wheelspin digs in. Do not use the handbrake on loose ground unless deliberately rotating.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Qualitative only; GTA V publishes no surface grip coefficients and no source consulted quantifies them.",
+      "sources": [
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "snow_only_in_scripted_segments",
+      "category": "surface_traction",
+      "cue": "The world is rendered snow-covered.",
+      "context": "GTA V Story Mode. Snow is not part of the normal Los Santos weather rotation; it appears in the North Yankton scripted sequences and, historically, around the in-game Christmas period.",
+      "meaning": "If snow is on the ground, the agent is almost certainly inside a scripted mission segment rather than in free roam, and grip is at its lowest. The high-order inference matters more than the traction: snow means 'a mission is running, follow the objective, do not wander'.",
+      "suggested_action": "Treat snow as a strong signal that mission state should be checked. Drive conservatively: gentle inputs, early braking, no handbrake.",
+      "avoid": "Do not start a wander_drive or a self-directed errand while snow is on the ground; do not assume normal Los Santos routes apply.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Not verified against a source in this pass. The North Yankton association is well-established player knowledge; the Christmas snow behaviour in current Story Mode builds is unverified and may not occur at all on the installed version.",
+      "sources": []
+    },
+    {
+      "id": "gps_route_line_colours",
+      "category": "route_following",
+      "cue": "A coloured route line is drawn on the radar and the map.",
+      "context": "GTA V Story Mode with a waypoint or a mission destination active.",
+      "meaning": "Colour distinguishes intent: yellow routes and waypoints are mission-generated, purple routes and waypoints are the ones the player set. A yellow line means the game itself is directing the agent to a mission destination; a purple line means the agent (or the harness) chose the destination.",
+      "suggested_action": "Give the yellow line priority over any purple one — a mission route is a hard requirement, a player waypoint is a preference. If both exist, drop the purple waypoint rather than trying to satisfy both.",
+      "avoid": "Do not overwrite a mission's yellow route by setting a new player waypoint mid-mission; the visual cue the agent relies on becomes ambiguous.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Colour naming is from the wiki; if the harness reads the route programmatically rather than visually, use the game's own mission/waypoint flags instead of colour.",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "gps_auto_reroutes_silently",
+      "category": "route_following",
+      "cue": "the agent leaves the drawn route line — a missed turn, a deliberate shortcut, or a shunt into a side street.",
+      "context": "GTA V Story Mode. Unlike GTA IV, GTA V's GPS recalculates automatically once the player goes off-route, with no 3-5 second delay and no voice announcement.",
+      "meaning": "There is no audible or textual 'recalculating' event. The line simply changes. This is a trap for an automated driver: a missed turn produces no error signal at all, only a quietly different route that may now be much longer.",
+      "suggested_action": "Do not wait for the game to tell the agent he went wrong — it never will. Sample the remaining distance-to-destination every second or two and treat a sustained increase as the missed-turn signal (see missed_turn_fast_detection).",
+      "avoid": "Never build the harness around a 'reroute event'. Never assume that because a route line is still drawn, the route is still good.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "GTA V has no voiced GPS at all, so audio cues are not available as a fallback.",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "missed_turn_fast_detection",
+      "category": "route_following",
+      "cue": "Distance-to-destination on the radar's mileage indicator stops falling, or the route line's first segment now points behind or sharply beside the vehicle heading.",
+      "context": "Driving with an active GPS route. GTA V shows a direction indicator at the bottom-left of the radar and a mileage indicator at the bottom-right when GPS is in use.",
+      "meaning": "Because rerouting is silent, the only reliable missed-turn signals are geometric: remaining distance rising instead of falling for a few consecutive samples, or the angle between vehicle heading and the first route segment exceeding roughly 90 degrees. Both appear within a second or two of the mistake, long before the visible route line looks obviously wrong.",
+      "suggested_action": "Sample distance-to-destination and route-bearing at ~2 Hz. Trip a missed-turn condition when distance rises for 3 consecutive samples OR heading-to-route-bearing error exceeds ~90 degrees for 2 seconds. Then take the next legal turn that reduces the error rather than braking dead in traffic.",
+      "avoid": "Do not wait 500 m or 30 seconds to notice — that turns a 10-second correction into a two-minute detour on stream. Do not stop in a live traffic lane to reassess; keep rolling and turn at the next junction.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The radar's direction and mileage indicators are documented, but the specific thresholds above are engineering choices, not published mechanics. Tune them against a real recorded session. Distance can also legitimately rise briefly on a route that must loop onto a freeway ramp — the 3-sample requirement guards against that but will not eliminate it.",
+      "sources": [
+        "https://gta.wiki/w/GPS",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "gps_lost_in_tunnels",
+      "category": "route_following",
+      "cue": "Vehicle enters a tunnel or goes underwater; the radar's GPS connection and mileage indicator behave differently.",
+      "context": "GTA V Story Mode. GPS connection is lost in tunnels and underwater; underwater, the distance to surface/floor replaces the mileage display.",
+      "meaning": "Inside a tunnel the navigation signal the agent depends on is deliberately absent. This is designed behaviour, not a bug and not a stuck condition. A missed-turn detector keyed on the distance indicator will produce false positives here.",
+      "suggested_action": "Detect tunnel entry (loss of GPS/mileage indicator) and suspend missed-turn detection and route-based decisions for its duration. Hold the current lane and speed, and re-acquire the route on exit.",
+      "avoid": "Do not trigger a reroute, a stuck-recovery, or a mission-abort while GPS is unavailable in a tunnel. Do not interpret the missing mileage readout as 'arrived'.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The Radar page confirms GPS loss in tunnels and underwater; the GPS page did not address tunnel behaviour specifically for GTA V. Tunnel geometry in Los Santos is mostly simple (freeway and subway tunnels), so lane-holding is usually sufficient.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "waypoints_over_water_not_routed",
+      "category": "route_following",
+      "cue": "A drive_to target is set and no route line appears on the radar or map.",
+      "context": "GTA V Story Mode. Waypoints placed in the middle of a body of water will not be routed.",
+      "meaning": "An unroutable destination produces silence, not an error. The most common cause is a target over water, but the same absence appears for any point the road network cannot reach in a land vehicle.",
+      "suggested_action": "Treat 'drive_to issued but no route line drawn after ~2 seconds' as an unreachable-by-road destination. Fall back to: drive to the nearest reachable land point and switch to walk_to, or pick a boat, or abandon the target.",
+      "avoid": "Do not sit idle waiting for a route that will never draw, and do not have the harness drive on a straight-line bearing toward a water target — the outcome is a submerged car.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The wiki confirms water waypoints are not routed; whether every other unreachable point behaves identically is not stated, so treat 'no route line' as the general unreachable signal.",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "blip_arrow_means_vertical_offset",
+      "category": "route_following",
+      "cue": "The objective blip on the radar is a coloured circle containing a small arrow.",
+      "context": "GTA V Story Mode. The radar uses coloured circles for targets; a small arrow inside the circle means the target is higher or lower than the player.",
+      "meaning": "An arrow inside a blip means the destination is on a different vertical level — a freeway above or below, a multi-storey car park, a rooftop, a subway or a hillside road. Straight-line proximity is then misleading: the agent can be 20 m from the blip and still have a kilometre of ramp to drive.",
+      "suggested_action": "When the objective blip carries an arrow and horizontal distance has stopped decreasing, stop trying to close the gap laterally and instead follow the GPS route line to the ramp or access point that changes level.",
+      "avoid": "Do not declare arrival on horizontal distance alone when the blip shows an arrow, and do not treat repeated circling under an elevated target as a stuck condition — it is a level-change problem.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The Radar page confirms the arrow-in-circle convention but does not state which direction the arrow indicates. Verify up-vs-down on the real install.",
+      "sources": [
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "radar_tilts_in_vehicle",
+      "category": "route_following",
+      "cue": "Radar view changes from top-down to a slanted, forward-biased perspective.",
+      "context": "GTA V Story Mode. The radar is top-down on foot and slanted while in any vehicle.",
+      "meaning": "The slanted in-vehicle radar shows more road ahead and less behind. If the agent's harness reads the radar visually, the geometric mapping from pixels to world positions differs between the two modes, and the tilt itself is a reliable 'am I in a vehicle' signal.",
+      "suggested_action": "If any vision-based route reading is used, branch the pixel-to-world transform on radar mode. Otherwise use the tilt as a cheap cross-check that the in-vehicle state flag is correct.",
+      "avoid": "Do not reuse one radar calibration across both modes; on-foot and in-vehicle radar geometry are not the same.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Only relevant if the harness reads the radar visually rather than via script data; a ScriptHookVDotNet bridge should read entity positions directly and ignore this entirely.",
+      "sources": [
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "corner_sequence_brake_turn_accelerate",
+      "category": "speed_discipline",
+      "cue": "The GPS route line shows a bend whose direction change exceeds roughly 45 degrees within the next ~60 m.",
+      "context": "Land vehicle at road speed on pavement.",
+      "meaning": "The stable sequence for a human is: all braking on the straight before turn-in; coast through the corner; throttle back on only once the wheel is unwinding. There is no steering primitive for the agent to sequence at all — the game's own AI driver behind drive_to executes the actual turn — so the lever available to him is when and how much he drops the speed_mps target, not any hand-on-wheel technique.",
+      "suggested_action": "Precompute the corner from the route geometry, not from what is under the bumper. Lower the drive_to speed_mps target at a distance that scales with speed squared and with class (roughly 1x for sports, 1.5x for muscle/SUV, 3x for trucks) before the AI driver enters the corner. Use brake_tap only as a manual assist if the vehicle is clearly still carrying too much speed on approach.",
+      "avoid": "Do not expect a raw steering input to execute the corner — none exists. Do not rely on brake_tap alone to rotate the car; it only slows it. Do not wait until the bumper is at the apex to lower speed_mps.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Standard driving technique mapped onto GTA V's arcade-sim handling model; no source consulted states braking distances or entry speeds. All numeric factors must be calibrated on the real install per vehicle class.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "no_full_throttle_default",
+      "category": "speed_discipline",
+      "cue": "drive_to or wander_drive is active and a maximum-speed target is being requested by default.",
+      "context": "Any land vehicle, any surface. drive_to takes speed_mps as an explicit parameter — there is no raw throttle key to hold in the first place.",
+      "meaning": "Requesting maximum speed by default is the equivalent failure mode for a bot driver: it converts every mistake into a high-speed collision, destroys the vehicle faster, wrecks the escort/follow distance, and looks bad on stream. A human driver modulates constantly and is rarely at full throttle outside a straight; the agent's equivalent is never defaulting speed_mps to the vehicle's top speed.",
+      "suggested_action": "Always set drive_to's speed_mps to a deliberate target, never to the vehicle's maximum. Suggested targets on pavement: ~110-130 km/h freeway, ~60-80 km/h arterial, ~40 km/h dense-traffic street, ~25 km/h in a parking structure, alley or near an objective. Lower it further ahead of any bend rather than braking mid-corner.",
+      "avoid": "Never default speed_mps to a vehicle's top speed. Never treat top speed as the goal on a route where arrival intact is the goal.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Speed figures are engineering targets, not published mechanics. Lower them in rain, on dirt, and in tall vehicles — there is no ability-charge exception any more (see franklin_driving_focus).",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/vehicles/"
+      ]
+    },
+    {
+      "id": "escort_follow_distance",
+      "category": "escort_follow",
+      "cue": "An active task is follow_entity on an NPC vehicle, or a mission objective reads 'follow' / 'stay with' a character.",
+      "context": "GTA V Story Mode escort and tail missions. In Repossession, moving too far from Lamar surfaces a 'Return to Lamar' objective, and continuing to move away fails the mission.",
+      "meaning": "Escort missions have a distance leash with a two-stage response: first a warning objective telling the agent to come back, then failure if the distance keeps growing. The warning is the last safe moment to correct. Falling behind and getting too far ahead are both problems — overtaking the escorted vehicle can push it off its scripted path or cause a collision that ends the mission.",
+      "suggested_action": "Hold a band, not a point: roughly 10-30 m behind the escorted vehicle, matching its speed rather than driving to a destination. The moment a 'return to X' style objective appears, drop everything and close the gap — that is a final warning, not advice.",
+      "avoid": "Do not overtake the escorted NPC, do not ram it, and do not take a shortcut that leaves its route even if the shortcut is faster — the leash is measured to the NPC, not to the destination.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Repossession documents the pattern concretely; the exact leash distance is not published and differs per mission. The 10-30 m band is an engineering choice. Some missions deliberately require staying far back and unseen (tail missions) where the leash has a minimum as well as a maximum.",
+      "sources": [
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "chasing_a_fleeing_target",
+      "category": "escort_follow",
+      "cue": "Mission objective is to catch or stop a fleeing NPC vehicle; a target blip is moving away.",
+      "context": "GTA V Story Mode chase missions. Repossession fails on 'the biker escaped', 'the bike was destroyed' and 'the bike was abandoned'.",
+      "meaning": "Chase missions typically have three distinct fail states, and two of them punish being too aggressive: letting the target escape, destroying the target vehicle, and the target vehicle ending up abandoned. Which failure applies depends on whether the vehicle itself is the objective.",
+      "suggested_action": "Read the objective before choosing tactics. If the target VEHICLE is the prize, close the distance and force a stop without wrecking it — pull alongside and block its path via drive_to/follow_entity, or let combat_hated_targets_around handle any firefight that develops naturally if the target turns hostile. The agent cannot aim at the rider specifically, so 'shoot the rider off the bike' is not an available tactic. If only the person matters, ramming the vehicle is on the table.",
+      "avoid": "Do not default to ramming a chase target. Do not shoot the vehicle when the vehicle is what the mission wants delivered intact. Do not plan around picking off a named rider — there is no manual-aim action to do that with.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Repossession is one documented example; other chase missions have their own fail conditions. Always prefer the mission's own on-screen objective text over this general rule.",
+      "sources": [
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "lost_the_target_recovery",
+      "category": "escort_follow",
+      "cue": "The followed entity's blip is no longer visible on the radar, or distance to it has grown for several consecutive samples.",
+      "context": "follow_entity is active and the target has broken line of sight or turned off the expected path.",
+      "meaning": "Losing a follow target is usually recoverable for a short window — the blip generally persists on the radar even when the vehicle is out of sight, so bearing information survives the visual loss. The failure is spending that window guessing instead of closing.",
+      "suggested_action": "Drive toward the blip's current bearing on the main road that most directly reduces distance, at a higher speed than the target's last known speed, and re-acquire visually. If a 'return to X' objective appears, that path is now the only priority.",
+      "avoid": "Do not stop to look around, and do not reverse back the way the agent came unless the blip is genuinely behind — both burn the recovery window.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Whether the target blip stays visible depends on the specific mission's scripting; some tail missions deliberately hide it. If no blip exists, the follow is already lost and the correct move is to accept the failure rather than wander.",
+      "sources": [
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "engine_damage_progression",
+      "category": "damage_assessment",
+      "cue": "Engine sounds change to a rattle, then a hiss; steam or smoke appears from the bonnet; acceleration and top speed have dropped.",
+      "context": "Any land vehicle in GTA V after collisions or gunfire. The engine compartment is more vulnerable than side panels.",
+      "meaning": "There is an ordered progression: rattle (camshaft/crankshaft damage) then hiss (overheating) then smoke then fire. Each stage also degrades acceleration, top speed and steering response. The rattle is the early warning; the smoke is the late warning; the fire is the point of no return.",
+      "suggested_action": "On rattle or hiss, start looking for a replacement vehicle and reduce the risk profile of driving. On visible smoke, plan to swap vehicles at the next opportunity, or route to Los Santos Customs if one is close and no police are watching, since it repairs the vehicle. On fire, get out (see fire_means_bail_out).",
+      "avoid": "Do not keep driving a smoking car into a mission or a chase on the theory that it still moves — its performance is already degraded and the failure is abrupt.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "No numeric engine-health thresholds are published in any source consulted; the harness should read engine health from the script API rather than from audio if the bridge exposes it. Some mission vehicles are scripted to be more or less durable than normal.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Vehicle_Damage",
+        "https://gta.wiki/w/Vehicle_Damage",
+        "https://gta.wiki/w/Los_Santos_Customs"
+      ]
+    },
+    {
+      "id": "fire_means_bail_out",
+      "category": "emergency_bailout",
+      "cue": "Flames are visible on the engine or under the vehicle; the burning-engine effect has started.",
+      "context": "Any land vehicle in GTA V. A burning engine signals imminent destruction; if flames reach the fuel tank, the vehicle explodes.",
+      "meaning": "Fire is a countdown, not a condition. The window between ignition and explosion is short, and the explosion kills or heavily damages anyone still inside or standing close. The vehicle is already written off at this point — there is nothing to save.",
+      "suggested_action": "Call exit_vehicle immediately, then move at least ~15-20 m away before doing anything else. Only then reassess: find another vehicle, or continue on foot. If a mission passenger is aboard, exiting is still correct — a dead protagonist fails harder than a lost car.",
+      "avoid": "Do not try to reach the destination in a burning car. Do not stand next to it, loot near it, or fight from behind it. Do not attempt to re-enter.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The exact seconds from ignition to explosion are not published in any source consulted and appear to vary with how the fire started; treat it as 'a handful of seconds' and never budget against a specific number. A vehicle that has already run its fuel dry may burn without exploding, but that is not knowable from outside.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Vehicle_Damage",
+        "https://gta.wiki/w/Vehicle_Damage"
+      ]
+    },
+    {
+      "id": "fuel_leak_and_trail",
+      "category": "damage_assessment",
+      "cue": "A liquid trail is visible behind the vehicle after rear-end damage; fuel warning behaviour; acceleration becomes jerky.",
+      "context": "GTA V. The fuel tank can be damaged and leak; the trail can be ignited by gunfire and burn back to the vehicle. Leaking to empty makes the vehicle stall.",
+      "meaning": "A fuel leak creates two separate problems: a hard time limit before the car stalls with jerky acceleration, and a burning fuse trailing behind the agent that any shooter can light. In a firefight, a leaking car is a liability parked under him.",
+      "suggested_action": "Treat a visible fuel trail as a swap-vehicle-now condition, especially under fire. If disengaging is not possible, at least stop leaving the trail across ground the agent intends to stand on.",
+      "avoid": "Do not fight from beside or behind a leaking vehicle, and do not drive a leaking vehicle into a long run expecting it to arrive.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Leak-to-empty duration is not published. Note that the ignitable fuel trail is also an offensive tool — it is exactly the gold-medal tactic in Repossession — so a leaking ENEMY vehicle is an opportunity, not a hazard.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage",
+        "https://www.grandtheftwiki.com/Vehicle_Damage",
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "tyre_burst_and_rims",
+      "category": "damage_assessment",
+      "cue": "The vehicle pulls persistently to one side, top speed has dropped, or a tyre is visibly flat or gone.",
+      "context": "GTA V. Punctured tyres deflate, eventually disintegrate and expose the rims, which significantly reduces traction. Spike strips are deployed by police from 3 stars.",
+      "meaning": "A flat tyre costs speed and grip and makes the car pull; running on bare rims makes it much worse and largely removes cornering ability. The car is still driveable and still better than walking, but it can no longer outrun anything.",
+      "suggested_action": "With one flat, cut the drive_to speed_mps target by roughly a third and expect a persistent pull that no manual correction can fix — there is no steering primitive to fight it with. With two or more flats, or with any rim exposed, treat the vehicle as transport-of-last-resort and swap at the first safe opportunity. Never plan an escape or chase on a car with flats.",
+      "avoid": "Do not expect any steering input to correct the pull — none exists; lowering speed_mps and eventually swapping the vehicle are the only real levers. Do not enter a police chase on flats.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some vehicles in GTA V have bulletproof tyres; if tyres are surviving obvious punctures, that is the reason and the assessment above does not apply.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage",
+        "https://www.grandtheftwiki.com/Vehicle_Damage",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "bent_axle_and_lost_wheel",
+      "category": "damage_assessment",
+      "cue": "After a heavy side or head-on impact the wheels sit at a visible angle (camber), the car crabs, steering barely responds, or a wheel has detached.",
+      "context": "GTA V. Side collisions bend axles causing camber that severely impacts steering and can lock wheels; wheels can come off entirely if hit hard enough; bent axles greatly reduce speed and handling.",
+      "meaning": "This is the most decisive 'the car is finished' signal short of fire. A bent axle or a missing wheel is not repairable by driving carefully — speed and steering are both permanently gone, and locked wheels drag along the ground.",
+      "suggested_action": "Declare the vehicle written off. Drive it only far enough to reach a replacement or to get out of an exposed position, then abandon it and take the nearest suitable vehicle for the task.",
+      "avoid": "Do not persist with a crabbing car through a long route, and do not diagnose this as a stuck condition or as a control-tuning problem — no input change will fix it.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "A single mildly bent axle may still permit slow travel; a detached wheel does not. Mission-critical vehicles that must be delivered intact are a separate problem — at this point the mission is likely already failing.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage",
+        "https://www.grandtheftwiki.com/Vehicle_Damage"
+      ]
+    },
+    {
+      "id": "when_a_car_is_finished",
+      "category": "damage_assessment",
+      "cue": "the agent needs a single decision: keep this vehicle or take another.",
+      "context": "Any point during free roam or a non-delivery mission.",
+      "meaning": "A vehicle is finished when ANY of: it is on fire; a wheel is off or an axle is visibly bent; two or more tyres are on rims; the engine is smoking heavily and top speed is obviously gone; it is stalled from empty fuel or drowned oil; or it is stuck in geometry that three recovery attempts have not cleared. Anything less is cosmetic and should not cost time.",
+      "suggested_action": "Run this as an explicit checklist on a timer during driving. When it trips, pick the nearest civilian vehicle of the class the current task needs and continue. Cars in Los Santos are abundant; time is the scarce resource on a live stream.",
+      "avoid": "Do not swap vehicles for dents, scratches, a broken window or a hanging bumper — those cost nothing. Do not become attached to a specific car during a mission.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Does NOT apply when the current vehicle is itself the mission objective (a car being repossessed or delivered) — then it must be preserved, and the correct move is to stop taking damage rather than to swap. Also note that switching between protagonists restores most cosmetic damage, dirt and burst tyres, so a battered personal vehicle may come back clean.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage",
+        "https://gta.wiki/w/Vehicles_in_GTA_V",
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "vehicle_in_water",
+      "category": "emergency_bailout",
+      "cue": "The vehicle has entered water; the engine cuts out; the radar's mileage indicator is replaced by a depth-to-surface readout.",
+      "context": "GTA V. Vehicles that sink or float in shallow water have their engine shut down. Sources describe roughly two minutes before a submerged vehicle is permanently unusable.",
+      "meaning": "Water kills the engine essentially on contact. In shallow water the car may be recoverable by pushing it out within a couple of minutes; in deep water it is gone and the protagonist will drown if he stays in it.",
+      "suggested_action": "Call exit_vehicle immediately, swim to the nearest shore, and treat the vehicle as lost unless the water is obviously shallow and there is an easy push-out. Then walk or find another vehicle.",
+      "avoid": "Do not sit in a sinking car trying to restart it, and do not route drive_to across a waterway on the assumption a road exists. Remember GPS will not route a water waypoint at all, which is the earlier warning.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "The ~2 minute figure comes from a Grand Theft Wiki description that spans GTA IV and V; it is not confirmed specifically for GTA V. Drowning risk depends on Lung Capacity; do not budget against a specific number.",
+      "sources": [
+        "https://www.grandtheftwiki.com/Vehicle_Damage",
+        "https://gta.wiki/w/Radar",
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "stuck_detection_no_displacement",
+      "category": "stuck_recovery",
+      "cue": "A drive-type command has been active for several seconds but world position has changed by less than a metre or two.",
+      "context": "drive_to or wander_drive is active; the vehicle is intact and upright.",
+      "meaning": "This is the primary machine-detectable stuck signal, and it is more reliable than any visual cue. It covers all the common causes at once: nose wedged into a wall or bollard, high-centred on a kerb or rock, boxed in by traffic, and jammed between two objects. It must NOT fire during a mission state that legitimately expects zero displacement against resistance — pushing a trailer down a bank, winching or ramming something immovable, blocking a road with a vehicle — or it will abort the objective and abandon a mission-flagged vehicle, itself a documented mission-failure condition.",
+      "suggested_action": "Trip a stuck state when a drive command has been active for 3 seconds and net displacement is under ~2 m — UNLESS the active mission/task state is flagged expect_no_displacement (a scripted push/ram/tow against resistance). A flagged state still gets a bounded attempt cap of its own (about 5 push/ram cycles or 45 seconds) before escalating below — never leave a push state both unmonitored and uncapped. Otherwise run the recovery ladder in order: (1) reverse_out for 2 seconds, (2) reverse_out for 2 seconds preceded by a brief swerve away from the obstacle's side, (3) call exit_vehicle and continue on foot or in another vehicle. There is no held-steering primitive, so a manual 'full-lock shuffle' step does not exist — two reverse_out attempts is the whole ladder before abandoning.",
+      "avoid": "Do not keep reissuing a throttle-bearing drive command into unresolved geometry — sustained wheelspin against geometry never resolves and it looks terrible on stream. Do not re-run the same recovery step more than twice. Do not suppress this detector for a push/ram state without also capping that state's own attempt count.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Thresholds, and the expect_no_displacement flag and its cap, are engineering choices, not published mechanics — tune them against recorded sessions. Must also be suppressed while stopped at a red light or in genuine gridlock, where zero displacement is correct behaviour, and while GPS is unavailable in a tunnel.",
+      "sources": []
+    },
+    {
+      "id": "stuck_detection_wheelspin",
+      "category": "stuck_recovery",
+      "cue": "Wheel rotation speed is high while vehicle ground speed stays near zero; audible tyre spin; the vehicle rocks without translating.",
+      "context": "Usually on loose surfaces (sand, mud, gravel), on a steep slope, or with the vehicle high-centred so a driven wheel is off the ground.",
+      "meaning": "Wheelspin with no displacement means the driven wheels have no useful load. More throttle makes it strictly worse — on sand and mud it digs the car in, on a high-centre it does nothing at all. This is a distinct case from the wedged case because reversing hard often will not help either.",
+      "suggested_action": "Stop commanding throttle entirely, then reissue drive_to/wander_drive with a low speed_mps target so only minimal power is applied. If nothing moves within 2-3 seconds, use reverse_out gently along the path the vehicle arrived on. If still nothing after two attempts, call exit_vehicle and abandon the vehicle.",
+      "avoid": "Never respond to wheelspin with a high speed_mps/full-power request. There is no handbrake primitive to reach for here either.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Whether the harness can see wheel rotation independently of ground speed depends on what the ScriptHookVDotNet bridge exposes; if it cannot, fall back to the no-displacement detector plus surface type. Not verified against a source — this is a physics-general inference.",
+      "sources": []
+    },
+    {
+      "id": "stuck_detection_oscillation",
+      "category": "stuck_recovery",
+      "cue": "The harness has issued alternating forward and reverse commands three or more times in the last 15 seconds and net displacement from the start of that window is under ~5 m.",
+      "context": "Any recovery attempt in progress.",
+      "meaning": "Oscillation is the failure signature of the recovery ladder itself. It means the geometry is not solvable by shuffling — the car is properly wedged, or the target position is unreachable, or the AI driver is fighting an obstacle it cannot perceive. It is also the single most stream-destroying loop the show can enter.",
+      "suggested_action": "Cap the recovery ladder: after 3 oscillation cycles or ~15 seconds, stop trying to free the vehicle. Call exit_vehicle, walk clear, and either continue the task on foot or take the nearest other vehicle via enter_nearest_vehicle. Announce the abandonment in commentary rather than hiding it. This cap applies even to a flagged expect_no_displacement push/ram state (see stuck_detection_no_displacement) — nothing is exempt from an upper bound.",
+      "avoid": "Never allow an unbounded recovery loop, including a scripted push/ram state — every such state gets its own bounded attempt count too. Never let 'try again' be the default outcome of a failed recovery.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Engineering rule, not a game mechanic. If the vehicle is the mission objective and cannot be abandoned, the correct escalation is to accept the mission failure rather than to loop indefinitely.",
+      "sources": []
+    },
+    {
+      "id": "reversing_out_procedure",
+      "category": "stuck_recovery",
+      "cue": "Stuck state confirmed, vehicle upright and intact, obstacle is ahead or to one side.",
+      "context": "Recovery step one, before anything more drastic.",
+      "meaning": "Most wedges clear by simply retracing. Because reverse_out(ms) almost certainly holds S internally, and S only engages reverse after forward motion is fully arrested (see brake_and_reverse_share_one_key), the first fraction of a second of the call does nothing. Retracing the entry path is by definition clear ground.",
+      "suggested_action": "Call reverse_out for about 2 seconds, expect the short dead zone, then confirm displacement from /state. Use look_around first if a rear view helps assess the obstacle. Once 3-5 m of clearance exists, resume with a fresh drive_to away from the obstacle.",
+      "avoid": "Do not treat 'no displacement' in the first fraction of a second of a reverse_out call as failure — that is the dead zone. Do not chain reverse_out calls back-to-back without checking /state for displacement in between.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Does not work when the vehicle is high-centred (no drive wheel load) or when the obstruction is a vehicle that has boxed the agent in from behind. Articulated trucks should not be reversed at all.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b"
+      ]
+    },
+    {
+      "id": "flipped_vehicle_recovery",
+      "category": "stuck_recovery",
+      "cue": "Vehicle roll or pitch angle indicates it is on its side or roof; throttle produces no movement.",
+      "context": "Most common in tall vehicles (SUV, van, truck) after a hard direction change, and on any vehicle after a big jump landed badly.",
+      "meaning": "A car on its roof cannot be driven out. In GTA V a rolled vehicle is generally recoverable only by an external force (another vehicle, an explosion, a slope) or, for bikes, by the rider simply picking it up on exit. For a bot, the realistic answer is almost always: leave it.",
+      "suggested_action": "On a bike: call exit_vehicle — the bike can normally be righted and re-entered via enter_nearest_vehicle, and this is cheap, do it. In a car: call exit_vehicle and take another vehicle via enter_nearest_vehicle. Do not spend more than a few seconds evaluating.",
+      "avoid": "Do not sit in an inverted car cycling throttle and steering. Do not try to ram it upright with a second stolen vehicle unless nothing else is available — it usually wastes more time than walking to a new car.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Not documented in any source consulted for GTA V specifically; GTA V has no player self-right control for cars. If the harness has a bridge-side unstick capability, this is the one place it earns its keep — see unstick_nudge_policy.",
+      "sources": []
+    },
+    {
+      "id": "unstick_nudge_policy",
+      "category": "stuck_recovery",
+      "cue": "All in-game recovery options have been exhausted and the vehicle or protagonist is genuinely wedged in world geometry.",
+      "context": "WANTED project rule: Story Mode only, no cheats. The agent gets no god mode, no teleports, no free money, no invincibility, because a human could not do those things.",
+      "meaning": "The project's one sanctioned exception is a small unstick nudge of a few metres when wedged, and it must be logged and announced in commentary. This is a last resort and an integrity commitment, not a routine tool.",
+      "suggested_action": "Order of preference: in-game recovery ladder, then abandon the vehicle and continue on foot, then the logged few-metre nudge only if the protagonist himself is wedged with no on-foot escape. Every use gets a log line and a line of commentary.",
+      "avoid": "Never nudge to save time, to skip traffic, to cross terrain, or to escape a chase. Never use it silently.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "This is a project policy rule, not a GTA V mechanic. It is sourced from the repository's CLAUDE.md non-negotiables, not from any game documentation.",
+      "sources": [
+        "repo:CLAUDE.md non-negotiable 5"
+      ]
+    },
+    {
+      "id": "police_chase_driving",
+      "category": "police_driving",
+      "cue": "Wanted stars are solid and the radar is flashing red and blue — police have line of sight and are actively pursuing.",
+      "context": "GTA V Story Mode. From 2 stars officers shoot to kill and pursue with multiple vehicles attempting PIT manoeuvres; at 3 stars roadblocks and spike strips are deployed and helicopters arrive; at 4-5 stars NOOSE units and up to three helicopters join.",
+      "meaning": "The threat profile changes qualitatively with stars, and it changes what driving is safe. At 1-2 stars the hazard is being rammed and PITted. At 3+ the hazard is spike strips and roadblocks ahead of the agent, plus air units that keep line of sight regardless of what he does at street level.",
+      "suggested_action": "At 1-2 stars, keep speed up and take turns to break contact. At 3+, stop treating the road ahead as safe: change level (freeway on/off ramps, underpasses), avoid long straight arterials where roadblocks get set, and expect spikes behind any roadblock. Prefer a heavy or fast vehicle over a fragile one, and check tyres after any roadblock.",
+      "avoid": "Do not drive long straights at 3+ stars, do not slow to a crawl beside police vehicles (that invites a PIT), and do not assume a fast car alone solves 4-5 stars while helicopters hold line of sight.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Star-by-star response details are from the GTA V wanted level page; exact spawn behaviour varies with location and with whether the agent is in Los Santos or Blaine County.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "losing_the_cops_in_a_vehicle",
+      "category": "police_driving",
+      "cue": "Wanted stars have started FLASHING and the radar has stopped flashing red and blue; cone-shaped field-of-vision indicators appear on police blips.",
+      "context": "GTA V Story Mode. This is 'search mode': police have lost sight of the agent and are searching. The slower the stars flash, the closer he is to escaping. If a pursuer re-spots him, the escape timer resets.",
+      "meaning": "Escape in GTA V is a line-of-sight problem, not a distance problem — GTA V searches by officer field of view rather than by a simple radius. The flashing stars are a live progress bar, and the cones on the radar are an explicit map of where NOT to be.",
+      "suggested_action": "The moment the stars start flashing, stop driving to a destination and start driving out of the cones: turn off the main road, break the sightlines, and keep moving away from every cone on the radar. Rail lines are noted as particularly effective because police follow poorly on rail. Hold this until the stars clear.",
+      "avoid": "Do not keep driving in a straight line at speed once search mode begins — speed keeps the agent inside the search area longer than a turn does. Do not stop in open view of a cone. Do not resume the original route until the stars are gone; getting re-spotted resets everything.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Changing appearance (masks/sunglasses) reduces the wanted level by one star during search mode, but that is an on-foot action. Helicopters will keep shooting even at a target hidden from ground units.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "los_santos_customs_wanted_reset",
+      "category": "police_driving",
+      "cue": "the agent is in a vehicle with a wanted level and a Los Santos Customs garage is within reach.",
+      "context": "GTA V Story Mode. Entering Los Santos Customs removes the wanted level and the shop repairs vehicles. Critically: if the player is spotted by police while approaching the workshop, the garage door will not open.",
+      "meaning": "LSC is a wanted-level reset and a full repair in one stop, but only if the agent arrives unseen. That makes it a search-mode tool, not an active-pursuit tool: it works when the stars are already flashing, and it fails outright while a cruiser is on his bumper.",
+      "suggested_action": "Route to LSC only after the stars start flashing and no cone covers the approach. Use it doubly when the vehicle is also damaged — one stop clears stars and repairs the car.",
+      "avoid": "Do not drive to LSC with police in active pursuit; the door will not open and the agent will be trapped in a dead end against a closed shutter.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The wiki page does not spell out whether mission vehicles, police vehicles or motorcycles are excluded from entry; treat those as unverified. The spotted-on-approach condition is stated explicitly and should be trusted.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Customs",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "helicopter_spotlight_at_night",
+      "category": "police_driving",
+      "cue": "Night time, 3+ stars, a police helicopter is overhead and a spotlight is tracking the agent.",
+      "context": "GTA V Story Mode. Helicopters arrive at 3 stars and use spotlights at night to track movement.",
+      "meaning": "A spotlight is continuous line of sight from the air. While it holds, the escape timer will never start, no matter how well the agent drives at street level. Ordinary road evasion does nothing against it.",
+      "suggested_action": "Break the vertical sightline rather than the horizontal one: get under a freeway overpass, into a tunnel, into a multi-storey car park, or under dense tree cover, and only then start the search-mode evasion.",
+      "avoid": "Do not keep making turns at street level under a spotlight expecting the stars to start flashing — they will not. Do not hide in a bush from a helicopter; sources note helicopters will still engage a target hidden from ground units. Do not treat combat_hated_targets_around as a way to bring the helicopter down — the agent cannot aim, and the engine's own targeting behaviour against aircraft is unconfirmed.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "The spotlight-blocks-escape mechanic is inferred from the documented line-of-sight escape system plus the documented spotlight tracking; it is not stated as such on the page. GPS also drops in tunnels, so an under-cover evasion costs navigation temporarily.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/w/Radar"
+      ]
+    },
+    {
+      "id": "safe_vs_unsafe_shortcuts",
+      "category": "shortcuts_missions",
+      "cue": "A visibly shorter path exists that leaves the GPS route line — cutting a car park, a field, an alley, or dropping down an embankment.",
+      "context": "GTA V Story Mode. The GPS calculates the shortest legal route, avoiding closed roads and alleyways, so route lines are deliberately conservative.",
+      "meaning": "Because the GPS avoids alleys by design, a shortcut is often genuinely faster in free roam. The risk is not the shortcut itself but the state the agent is in: during an escort or a tail, distance is measured to the NPC, so a shortcut that leaves the NPC's route can trip the leash and fail the mission even while it saves distance to the destination.",
+      "suggested_action": "Allow shortcuts in free roam and in solo point-to-point objectives, if the vehicle class suits the surface. Forbid shortcuts whenever follow_entity is active, whenever a passenger or escorted NPC is involved, and whenever a 'stay with X' objective is on screen.",
+      "avoid": "Do not take a low car down an embankment or across a field. Do not take a shortcut during a tail mission — the distance leash does not care that the agent arrives first.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The escort-leash consequence is documented for Repossession but leash sizes vary per mission. Some Story Mode missions restrict the playable area outright and will fail on leaving it; the on-screen objective text is authoritative over this rule.",
+      "sources": [
+        "https://gta.wiki/w/GPS",
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "mission_vehicle_must_survive",
+      "category": "shortcuts_missions",
+      "cue": "The mission objective names a specific vehicle to steal, deliver, repossess or protect.",
+      "context": "GTA V Story Mode missions built around a particular vehicle. Repossession fails on 'the bike was destroyed' and 'the bike was abandoned'.",
+      "meaning": "When the vehicle is the objective, the entire driving policy inverts: speed, ramming and aggressive shortcuts all become risks, and 'the car is finished, take another' is exactly the wrong instinct. Abandoning it is its own separate fail state, distinct from destroying it.",
+      "suggested_action": "Detect this state explicitly from the objective and switch to a preservation profile: lower speed targets, no ramming, no shortcuts over rough ground, avoid police contact, and never exit the vehicle except at the delivery point.",
+      "avoid": "Do not apply the general when_a_car_is_finished checklist to a mission vehicle. Do not leave it parked while pursuing something else — that can register as abandoned.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "How much damage a specific mission tolerates is not published and varies; some missions have gold-medal conditions on vehicle condition or time that add further constraints.",
+      "sources": [
+        "https://gta.wiki/w/Repossession"
+      ]
+    },
+    {
+      "id": "stopping_before_exit",
+      "category": "control_technique",
+      "cue": "drive_to has reached its destination, or the harness is about to issue an exit-vehicle command.",
+      "context": "Any land vehicle. exit_vehicle is the bridge task that dismounts the agent; there is no handbrake primitive to hold position with first.",
+      "meaning": "Exiting a moving vehicle throws the protagonist out and causes injury and often ragdoll, which loses seconds and looks like a malfunction on stream. Leaving a car in a live traffic lane also invites collisions that damage it before the agent returns.",
+      "suggested_action": "Sequence every dismount: bring speed down with repeated brake_tap calls until stopped or near-stopped, then call exit_vehicle. Route toward the kerb or a clear space first via drive_to when the road has traffic.",
+      "avoid": "Do not call exit_vehicle while still moving at speed. Do not stop in an intersection, on a freeway lane, or across the exit of the place the agent is about to walk into.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The exact speed above which exiting causes a bail-out ragdoll is not published in any source consulted; use near-zero as the safe rule. Deliberately bailing from a moving vehicle is a legitimate tactic when the car is about to explode — there, injury beats the alternative.",
+      "sources": [
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://www.gamepressure.com/gtav/pc-keybinds/z3764b"
+      ]
+    },
+    {
+      "id": "stealing_a_car_can_raise_stars",
+      "category": "vehicle_selection",
+      "cue": "the agent needs a vehicle and is choosing between an empty parked car and jacking an occupied one.",
+      "context": "GTA V Story Mode. The wanted level responds to crimes observed by police, with officers having individual fields of view.",
+      "meaning": "Jacking an occupied vehicle is a witnessed crime and a source of wanted stars if an officer has line of sight; taking an empty parked car in an unobserved spot generally is not. For a 24/7 unattended run, gratuitous stars are the main source of unplanned chaos and lost time.",
+      "suggested_action": "Default to the nearest EMPTY parked vehicle that suits the task class, and check for police blips before taking anything. Jack an occupied vehicle only when speed matters more than the star, or when no parked option exists.",
+      "avoid": "Do not jack cars in front of police blips, and do not jack an occupied car when an equivalent empty one is a few metres away.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The wiki page consulted describes the line-of-sight wanted system but does not enumerate which specific acts trigger which star counts; the theft consequence is an inference from that system. Some Story Mode missions grant a wanted level by script regardless.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "traffic_and_oncoming_lanes",
+      "category": "speed_discipline",
+      "cue": "Route line runs along a divided road, or dense traffic is ahead in the current lane.",
+      "context": "Free roam or non-timed missions in Los Santos.",
+      "meaning": "Oncoming lanes are the fastest way to end a run in a head-on collision. Head-on impacts are the most damaging kind: closing speeds are doubled, and the engine compartment is the most vulnerable part of the car. There is no offsetting benefit for the agent here — the special-ability meter this used to charge is not available to him at all (see franklin_driving_focus) — so oncoming-lane driving is pure downside.",
+      "suggested_action": "Stay on the correct side by default. Use the oncoming lane only in a short, sighted overtake with a clear exit back, and only when no time pressure would be wasted by a crash.",
+      "avoid": "Do not sustain an oncoming run for any reason resembling 'building something up' — there is nothing for the agent to build up. Do not enter an oncoming lane approaching a blind crest or bend.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The collision-damage reasoning is derived from the vehicle damage page rather than measured. Traffic density varies with time of day and district in ways no source consulted quantifies.",
+      "sources": [
+        "https://gta.wiki/w/Vehicle_Damage"
+      ]
+    },
+    {
+      "id": "landing_a_jump_or_drop",
+      "category": "control_technique",
+      "cue": "The route crosses a stunt jump, a ramp, a hill crest, or a drop off a kerb or embankment at speed.",
+      "context": "GTA V Story Mode. The Driving stat improves airborne handling and makes landing big jumps on four or two wheels easier.",
+      "meaning": "Airborne attitude is controllable in GTA V, and the landing decides whether the vehicle survives. A flat, wheels-first, straight landing costs almost nothing; a nose-down or sideways landing damages the front end, bends axles and can flip tall vehicles.",
+      "suggested_action": "Approach jumps straight and at a moderate drive_to speed_mps rather than maximum — that is the only lever the agent actually has before becoming airborne; there is no in-air control primitive to level the vehicle mid-flight. Prefer a low, wide car or an Off-Road vehicle for any route with jumps, and route around the jump entirely when a ground path exists.",
+      "avoid": "Do not expect any airborne correction to be possible — nothing steers, brakes or levels the vehicle mid-air from the harness's side. Do not take a jump at maximum speed or at an angle, and do not jump in a vehicle already carrying engine or axle damage.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The Driving stat's airborne effect is documented; the specific landing technique is standard player practice and is not described in the sources consulted.",
+      "sources": [
+        "https://gta.wiki/w/Stats",
+        "https://gta.wiki/w/Vehicle_Damage"
+      ]
+    },
+    {
+      "id": "gta_online_only_do_not_use",
+      "category": "shortcuts_missions",
+      "cue": "A tactic surfaced from research involves personal vehicles, Mors Mutual insurance, mechanic delivery, off-radar/Ghost Organization, Lester's 'remove wanted level' service, or vehicle upgrades bought with Online money.",
+      "context": "WANTED runs GTA V Story Mode exclusively.",
+      "meaning": "A large share of published GTA driving advice is written for GTA Online and silently assumes Online-only systems. None of it applies. Story Mode has no insurance recovery, no mechanic vehicle delivery, no off-radar, and no Lester wanted-level removal service.",
+      "suggested_action": "Filter every incoming driving tactic through the question 'does this exist in Story Mode?'. When a source does not distinguish, assume it is Online advice and discard it. Prefer Story-Mode-specific mechanics: Los Santos Customs, protagonist switching for cosmetic repair, and vehicle-class selection matched to the route (the agent has no usable special ability — see franklin_driving_focus).",
+      "avoid": "Never plan around recovering a destroyed vehicle, never rely on an Online-only evasion service, and never quote an Online tactic in commentary as if it were something the agent can do.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Los Santos Customs exists in both modes but with different behaviour; the wanted-level-removal-on-entry and repair behaviour cited here is the Story Mode description. Wanted level mechanics themselves differ between GTA V Story Mode and GTA Online — the wiki maintains separate pages for each.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Customs",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    }
+  ],
+  "notes": "SOURCING LIMITS\n- gta.fandom.com returns HTTP 402 to this fetcher as briefed, so I used the gta.wiki mirror (https://gta.wiki/w/...) plus grandtheftwiki.com, gtabase.com, gamepressure.com and bisecthosting.com. pcgamingwiki.com returned HTTP 403, so I could not verify PC-specific input behaviour (analog vs digital steering, controller support, frame-rate/physics interactions) against it.\n- The WebSearch budget for this session was exhausted partway through (200/200 calls), so several planned cross-checks could not be run: a dedicated driving-technique guide from IGN/GameFAQs, handling.meta parameter documentation, and a second source on motorcycle fall-off thresholds.\n- The Steam Community keyboard-controls guide (id 1228797956) presents its control tables as images only, so no text could be extracted; the keybind table is instead sourced from two independent text sources that agree.\n\nWHAT I COULD NOT VERIFY\n- Per-class handling physics (sports/muscle/SUV/off-road/truck). gta.wiki and gtabase confirm the CLASS TAXONOMY and that gtabase tracks per-vehicle top speed, acceleration, braking and traction, but neither publishes class-level handling characteristics. The only source that described class handling qualitatively was a low-quality aggregator page. All class items are therefore marked medium confidence and should be treated as priors to be replaced by measured per-vehicle data from gtabase or from the game's own handling data.\n- Numeric traction penalties for wet, dirt and snow surfaces. No source quantifies these. The wet-grip claim rests on a single weak secondary source. The snow item is marked low confidence with an empty sources array: the North Yankton association is player knowledge I could not confirm in this pass, and the Christmas-snow behaviour in current builds is entirely unverified.\n- Engine health thresholds, seconds from fire to explosion, fuel-leak duration to stall, and the ~2 minute submerged-vehicle window. Damage STAGES (rattle to hiss to smoke to fire, fuel trails, tyre/rim, bent axles, wheels detaching) are well documented; the TIMINGS are not. The ~2 minute water figure comes from a Grand Theft Wiki page covering GTA IV and V together and is not confirmed for GTA V specifically.\n- All stuck-detection thresholds (3s/2m displacement, 3 oscillation cycles, 15s cap) and all speed targets are engineering choices, not game mechanics. Three of those items carry empty sources arrays for that reason. They must be calibrated against real recorded sessions on the delivery machine before being trusted.\n- Escort leash distances. The two-stage warning-then-fail pattern is documented concretely for Repossession, but no source publishes the distance, and it varies per mission. The 10-30 m band is my recommendation, not a measurement.\n- Jack-knifing of articulated trucks, motorcycle fall-off thresholds, car self-righting, and the exact speed above which exiting a vehicle causes a ragdoll bail-out. None appear in the sources consulted.\n\nSOURCE DISAGREEMENTS\n- Camera keys: bisecthosting lists R as cinematic camera; gamepressure lists V as the 'movie camera' and adds Tab as slow-motion. The two disagree, so I flagged camera bindings as unverified in pc_default_vehicle_keybinds rather than picking one. Every other vehicle binding (W/S/A/D/SPACE/E/H/F/C/X/LMB/RMB) is identical across both sources and is high confidence.\n- Franklin's ability recharge: gta.wiki describes it as 'maintaining high speed'; a secondary source gives a specific '90% of top speed' threshold. I recorded the threshold but flagged it as single-sourced and approximate.\n- Wanted-level search model: the gta.wiki GTA V page states police search across the entire map with per-officer fields of view (explicitly contrasting this with GTA IV's search radius), while some secondary summaries still describe a search radius. I followed gta.wiki, which is the more specific and more recent description, and the radar page independently corroborates the field-of-vision cones on police blips.\n\nPROJECT-RULE ITEM\n- unstick_nudge_policy is sourced from this repository's CLAUDE.md non-negotiable 5, not from any game documentation. I included it because a driving knowledge base that omits the project's own cheat boundary would let the agent reach for a teleport during a stuck loop. Its sources field cites the repo file rather than a URL.\n\nBIAS TO WATCH\n- Most published GTA driving advice online is written for GTA Online. I discarded a large amount of retrieved material on that basis (personal vehicles, Mors Mutual, mechanic delivery, off-radar, Lester's wanted-level removal) and added gta_online_only_do_not_use as an explicit filter item so the same contamination does not re-enter through a later research pass.\n\nREPAIR PASS (post-critic, this session)\n- Fixed a blocker-level contradiction: rewrote franklin_driving_focus so it no longer instructs pressing CAPS LOCK or planning around a special-ability meter — per CAPABILITIES.md, no special-ability primitive exists and it must never appear in a suggested_action; every other item that referenced it (traffic_and_oncoming_lanes, no_full_throttle_default, gta_online_only_do_not_use) was edited to drop the reference. Discovered independently and fixed the same class of problem across the rest of the file: the harness has NO generic raw-keypress action at all (only 11 bridge tasks and 8 named primitives — look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn), so every suggested_action that told the agent to hold/tap/press a specific key (W, S, A/D, SPACE, F, C) was rewritten around the actual primitives/bridge tasks (pc_default_vehicle_keybinds, brake_and_reverse_share_one_key, keyboard_steering_is_binary, handbrake_is_a_rotation_tool_not_a_brake, class_motorcycle, corner_sequence_brake_turn_accelerate, no_full_throttle_default, tyre_burst_and_rims, dirt_and_loose_surface, stopping_before_exit, reversing_out_procedure, stuck_detection_no_displacement, stuck_detection_wheelspin, stuck_detection_oscillation, fire_means_bail_out, vehicle_in_water, flipped_vehicle_recovery, landing_a_jump_or_drop). Fixed a CAPABILITIES violation in chasing_a_fleeing_target ('shoot the rider' is a named-target manual-aim action the agent cannot perform) and softened helicopter_spotlight_at_night's vague 'deal with the helicopter directly' for the same reason. Applied critic loop_risk finding: stuck_detection_no_displacement now carries an expect_no_displacement exemption for scripted push/ram/tow mission states, itself bounded (~5 cycles/45s) and still subject to stuck_detection_oscillation's outer cap, so no push state is ever both unmonitored and uncapped. Checked unstick_nudge_policy against the critic's contradiction finding: this item's own ordering (in-game ladder, then abandon-on-foot, then logged nudge as last resort) already matches the critic's proposed fix — the actual contradiction lives in a different domain's recovery item, not here, so no change was needed in this file. No items were deleted; all 52 ids preserved. Verified the file re-parses as JSON with the same top-level shape."
+}

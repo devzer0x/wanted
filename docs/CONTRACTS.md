@@ -1,9 +1,89 @@
 # WANTED — CONTRACTS
 
-**Version: 1.2 — FROZEN 2026-08-29.** Executors treat this file as read-only; changes go through
+**Version: 1.9 — FROZEN 2026-09-02.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
 Changelog:
+- v1.9 (behavioural, root-caused from a live stream failure): `follow_entity` gains `style` and
+  `speed_mps`. Until now `StartFollowEntity` hard-coded `DrivingStyles.Normal` and a 15 m/s cruise
+  cap (`TaskEngine.cs`), so a tail obeyed red lights and topped out at 54 km/h while the NPC being
+  tailed did neither. Following a mission car was therefore **not achievable** — the target simply
+  drove away, the mission failed, and no amount of prompting could fix it, because the losing
+  behaviour was in the bridge, not the decision. Observed live as "Franklin lost Lamar" on a follow
+  mission whose only objective is to stay with Lamar. New defaults **when the caller omits them**:
+  style `ignore_lights`, `speed_mps` 30.0 (108 km/h). Both are chosen to match, not exceed, what a
+  mission NPC does; `avoid_traffic` remains available for a genuine chase, and a caller may still
+  pass `normal` for a leisurely tail. The on-foot branch is unchanged (it already runs). Rationale
+  for touching the default rather than only the parameter: every existing caller is the harness's
+  own follow logic, which wants to keep up in all cases, and a default that loses the target is a
+  bug rather than a preference. No new task type, no new event, no `/state` change.
+  **Asymmetry, on purpose:** the bridge ACCEPTS `style` on `follow_entity`, but the brain's decision
+  schema does NOT expose it (`ACTION_PARAM_KEYS["follow_entity"] = (handle, in_vehicle, speed_mps)`).
+  `style` is one of the three non-nullable wire keys from v1.4, so listing it would put
+  `style: "normal"` on *every* follow the model ever emits and re-create the bug. Left off, the
+  bridge default applies. `speed_mps` is nullable, so it is absent unless a caller means it, and
+  that is the one lever the brain and `MissionFollower` get for a widening gap.
+- v1.8 (additive; **retroactive — the bridge has emitted this since 2026-09-02, the contract
+  entry was missed**): `mission.route_blips[]` = `[{ "pos": {x,y,z}, "kind": "coord"|"entity",
+  "handle": int, "color": string }]` — the blips the game has actually plotted a GPS route to,
+  nearest first, at most 5 (`MaxRouteBlips`). `objective_blip` is the bridge's single best pick out
+  of the same set; the list exists so that the harness can reason when there is more than one (a
+  follow target plus a drop-off), and so a wrong pick is recoverable instead of invisible. `color`
+  is the SHVDN `BlipColor` member name, and an index with no name in the pinned enum serializes as
+  its integer rendered as a string — consumers must tolerate that. `kind: "entity"` means the route
+  points at a moving thing (`handle` is valid and can be passed to `follow_entity`); `kind: "coord"`
+  means a fixed place. The key is always present as an array, never null.
+- v1.7 (additive): `player.protagonist` = `michael|franklin|trevor|unknown` (from the player ped
+  model), and `mission.starts[]` = `[{ "pos": {x,y,z}, "protagonist": "michael|franklin|trevor|unknown" }]`
+  — the mission-start markers currently on the map (the M/F/T letter blips, identified by the
+  game's own per-protagonist blip colours; nearest first, at most 8). Walking or driving into one
+  starts that mission. Purpose: the agent can now DECIDE to go and do a job instead of only reacting
+  once a mission is already running. Harness types widened (optional, defaulted) before the
+  bridge emits them.
+- v1.6 (additive): `nearby.vehicles[]` and `nearby.peds[]` gain `pos: {x,y,z}` (same shape as
+  `player.pos`). Until now they carried only `distance` + `handle`, so the agent knew a crewmate or an
+  enemy was "20 m away" but not in which direction — the minimap's red/blue dots were invisible to
+  him as data. With `pos` he can `walk_to`/`drive_to` a crewmate, reason about where enemies are,
+  and use `nearby` positions as a legitimate coordinate source. Harness types were widened
+  (optional field) before the bridge began emitting it.
+- v1.5 (additive): `nearby.peds[].relationship` gains `friendly`. Until now every non-hostile ped
+  was `neutral`, so a mission crewmate standing beside the agent was indistinguishable from a bystander
+  and "stay with the crew" / `follow_entity` on a crewmate could not be expressed. The harness
+  type was widened before the bridge began emitting the value.
+- v1.4 (root-caused by a 25-agent adversarial pass over 174 real decisions + server logs):
+  §2 `action.params` is now a **closed, typed object** — every key §1's task table and §2's primitive
+  list already name (`x y z speed_mps style arrive_radius_m run prefer search_radius_m radius_m
+  duration_s handle in_vehicle seconds station ms direction`). On the wire this is a
+  strict subset of what v1.3 permitted and adds no task type, event type or decision field. Why it
+  had to change: the harness sends the decision schema through the Anthropic SDK's strict
+  `transform_schema`, which rewrites a free-form object into `properties: {} +
+  additionalProperties: false` — a grammar whose only legal value is `{}`. Constrained decoding
+  therefore forced `params: {}` on **every one of 174 real decisions**, so every `drive_to` /
+  `walk_to` / `follow_entity` was dead on arrival and the parameterless `enter_nearest_vehicle` /
+  `exit_vehicle` pair made up 63% of all actions — the observed get-in-car / get-out / get-in-car
+  loop. A typed model is the only fix a decoding grammar respects; prose in the catalog cannot.
+  Wire-shape constraints, MEASURED against the real API 2026-09-02 (forced, not chosen): every
+  param key is `required` on the wire and the model writes an explicit value or `null` per key,
+  because the constrained-decoding grammar compiles in time exponential in the number of OPTIONAL
+  properties (n>=15 optional => the server drops the connection at 60 s; all-required => ~3 s cold /
+  ~1.3 s warm). The endpoint also rejects >16 union-typed params, so `style`/`run`/`direction` are
+  non-nullable with their contract defaults (`normal`/`false`/`left`), holding the union count at 14.
+  `wire_params()` strips keys an action does not take (an `ACTION_PARAM_KEYS` allowlist = the §1
+  table + §2 primitives), so `decisions.action` / `POST /task` keep exactly the documented shape and
+  no default leaks onto an action with no such param. Cost: +~85 output tokens/decision (~+$0.0004);
+  the params schema rides inside the cached prefix. `follow_entity.in_vehicle`, when the model omits
+  it, is absent from the POST body and the bridge defaults it to `false`.
+  Companion (non-contract) findings fixed in the same pass: the harness left `world.timescale` at
+  0.15 after a failed restore (the observed "slow motion"); a synchronous screen-grab retry loop
+  blocked the tick for up to 172 s; a local schema failure was charged to the API-outage backoff.
+- v1.3 (from the first live play session on the real game): `mission_start` now carries a
+  **screenshot**. Rationale: /state exposes no mission name and no objective text — verified, the
+  field does not exist anywhere in the pipeline — so the ONLY honest source of "what does this
+  mission actually want" is the screen the game draws it on. Previously the director could see the
+  screen on `death`, `busted`, `mission_fail` and `wanted_change` — i.e. only after things had gone
+  wrong, never at the moment the objective is displayed. Observed live: the agent stood in a mission
+  with no idea what it wanted. Cost is bounded: missions start rarely, so this adds roughly one
+  vision call per mission rather than per tick.
 - v1.1 adds the `site_config` table (§5) so stream provider/channel are runtime-switchable
   (D8 — `NEXT_PUBLIC_*` values are baked per-deployment and cannot switch at runtime).
 - v1.2 (from the delivery-day readiness pass, all three found by cross-package verification):
@@ -63,7 +143,7 @@ preconditions.
   "location": {"street": "Vinewood Blvd", "zone": "Downtown Vinewood"},
   "world": {"clock": "13:45", "weather": "CLEAR", "timescale": 1.0},
   "mission": {"active": false, "random_event_active": false, "cutscene_active": false,
-              "objective_blip": null},
+              "objective_blip": null, "starts": [], "route_blips": []},
   "nearby": {"vehicles": [], "peds": []},
   "last_task": {"id": "t-000123", "type": "drive_to", "status": "running", "detail": ""},
   "bridge": {"version": "1.0.0", "edition": "legacy"}
@@ -80,10 +160,20 @@ Field notes:
   "handle": <blip handle>}`. Starting identification rule (empirical convention, validated per
   mission in Phase 4): sprite Standard(1) + colour Yellow(66) + route enabled; refinements are
   documented in bridge/README without changing this field's shape.
+- `mission.route_blips[]` (v1.8, nearest first, at most 5): `{"pos": {x,y,z},
+  "kind": "coord|entity", "handle": <blip handle>, "color": "<BlipColor member name>"}` — every
+  blip the game has plotted a GPS route to, i.e. the yellow line on the minimap made readable as
+  data. `objective_blip` is the bridge's single best pick out of this same set. Use the list when
+  there is more than one route (a follow target plus a drop-off) or when the pick looks wrong.
+  `kind: "entity"` means the route points at something that moves and `handle` may be passed
+  straight to `follow_entity`. `color` is a member name such as `"Yellow"`, but an enum index with
+  no name in the pinned SHVDN build serializes as its integer as a string — tolerate that.
 - `nearby.vehicles[]` (top 8 by distance): `{"handle": 5678, "model": "...", "display_name": "...",
   "class": "...", "distance": 12.3, "driver": "player|npc|empty"}`.
 - `nearby.peds[]` (top 8): `{"handle": 9012, "model": "...", "distance": 5.2,
-  "relationship": "neutral|hostile"}`.
+  "relationship": "neutral|hostile|friendly", "pos": {x,y,z}}`. `friendly` (v1.5) = the engine's
+  own Companion/Like/Respect relationship towards the player, i.e. mission crewmates. `pos` (v1.6)
+  = world position, same shape as `player.pos`; vehicles carry it too.
 - `last_task.status` lifecycle: `idle` (no task ever / cleared) → `running` → `done` | `failed`.
   **v1.2:** when no task has ever been posted (fresh bridge load / script reload), `id` and `type`
   are `null`; every consumer must treat them as nullable. `status` and `detail` are always present.
@@ -111,7 +201,7 @@ values empirically (Phase 3) without a contract change.
 | `flee_police` | `{}` | runs while wanted > 0; `done` when wanted = 0 |
 | `combat_hated_targets_around` | `{radius_m}` | engine combat task; `done` when no hated targets remain in radius |
 | `seek_cover` | `{duration_s: 10}` | cover reached or timeout |
-| `follow_entity` | `{handle, in_vehicle: bool}` | runs until preempted or entity gone (`failed`, `"target_lost"`) |
+| `follow_entity` | `{handle, in_vehicle: bool, style: "ignore_lights", speed_mps: 30.0}` | runs until preempted or entity gone (`failed`, `"target_lost"`). `style`/`speed_mps` apply to the in-vehicle tail only; on foot he always runs. Defaults keep pace with a mission NPC — see v1.9 |
 | `set_waypoint` | `{x, y}` | immediate (`done` same tick); map waypoint only, no movement |
 | `stop` | `{}` | clears current task → `idle` |
 
@@ -149,7 +239,8 @@ This object is the whole public feed.
   "thought": "≤40 words. The agent's private-ish reasoning, shown on site as 'what he was thinking'.",
   "say": "≤20 words. The agent's out-loud line in his voice. This is the commentary.",
   "mood": "chill | bored | hyped | scared | smug",
-  "action": { "type": "<one of the bridge tasks or a manual-control primitive>", "params": {} },
+  "action": { "type": "<one of the bridge tasks or a manual-control primitive>",
+              "params": { "<v1.4: only the keys §1/§2 name for THIS type; see the v1.4 note on the closed 17-key wire object>": "..." } },
   "goal": "current goal in ≤12 words, unchanged unless the director changed it",
   "confidence": 0.0
 }
@@ -191,7 +282,7 @@ This object is the whole public feed.
 |---|---|---|
 | `death` | `{cause: "?", street, deaths_total}` | yes |
 | `busted` | `{wanted_at_arrest, street, busted_total}` | yes |
-| `mission_start` | `{name}` | no |
+| `mission_start` | `{name}` | yes |
 | `mission_end` | `{name, outcome: "passed", duration_s, deaths, attempts}` | yes |
 | `mission_fail` | `{name, reason_text, attempt}` | yes |
 | `wanted_change` | `{from, to}` | only if to ≥ 3 |

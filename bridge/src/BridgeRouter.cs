@@ -225,7 +225,7 @@ namespace WastedBridge
                     {
                         return Invalid(out error, out detail, "drive_to requires numeric speed_mps");
                     }
-                    if (!TryStyle(p, out req.Style, out detail))
+                    if (!TryStyle(p, "normal", out req.Style, out detail))
                     {
                         error = "invalid_params";
                         return false;
@@ -259,7 +259,7 @@ namespace WastedBridge
                     return true;
                 case "wander_drive":
                 {
-                    if (!TryStyle(p, out req.Style, out detail))
+                    if (!TryStyle(p, "normal", out req.Style, out detail))
                     {
                         error = "invalid_params";
                         return false;
@@ -291,6 +291,24 @@ namespace WastedBridge
                         return Invalid(out error, out detail, "follow_entity requires integer handle");
                     }
                     req.InVehicle = OptBool(p, "in_vehicle", false);
+                    // CONTRACTS v1.9: style/speed_mps are OPTIONAL on follow_entity. Absent means
+                    // the v1.9 defaults (TaskEngine.FollowVehicleDefaultStyleName/SpeedMps), which
+                    // keep pace with the mission NPC being tailed instead of losing it (the old
+                    // hard-coded DrivingStyles.Normal + 15 m/s could not). An explicit value from
+                    // the caller always wins. Parsed through the exact same validated path drive_to
+                    // uses, so a malformed value fails invalid_params (already-enumerated code) the
+                    // same way, never a new code.
+                    if (!TryStyle(p, TaskEngine.FollowVehicleDefaultStyleName, out req.Style, out detail))
+                    {
+                        error = "invalid_params";
+                        return false;
+                    }
+                    if (!TryOptFloat(p, "speed_mps", TaskEngine.FollowVehicleDefaultSpeedMps,
+                        out req.SpeedMps))
+                    {
+                        return Invalid(out error, out detail,
+                            "follow_entity speed_mps must be numeric when present");
+                    }
                     return true;
                 }
                 case "set_waypoint":
@@ -510,9 +528,17 @@ namespace WastedBridge
             return false;
         }
 
-        private static bool TryStyle(JObject p, out GTA.VehicleDrivingFlags style, out string detail)
+        /// <summary>
+        /// Validates an optional "style" key against the four contract driving styles.
+        /// <paramref name="fallbackName"/> is the name substituted when the caller omits the key
+        /// entirely — drive_to/wander_drive pass "normal"; follow_entity (v1.9) passes
+        /// <see cref="TaskEngine.FollowVehicleDefaultStyleName"/> so a caller who says nothing
+        /// still gets a tail that keeps pace with a mission NPC.
+        /// </summary>
+        private static bool TryStyle(JObject p, string fallbackName, out GTA.VehicleDrivingFlags style,
+                                     out string detail)
         {
-            string name = OptString(p, "style", "normal");
+            string name = OptString(p, "style", fallbackName);
             if (!DrivingStyles.TryParse(name, out style))
             {
                 detail = "style must be one of normal|rushed|ignore_lights|avoid_traffic";
@@ -550,6 +576,30 @@ namespace WastedBridge
         {
             float v;
             return TryFloat(o, name, out v) ? v : fallback;
+        }
+
+        /// <summary>
+        /// Like <see cref="TryFloat"/> but the key is OPTIONAL: a missing key succeeds with
+        /// <paramref name="fallback"/> (the contract default), while a key that is present but not
+        /// a JSON number still fails — same "malformed value" contract as every other typed param,
+        /// just with an extra "absent is fine" escape hatch that OptFloat's fallback-on-any-mismatch
+        /// behavior does not give us (OptFloat cannot tell "absent" from "wrong type").
+        /// </summary>
+        private static bool TryOptFloat(JObject o, string name, float fallback, out float value)
+        {
+            JToken t = o[name];
+            if (t == null)
+            {
+                value = fallback;
+                return true;
+            }
+            if (t.Type != JTokenType.Float && t.Type != JTokenType.Integer)
+            {
+                value = 0f;
+                return false;
+            }
+            value = (float)t;
+            return true;
         }
 
         private static bool OptBool(JObject o, string name, bool fallback)

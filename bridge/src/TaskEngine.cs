@@ -15,9 +15,27 @@ namespace WastedBridge
         private const float WanderCruiseSpeedMps = 13f;   // ~47 km/h city cruise
         private const float FleeSafeDistanceM = 200f;
         private const int FleeReissueMs = 5000;           // re-aim at updated police position
-        private const float FollowVehicleCruiseSpeedMps = 15f;
-        private const int FollowVehicleDistanceM = 20;
+        private const int FollowVehicleDistanceM = 20;    // trailing distance for VehicleFollow, unchanged by v1.9
         private const float WalkArriveRadiusM = 2f;       // contract: walk_to done within 2 m
+
+        // CONTRACTS v1.9 defaults for follow_entity's in-vehicle tail, applied by BridgeRouter when
+        // the caller omits style/speed_mps. The old hard-coded DrivingStyles.Normal + 15 m/s (54
+        // km/h) cruise cap could not keep pace with a mission NPC, who neither stops for lights nor
+        // caps its own speed - the target simply drove away and the mission failed (observed live
+        // as "Franklin lost Lamar"). These two values are chosen to match, not exceed, what a
+        // mission NPC does.
+        internal const string FollowVehicleDefaultStyleName = "ignore_lights";
+        internal const float FollowVehicleDefaultSpeedMps = 30f; // 108 km/h
+
+        // Sanity band clamped onto an explicit (caller-supplied) follow_entity speed_mps before it
+        // reaches the VehicleFollow native. Floor: below this the "tail" would fall behind its own
+        // target at a crawl, which is never useful. Ceiling: a hair above the fastest Super-class
+        // car's real top speed in this game (~55-60 m/s / ~200-215 km/h) - GTA's own vehicle physics
+        // caps actual speed there regardless of what is asked for, so anything higher only hands the
+        // AI driver task a target speed it can never reach, and this is what stops a malformed or
+        // absurd caller value (the "500 m/s tail" case) from doing anything but nothing.
+        private const float FollowVehicleMinSpeedMps = 1f;
+        private const float FollowVehicleMaxSpeedMps = 60f;
 
         // Watchdog timeouts (bridge-side judgement; contract names "timeout" as a failure detail).
         private const int DriveToTimeoutMs = 600000;
@@ -136,9 +154,28 @@ namespace WastedBridge
 
                 case "combat_hated_targets_around":
                     // Engine gotcha (brief-natives): despite the plural name the native engages
-                    // only the single closest hated target and needs hostile relationships to
-                    // exist, or it exits immediately. The done-check below is ours, not the task's.
-                    ped.Task.CombatHatedTargetsAroundPed(req.RadiusM);
+                    // only the single closest HATED target and needs hostile relationships to
+                    // exist, or it exits immediately. Observed live: 234 of these started and the
+                    // ones that ran finished in the same millisecond while cops were shooting from
+                    // ~45 m - mission cops attacking the player are "in combat against" him without
+                    // necessarily being in a hated group. So: use the hated-group native when it
+                    // has something to bite on, otherwise fight the nearest ped that is actually
+                    // attacking him. Search radius is widened to at least 60 m for the same reason.
+                    {
+                        float r = System.Math.Max(req.RadiusM, 60f);
+                        if (CountHatedTargets(ped, req.RadiusM) > 0)
+                        {
+                            ped.Task.CombatHatedTargetsAroundPed(req.RadiusM);
+                        }
+                        else
+                        {
+                            Ped target = NearestHostile(ped, r);
+                            if (target != null)
+                            {
+                                ped.Task.Combat(target, (TaskCombatFlags)0, (TaskThreatResponseFlags)0);
+                            }
+                        }
+                    }
                     break;
 
                 case "seek_cover":
@@ -259,7 +296,9 @@ namespace WastedBridge
                     break;
 
                 case "combat_hated_targets_around":
-                    if (CountHatedTargets(ped, _req.RadiusM) == 0)
+                    // Widened radius (see the start case) and a 2 s grace so the engine's combat
+                    // task has actually spun up before we judge "nothing left to fight".
+                    if (elapsed > 2000 && CountHatedTargets(ped, System.Math.Max(_req.RadiusM, 60f)) == 0)
                     {
                         Done("");
                     }
@@ -402,8 +441,12 @@ namespace WastedBridge
                     Fail("not_in_vehicle");
                     return;
                 }
-                ped.Task.VehicleFollow(veh, target, FollowVehicleCruiseSpeedMps,
-                    DrivingStyles.Normal, FollowVehicleDistanceM);
+                // req.Style/req.SpeedMps already carry either the caller's explicit value or the
+                // v1.9 defaults (BridgeRouter's follow_entity parsing) - clamp the speed into the
+                // sane band regardless of which one it is.
+                float speed = System.Math.Min(FollowVehicleMaxSpeedMps,
+                    System.Math.Max(FollowVehicleMinSpeedMps, req.SpeedMps));
+                ped.Task.VehicleFollow(veh, target, speed, req.Style, FollowVehicleDistanceM);
             }
             else
             {
@@ -434,6 +477,38 @@ namespace WastedBridge
             _lastFleeReissueAt = Game.GameTime;
         }
 
+        /// <summary>Nearest living, non-animal ped within radius that hates the player or is in
+        /// combat against him - the same criteria as CountHatedTargets, returned as a target.</summary>
+        private static Ped NearestHostile(Ped player, float radiusM)
+        {
+            Ped best = null;
+            float bestD = float.MaxValue;
+            Ped[] peds = World.GetNearbyPeds(player, radiusM) ?? new Ped[0];
+            for (int i = 0; i < peds.Length; i++)
+            {
+                Ped p = peds[i];
+                if (p == null || !p.Exists() || p.IsDead || p.Handle == player.Handle)
+                {
+                    continue;
+                }
+                // An animal can never be a combat target. Observed live: a cat 29.1 m away reported
+                // model='cat' rel=hostile, was selected here, and the agent moved 0.2 m in 20 s during
+                // an active mission while narrating "cat" over and over. Reuses
+                // SnapshotBuilder.IsAnimal - the same PedType/IsAnimalPed check nearby.peds[] is
+                // already filtered with - rather than a second animal test.
+                if (SnapshotBuilder.IsAnimal(p, p.Model))
+                {
+                    continue;
+                }
+                if (p.GetRelationshipWithPed(player) == Relationship.Hate || p.IsInCombatAgainst(player))
+                {
+                    float d = player.Position.DistanceTo(p.Position);
+                    if (d < bestD) { bestD = d; best = p; }
+                }
+            }
+            return best;
+        }
+
         private static int CountHatedTargets(Ped player, float radiusM)
         {
             int count = 0;
@@ -442,6 +517,12 @@ namespace WastedBridge
             {
                 Ped p = peds[i];
                 if (p == null || !p.Exists() || p.IsDead)
+                {
+                    continue;
+                }
+                // See NearestHostile: an animal must never count as (or be selected as) a hated
+                // combat target.
+                if (SnapshotBuilder.IsAnimal(p, p.Model))
                 {
                     continue;
                 }

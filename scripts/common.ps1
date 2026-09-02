@@ -142,3 +142,116 @@ function Get-WastedFileSha256 {
     param([Parameter(Mandatory)][string]$Path)
     return (Get-FileHash -LiteralPath $Path -Algorithm SHA256).Hash.ToLowerInvariant()
 }
+
+function Get-WastedSessionTable {
+    <#
+    `query session` parsed into objects, so nothing downstream has to hardcode "session 1".
+
+    Emits one PSCustomObject per row: Current (the '>' marker), SessionName, UserName, Id (int),
+    State ('Active' / 'Disc' / 'Conn' / 'Listen' / ...).
+
+    Parsing: the SESSIONNAME column is cut off by the header offset of USERNAME (session names are
+    never numeric, so leaving them in would confuse the id), and everything after that is
+    tokenised. `query session` right-aligns the ID column and leaves USERNAME blank on unowned
+    sessions, so a naive `\S+\s+\S+\s+\d+` regex silently mis-columns the `services` and `console`
+    rows; anchoring the STATE column by offset is no better, because a wide session id shifts the
+    row relative to the header. Instead the tokens are read positionally: "<user> <id> <state> …"
+    or "<id> <state> …", decided by which one parses as an integer.
+
+    Locale: the English header is what this parses. That is not an assumption — the
+    WASTED-ConsoleKeepalive log on this server contains a "reattached session 1 to console" line,
+    which can only be written after its `Administrator ... Disc` English-format match succeeded.
+    If the header ever changes, this throws with the raw output rather than guessing.
+    #>
+    [CmdletBinding()]
+    param()
+
+    $exe = if ($IsWindows) { Join-Path $env:SystemRoot 'System32\query.exe' } else { 'query' }
+    $raw = & $exe session 2>&1
+    $lines = @($raw | ForEach-Object { [string]$_ })
+    if ($lines.Count -eq 0) {
+        throw "'query session' produced no output (exit $LASTEXITCODE) — cannot determine the session table."
+    }
+
+    $headerIndex = -1
+    for ($i = 0; $i -lt $lines.Count; $i++) {
+        if ($lines[$i] -match 'SESSIONNAME' -and $lines[$i] -match 'USERNAME' -and $lines[$i] -match 'STATE') {
+            $headerIndex = $i
+            break
+        }
+    }
+    if ($headerIndex -lt 0) {
+        throw "Could not find the 'SESSIONNAME USERNAME ID STATE' header in 'query session' output " +
+              '(non-English Windows, or query.exe failed). Raw output: ' + ($lines -join ' | ')
+    }
+
+    $header = $lines[$headerIndex]
+    $idxUser = $header.IndexOf('USERNAME')
+    $idxState = $header.IndexOf('STATE')
+    if ($idxUser -lt 0 -or $idxState -le $idxUser) {
+        throw "'query session' header columns are not in the expected order: '$header'."
+    }
+
+    $rows = [System.Collections.Generic.List[object]]::new()
+    for ($i = $headerIndex + 1; $i -lt $lines.Count; $i++) {
+        $line = $lines[$i]
+        if (-not $line.Trim()) { continue }
+
+        $current = $line.StartsWith('>')
+        $namePart = $line
+        $rest = ''
+        if ($line.Length -gt $idxUser) {
+            $namePart = $line.Substring(0, $idxUser)
+            $rest = $line.Substring($idxUser)
+        }
+        $sessionName = $namePart.Trim().TrimStart('>').Trim()
+
+        # "<user> <id> <state> ..." or "<id> <state> ..." — decided by which token is the integer,
+        # not by a column offset, because a wide session id shifts the row against the header.
+        $tokens = @($rest -split '\s+' | Where-Object { $_ })
+        $sessionId = 0
+        $userName = ''
+        $state = ''
+        if ($tokens.Count -ge 3 -and [int]::TryParse($tokens[1], [ref]$sessionId)) {
+            $userName = $tokens[0]
+            $state = $tokens[2]
+        }
+        elseif ($tokens.Count -ge 2 -and [int]::TryParse($tokens[0], [ref]$sessionId)) {
+            $state = $tokens[1]
+        }
+        else {
+            continue
+        }
+
+        $rows.Add([pscustomobject]@{
+            Current     = $current
+            SessionName = $sessionName
+            UserName    = $userName
+            Id          = $sessionId
+            State       = $state
+        })
+    }
+
+    if ($rows.Count -eq 0) {
+        throw "'query session' returned a header but no parsable rows. Raw output: " + ($lines -join ' | ')
+    }
+    return $rows.ToArray()
+}
+
+function Test-WastedOperatorConnected {
+    <#
+    True when somebody is sitting in a live Remote Desktop session right now.
+
+    Used as a "do not touch the foreground" guard: stealing focus out from under a connected
+    operator is worse than leaving it alone, and the whole point of the focus keeper is to fix
+    the desktop AFTER they have gone.
+    #>
+    [CmdletBinding()]
+    param([object[]]$SessionTable)
+
+    if (-not $SessionTable) { $SessionTable = Get-WastedSessionTable }
+    foreach ($row in $SessionTable) {
+        if ($row.SessionName -match '^(?i)rdp-tcp#' -and $row.State -eq 'Active') { return $true }
+    }
+    return $false
+}

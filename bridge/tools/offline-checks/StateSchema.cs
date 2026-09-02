@@ -67,6 +67,10 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("player.arrested", Kind.Boolean),
             new FieldSpec("player.in_vehicle", Kind.Boolean),
             new FieldSpec("player.control_enabled", Kind.Boolean),
+            // CONTRACTS v1.7: who the player currently is, from the ped model. Always present
+            // (defaults to "unknown" rather than being absent/null).
+            new FieldSpec("player.protagonist", Kind.String,
+                allowed: new[] { "michael", "franklin", "trevor", "unknown" }),
 
             // null when on foot — the key is always present (contract example shows "vehicle": null)
             new FieldSpec("vehicle", Kind.Object, nullable: true),
@@ -101,6 +105,28 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("mission.objective_blip.kind", Kind.String,
                 allowed: new[] { "coord", "entity" }),
             new FieldSpec("mission.objective_blip.handle", Kind.Integer),
+            // CONTRACTS v1.7: mission-start markers (the M/F/T letter blips) currently on the map,
+            // nearest first, at most 8. Always an array, never null.
+            new FieldSpec("mission.starts", Kind.Array),
+            new FieldSpec("mission.starts[]", Kind.Object),
+            new FieldSpec("mission.starts[].pos", Kind.Object),
+            new FieldSpec("mission.starts[].pos.x", Kind.Number),
+            new FieldSpec("mission.starts[].pos.y", Kind.Number),
+            new FieldSpec("mission.starts[].pos.z", Kind.Number),
+            new FieldSpec("mission.starts[].protagonist", Kind.String,
+                allowed: new[] { "michael", "franklin", "trevor", "unknown" }),
+            // CONTRACTS v1.8: the route-enabled blips objective_blip was picked from, nearest
+            // first, at most 5. Always an array, never null.
+            new FieldSpec("mission.route_blips", Kind.Array),
+            new FieldSpec("mission.route_blips[]", Kind.Object),
+            new FieldSpec("mission.route_blips[].pos", Kind.Object),
+            new FieldSpec("mission.route_blips[].pos.x", Kind.Number),
+            new FieldSpec("mission.route_blips[].pos.y", Kind.Number),
+            new FieldSpec("mission.route_blips[].pos.z", Kind.Number),
+            new FieldSpec("mission.route_blips[].kind", Kind.String,
+                allowed: new[] { "coord", "entity" }),
+            new FieldSpec("mission.route_blips[].handle", Kind.Integer),
+            new FieldSpec("mission.route_blips[].color", Kind.String),
 
             new FieldSpec("nearby", Kind.Object),
             new FieldSpec("nearby.vehicles", Kind.Array),
@@ -112,13 +138,25 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("nearby.vehicles[].distance", Kind.Number),
             new FieldSpec("nearby.vehicles[].driver", Kind.String,
                 allowed: new[] { "player", "npc", "empty" }),
+            // CONTRACTS v1.6: world position, same shape as player.pos.
+            new FieldSpec("nearby.vehicles[].pos", Kind.Object),
+            new FieldSpec("nearby.vehicles[].pos.x", Kind.Number),
+            new FieldSpec("nearby.vehicles[].pos.y", Kind.Number),
+            new FieldSpec("nearby.vehicles[].pos.z", Kind.Number),
             new FieldSpec("nearby.peds", Kind.Array),
             new FieldSpec("nearby.peds[]", Kind.Object),
             new FieldSpec("nearby.peds[].handle", Kind.Integer),
             new FieldSpec("nearby.peds[].model", Kind.String),
             new FieldSpec("nearby.peds[].distance", Kind.Number),
+            // CONTRACTS v1.5: gains "friendly" (the engine's own Companion/Like/Respect
+            // relationship towards the player - mission crewmates).
             new FieldSpec("nearby.peds[].relationship", Kind.String,
-                allowed: new[] { "neutral", "hostile" }),
+                allowed: new[] { "neutral", "hostile", "friendly" }),
+            // CONTRACTS v1.6: world position, same shape as player.pos.
+            new FieldSpec("nearby.peds[].pos", Kind.Object),
+            new FieldSpec("nearby.peds[].pos.x", Kind.Number),
+            new FieldSpec("nearby.peds[].pos.y", Kind.Number),
+            new FieldSpec("nearby.peds[].pos.z", Kind.Number),
 
             new FieldSpec("last_task", Kind.Object),
             // CONTRACTS v1.2: present-and-null before the first task, never absent.

@@ -22,14 +22,76 @@ API rate limit / overload     ApiBackoff with a per-cause floor; the reflex
 Supabase down                 events.SupabaseWriter offline queue (locked,
                              capped, flushed on reconnect)
 stuck on geometry             StuckDetector → reverse_out → bridge `unstick`
+                              (vehicles only: it needs `state.vehicle` AND a
+                              driving task, so an on-foot pin is invisible
+                              to it)
+pinned by a task that never   TaskStallDetector → `stop`, then a short refusal
+finishes                      to re-post that same task type. Confirmed live:
+                              a stray CAT is a `nearby.peds[]` entry with
+                              `relationship: "hostile"` (animals are peds in
+                              this engine), so `combat_hated_targets_around`
+                              never completed — 20 s of RUNNING, 0.2 m of
+                              movement, full health, a story mission waiting
 flipped                       flipped_action → exit_vehicle
 stranded on foot              StrandedEscalator → widening vehicle search
+attacked / shot at / cornered DamageTracker (effective HP falling inside a
+                              short window ⇒ he is being hit RIGHT NOW,
+                              whatever the engine's relationship groups say)
+                              → threat_action → reflex, no model call: the
+                              survival ladder (break contact when hurt >
+                              **leave, if he is in a working car and parked** >
+                              fight back on foot at whatever is in reach >
+                              fight a close hostile when healthy, or leave if
+                              the car works > flee_police, and only outside a
+                              mission) + ThreatLatch, so the
+                              chosen action is POSTED once instead of every
+                              tick (a re-post preempts and restarts the engine
+                              task, which is what made him stutter and never
+                              land a shot)
+screen capture wedged         OffLoopGrab → the grab runs on a daemon worker
+                              with a hard deadline, so a dxcam device stuck in
+                              its own recovery loop cannot freeze the tick;
+                              after a run of failures capture is given up on
+                              and the show continues without screenshots
+model answered, our schema    classify_api_failure → "invalid_output": a local
+said no                       rejection is NOT an API outage and must not be
+                              charged to the outage backoff
+died / arrested               DeathArrestRecovery → suppress tasks, wait for
+                              the game's own respawn, clear stale mission/goal
+                              state
+script thread frozen on a     BlockingScreenWatchdog → detects `state.tick`
+blocking screen (pause menu,  not advancing from OUTSIDE the frozen script
+MISSION FAILED, retry prompt) thread, presses a bounded, escalating key
+                              sequence via real SendInput to clear it
 ===========================  =================================================
+
+These close the exact gaps this module used to admit: it handled brain-call
+failures, bridge stalls and API backoff, but NOT in-game death, arrest,
+mission failure, or a script thread that stops ticking outright. Observed
+live, twice: (1) a firefight left the agent standing still because the only
+thing driving combat was a 1-2 s model call; a death that flipped
+`player.dead` / `mission.active` was never detected by anything, so he sat
+there dead with no recovery. (2) A mission failure put the game on a
+"MISSION FAILED" / retry screen and the SHVDN script thread stopped ticking
+entirely — `/health.tick_hz` pinned at 0.0, `/state` frozen — and
+`System.Windows.Forms.SendKeys` was confirmed to do nothing at all (GTA V
+reads raw/DirectInput and silently discards synthetic window messages); only
+a real SendInput keypress gets out of that. (3) A pedestrian walked up on the
+freeway and beat him to death while he stood there — the combat reflex keyed
+only off `nearby.peds[].relationship == "hostile"`, and a ped that simply
+starts swinging is usually still `neutral` in the snapshot (that field is the
+engine's relationship GROUP, not "is currently hitting me"), so nothing ever
+fired. His own recorded thought at the time: "Something hostile nearby—cat,
+weird—but no objective blip yet. Hold position." :class:`DamageTracker` is
+the fix: losing health is the one signal that cannot lie about being under
+attack, and it is already in every `/state`.
 """
 
 from __future__ import annotations
 
+import math
 import random
+import threading
 import time
 from dataclasses import dataclass, field
 from typing import Any
@@ -42,6 +104,8 @@ from ..bridge_client import (
     GameState,
 )
 from ..logsetup import get_logger
+from ..perception import Delta
+from .vehicle import SEATED_SPEED_MPS, vehicle_can_drive_away
 
 log = get_logger("wasted.recovery")
 
@@ -54,7 +118,18 @@ class StuckDetector:
     """Speed ~0 for >20 s while a drive task runs → escalate: reverse_out, then unstick."""
 
     threshold_s: float = 20.0
+    #: Minimum gap between two /unstick ATTEMPTS (moved or refused). Without this the
+    #: detector returned "unstick" on every tick while the car stayed stopped, and the
+    #: real server log shows 7 nudges in 34 s - five of them inside 1.35 s - for ~17.6 m
+    #: of cumulative displacement. That is a teleport in all but name, and CLAUDE.md
+    #: rule 5 allows exactly one thing: "an unstick nudge of a few meters when wedged".
+    unstick_cooldown_s: float = 30.0
+    #: Hard cap per stuck episode. Two nudges that do not free the car mean the car is
+    #: not merely wedged; hand the problem back to the brain instead of drifting away.
+    max_nudges_per_episode: int = 2
     _reverse_tried_at: float | None = None
+    _last_unstick_at: float | None = None
+    _episode_nudges: int = 0
     clock: Any = time.monotonic
 
     def check(self, state: GameState) -> str | None:
@@ -66,14 +141,24 @@ class StuckDetector:
             "flee_police",
         )
         if not (v and driving and v.stopped_for_s > self.threshold_s):
+            # Not stuck (or moving again): the episode is over, reset the ladder.
             self._reverse_tried_at = None
+            self._episode_nudges = 0
             return None
         now = self.clock()
         if self._reverse_tried_at is None or now - self._reverse_tried_at > 45.0:
             self._reverse_tried_at = now
             return "reverse_out"
         # reverse_out already tried recently and we're still parked on geometry:
-        # ask the bridge for the logged, contract-limited nudge.
+        # ask the bridge for the logged, contract-limited nudge - but rate-limited,
+        # and never more than max_nudges_per_episode until the car actually moves.
+        if self._episode_nudges >= self.max_nudges_per_episode:
+            return None
+        if (
+            self._last_unstick_at is not None
+            and now - self._last_unstick_at < self.unstick_cooldown_s
+        ):
+            return None
         return "unstick"
 
     def try_unstick(self, bridge: BridgeClient) -> float | None:
@@ -86,6 +171,10 @@ class StuckDetector:
         tick. Neither is worth killing the loop for, and a three-metre nudge
         never is.
         """
+        # Stamp the ATTEMPT (not just a success): a refused nudge still counts against the
+        # cooldown, otherwise a 409 loop would hammer the bridge every tick.
+        self._last_unstick_at = self.clock()
+        self._episode_nudges += 1
         try:
             result = bridge.unstick()
             return result.distance_m if result.moved else None
@@ -106,12 +195,924 @@ class StuckDetector:
             return None
 
 
+# --- a task that runs forever pins him (on foot OR in a car) ------------------
+#
+# Confirmed live, measured off /state at 4 s intervals:
+#
+#     last_task = combat_hated_targets_around / RUNNING   (the whole window)
+#     player.pos moved 0.2 m in 20 s, in_vehicle = False
+#     health 200 (nothing was damaging him), wanted 0, mission.active = true
+#
+# Root cause of that particular instance: a stray CAT appears in
+# `nearby.peds[]` with `relationship: "hostile"` — animals are peds in this
+# engine — so the bridge's done-check for `combat_hated_targets_around` ("done
+# when no hated targets remain in radius", CONTRACTS §1) never came true, and
+# he stood in a hedge fighting a cat while a story mission waited. Filtering
+# animals out of `nearby.peds` removes that trigger and is the bridge's job;
+# the DEADLOCK CLASS is this module's, because any engine task that never
+# completes pins him the same way and nothing here noticed for 20+ seconds.
+#
+# This is NOT a duplicate of StuckDetector above: that one needs
+# `state.vehicle` AND a driving task, so it cannot see an on-foot pin at all,
+# and it answers with reverse_out/unstick (move the car) where this answers
+# with `stop` (abandon the task and let the ordinary layers choose again).
+
+#: How far the player may move and still count as not moving. The measured
+#: deadlock was 0.2 m in 20 s. 2 m is comfortably above the shuffle an idle
+#: ped animation produces and the metre a combat task's aim-stance costs, and
+#: far below anything a walk, a drive or a real fight covers in 20 s.
+STALL_MOVE_M = 2.0
+
+#: How long he must stay inside that circle, with a task RUNNING, before it
+#: counts as deadlocked rather than merely slow. Long enough to sit out a
+#: traffic light, an engine-side re-path or a door animation; short enough
+#: that this is the most a story mission ever loses to a pin. Deliberately the
+#: same 20 s StuckDetector uses for the vehicle case, for the same reason.
+STALL_WINDOW_S = 20.0
+
+#: Minimum gap between two interventions. One `stop` per half-minute at the
+#: very worst: past that this is not a stall to be broken every tick, it is a
+#: situation, and the ordinary layers (and the brain) should own it.
+STALL_INTERVENTION_GAP_S = 30.0
+
+#: How long the exact task type that just deadlocked him is refused
+#: afterwards. Longer than STALL_INTERVENTION_GAP_S on purpose: if the refusal
+#: expired first, whichever layer chose that task would simply choose it again
+#: and walk straight back into the identical deadlock — one `stop` every 30 s,
+#: forever. Short enough that a type blocked by a false positive is available
+#: again inside one activity step.
+STALL_TYPE_BLOCK_S = 45.0
+
+#: Task types where standing still IS the task, so a stationary window proves
+#: nothing: `seek_cover` (the entire point is to be behind cover and stay
+#: there), `follow_entity` (a stationary target legitimately means a
+#: stationary follower, and the bridge fails it on its own with `target_lost`
+#: when the entity is gone), and `stop` / `set_waypoint`, which do not move
+#: him at all. Every other type in CONTRACTS §1's table is supposed to change
+#: where he is.
+STATIONARY_TASK_TYPES: frozenset[str] = frozenset(
+    {"seek_cover", "follow_entity", "stop", "set_waypoint"}
+)
+
+
+@dataclass
+class TaskStallDetector:
+    """A RUNNING task that has not moved him for :data:`STALL_WINDOW_S`.
+
+    Position across ticks is kept here rather than read off
+    :class:`perception.Delta`, which carries no movement signal at all (it has
+    `died`, `wanted_*`, task and mission transitions, `big_health_drop` — no
+    position, and `perception.py` is not this work package's to widen). The
+    idiom is the same self-contained previous-tick memory
+    :class:`GameRestartDetector` and :class:`BlockingScreenWatchdog` already
+    use.
+
+    The measure is an ANCHOR, not a sum of per-tick steps: "he has not been
+    more than :data:`STALL_MOVE_M` from where he was N seconds ago". A ped
+    shuffling on the spot can accumulate metres of per-tick movement while
+    going nowhere, which is exactly the thing being detected.
+
+    Answering with `stop` and nothing else is deliberate. `stop` is CONTRACTS
+    §1's own "clear current task → idle"; once the task is gone the layers
+    that were already waiting for the wheel (the day plan, the activity
+    runner, the mission follower, the brain) choose something on the very next
+    tick. Choosing FOR them here would be a second, competing planner.
+    """
+
+    move_m: float = STALL_MOVE_M
+    window_s: float = STALL_WINDOW_S
+    intervention_gap_s: float = STALL_INTERVENTION_GAP_S
+    block_s: float = STALL_TYPE_BLOCK_S
+    clock: Any = time.monotonic
+    #: Where he was when the current no-movement window started, and when.
+    _anchor: tuple[float, float] | None = None
+    _anchor_at: float = 0.0
+    _task_id: str | None = None
+    _last_intervention_at: float = 0.0
+    _blocked_type: str | None = None
+    _blocked_until: float = 0.0
+    _block_logged: bool = False
+
+    def feed(
+        self, state: GameState, *, under_attack: bool = False, suspended: bool = False
+    ) -> str | None:
+        """One tick. Returns the stalled task type when it should be abandoned.
+
+        `under_attack` (:meth:`DamageTracker.feed`'s answer) restarts the
+        window: HP moving means the fight is real and going somewhere, and
+        `stop` is the wrong answer to being shot — the survival ladder owns
+        that case. `suspended` is the caller's "he is standing still on
+        purpose" — a deliberate `wait` (the brain's own action, and the beat
+        in every park-and-watch style activity) or governor L3, which is
+        literally asleep in a parked car (CONTRACTS §7).
+        """
+        now = self.clock()
+        p, lt = state.player, state.last_task
+        if (
+            suspended
+            or under_attack
+            or p.dead
+            or p.arrested
+            or state.mission.cutscene_active
+            or lt.status != "running"
+            or lt.type is None
+            or lt.type in STATIONARY_TASK_TYPES
+        ):
+            self._anchor = None
+            return None
+
+        if lt.id != self._task_id:
+            # A different task: it gets its own full window to show movement.
+            self._task_id = lt.id
+            self._anchor = None
+
+        here = (p.pos.x, p.pos.y)
+        if self._anchor is None or math.dist(here, self._anchor) > self.move_m:
+            self._anchor = here
+            self._anchor_at = now
+            return None
+        stalled_for = now - self._anchor_at
+        if stalled_for < self.window_s:
+            return None
+        if now - self._last_intervention_at < self.intervention_gap_s:
+            return None
+
+        self._last_intervention_at = now
+        self._anchor_at = now  # the next window starts here, not at the old anchor
+        self._blocked_type = lt.type
+        self._blocked_until = now + self.block_s
+        self._block_logged = False
+        log.warning(
+            "task is running but has pinned him in place; abandoning it with `stop`",
+            extra={
+                "kv": {
+                    "type": lt.type,
+                    "task_id": lt.id,
+                    "stalled_for_s": round(stalled_for, 1),
+                    "moved_under_m": self.move_m,
+                    "in_vehicle": p.in_vehicle,
+                }
+            },
+        )
+        return lt.type
+
+    def blocked(self, task_type: str) -> bool:
+        """Is this the task type that just deadlocked him, still inside its refusal?
+
+        `stop` is never blocked: it is how this detector itself gets out, and
+        it cannot pin anyone.
+        """
+        if self._blocked_type is None or task_type == "stop":
+            return False
+        if self.clock() >= self._blocked_until:
+            self._blocked_type = None
+            return False
+        if task_type != self._blocked_type:
+            return False
+        if not self._block_logged:
+            self._block_logged = True
+            log.info(
+                "refusing to re-post the task type that just deadlocked him",
+                extra={"kv": {"type": task_type, "for_s": self.block_s}},
+            )
+        return True
+
+    def reset(self) -> None:
+        """Forget everything (new game process behind the same bridge URL)."""
+        self._anchor = None
+        self._task_id = None
+        self._blocked_type = None
+        self._block_logged = False
+
+
 def flipped_action(state: GameState) -> dict[str, Any] | None:
     """Upside-down and not moving → get out (the engine rights nothing for us)."""
     v = state.vehicle
     if v and v.upside_down and v.speed < 0.5:
         return {"type": "exit_vehicle", "params": {}}
     return None
+
+
+# --- combat / threat reflex (observed live: no reflex drove combat, so a
+# 1-2 s model call under fire meant standing still and dying) -----------------
+
+#: A hostile ped within this many metres counts as an active threat worth
+#: engaging. Revised UP from an original 15 m ("in your face") after live
+#: feedback: at 15 m he sat in a car taking fire from hostiles further out
+#: than that and did nothing at all until either they closed to melee range
+#: or he was already badly hurt — "he just sits in car and dies". GTA's own
+#: gunfights routinely happen at 20-40 m; `nearby.peds` is already the top 8
+#: BY DISTANCE (CONTRACTS §1), so anything hostile that makes that list is
+#: already one of the closest entities around him, not something merely
+#: visible in the distance. Tunable; not yet verified against measured
+#: engagement ranges on the server.
+HOSTILE_CLOSE_RADIUS_M = 40.0
+
+#: How close a ped has to be before mere PROXIMITY, plus damage arriving right
+#: now, is enough to treat it as the thing hitting him. Deliberately far
+#: shorter than :data:`HOSTILE_CLOSE_RADIUS_M`: a `hostile` relationship is
+#: evidence on its own, plain proximity is not, and at 40 m every bystander on
+#: the pavement would become an "attacker" the moment he fell off a kerb.
+#: Melee in GTA V lands from about a metre; 8 m leaves room for the metre or
+#: two an attacking ped covers between two snapshots at a 2-4 Hz poll, and for
+#: a shove that knocks him back a step. Tunable; not yet measured on the
+#: server.
+ATTACKER_CLOSE_RADIUS_M = 8.0
+
+#: Effective HP (health + armor) lost inside :data:`DAMAGE_WINDOW_S` that
+#: counts as "someone is hitting me right now".
+#:
+#: Why a window rather than the per-tick signal that already exists:
+#: :attr:`perception.Delta.big_health_drop` needs >= 25 HP to disappear
+#: BETWEEN TWO SNAPSHOTS, and the fists that killed him on the freeway arrived
+#: a few HP at a time — under that bar on every single tick, so it never fired
+#: once during the whole beating. Nothing in ordinary play REMOVES effective HP
+#: in ones and twos (regeneration only adds, armor pickups only add), so this
+#: bar only has to clear the noise floor rather than identify a weapon: 10 is
+#: two or three punches, or one glancing hit.
+DAMAGE_ATTACK_HP = 10.0
+
+#: How far back the loss is accumulated. Long enough that a slow melee
+#: exchange adds up at a 2-4 Hz poll (a punch lands roughly once a second),
+#: short enough that a beating survived ten seconds ago does not keep him
+#: swinging at an empty street. Also the reason this is peak-to-now inside the
+#: window rather than a running total: health regenerating back up between
+#: hits must not be counted as more damage.
+DAMAGE_WINDOW_S = 4.0
+
+#: Health at or below this fraction of max counts as "hurt enough to break
+#: contact rather than trade more hits". The brain's own prompt (situations.md
+#: "Health & damage") treats under-35-of-200 (~17%) as "stop taking risks";
+#: this reflex fires a little earlier because it has to win a race against a
+#: 1-2 s model call, not merely advise one.
+LOW_HEALTH_FRACTION = 0.30
+
+
+@dataclass
+class DamageTracker:
+    """Is he losing health right now? The one attack signal that cannot lie.
+
+    `nearby.peds[].relationship` is the engine's relationship GROUP, not "is
+    currently hitting me". A random pedestrian who decides to swing is still
+    `neutral` in the snapshot while the punches land — observed live, and the
+    reason :func:`threat_action` never fired while a ped beat the agent to death
+    on the freeway. Health going down, on the other hand, is unambiguous, and
+    it is in every `/state` already (CONTRACTS §1 `player.health` /
+    `player.armor`).
+
+    `health + armor` rather than health alone: armor absorbs damage FIRST in
+    GTA V, so an armoured the agent being shot shows a perfectly flat `health`
+    while he is very much under fire. Both fields are contract fields; the sum
+    is only ever used as "did the number go down", never as a health value.
+
+    The measure is PEAK-to-now inside a :data:`DAMAGE_WINDOW_S` sliding
+    window, not a sum of per-tick differences: health regenerates between
+    hits, and a running total would keep counting the same 20 HP long after it
+    had been healed back. It also means a tick that is simply missed (a bridge
+    stall, a dead/arrested gap) degrades to "no evidence" rather than to a
+    fabricated spike — old samples age out on their timestamps, and one lone
+    sample can never be a drop.
+
+    :meth:`feed` is called once per poll tick with the fresh snapshot and
+    returns whether the window now shows an attack.
+    """
+
+    window_s: float = DAMAGE_WINDOW_S
+    attack_hp: float = DAMAGE_ATTACK_HP
+    clock: Any = time.monotonic
+    #: (timestamp, effective HP) inside the window. Bounded by the window, so
+    #: this cannot grow: at 4 Hz over 4 s it holds ~16 entries.
+    _samples: list[tuple[float, float]] = field(default_factory=list)
+    #: Effective HP lost from the window's peak, exposed for logs/commentary.
+    lost_hp: float = 0.0
+
+    def feed(self, state: GameState) -> bool:
+        """Record this tick's effective HP; True when the window shows an attack."""
+        now = self.clock()
+        effective = float(state.player.health + state.player.armor)
+        cutoff = now - self.window_s
+        self._samples = [s for s in self._samples if s[0] >= cutoff]
+        self._samples.append((now, effective))
+        peak = max(hp for _, hp in self._samples)
+        self.lost_hp = max(0.0, peak - effective)
+        return self.lost_hp >= self.attack_hp
+
+    def reset(self) -> None:
+        """Forget the window (respawn, or a new game process behind the bridge).
+
+        A death is a 200 HP drop and a respawn is a 200 HP jump; carrying
+        either across the gap would have him come back swinging at nobody.
+        """
+        self._samples.clear()
+        self.lost_hp = 0.0
+
+
+def _attacker_close(state: GameState) -> bool:
+    """Is anything that could be swinging at him within arm's reach?
+
+    Any relationship EXCEPT `friendly` counts: `friendly` (CONTRACTS §1, v1.5)
+    is the engine's own Companion/Like/Respect group — mission crew standing
+    next to him — and a crewmate is the one ped that is definitely not the one
+    hitting him. `neutral` explicitly counts, because that is what a random
+    attacker looks like in the snapshot at the moment it swings. `nearby.peds`
+    is the top 8 BY DISTANCE (§1), so whoever is punching him is in that list.
+    """
+    return any(
+        ped.relationship != "friendly" and ped.distance <= ATTACKER_CLOSE_RADIUS_M
+        for ped in state.nearby.peds
+    )
+
+
+def threat_action(
+    state: GameState,
+    delta: Delta,
+    under_attack: bool = False,
+    *,
+    vehicle_blocked: bool = False,
+) -> dict[str, Any] | None:
+    """Immediate combat/threat response — NO model call.
+
+    This is the reflex layer's whole reason to exist: a brain call costs
+    1-2 s, which is fatal under fire — confirmed live as the top-priority gap:
+    "he can see enemies on the map, he just sits in car and dies". Survival
+    ladder, highest priority first:
+
+    1. Hurt — health at/under :data:`LOW_HEALTH_FRACTION` of max -> break
+       contact, above everything else: ``seek_cover`` on foot, or
+       ``wander_drive`` (style ``avoid_traffic``) in a WORKING vehicle. There
+       is no "just drive away" bridge task without a destination, so widening
+       distance via ordinary driving is the honest equivalent of "drive
+       away". Survival always wins the ladder. In a car that cannot leave
+       (upside down, in the water, a burnt-out shell, or one the vehicle
+       state machine has measured as not moving) breaking contact by driving
+       is a lie, so that case falls back to ``seek_cover``.
+    2. **Being beaten in a car that can leave** — `under_attack`,
+       `player.in_vehicle`, the car is drivable and STATIONARY, and no
+       mission is active -> ``wander_drive``. THE OPERATOR'S RULE, and a
+       deliberate reversal of what the rungs below used to do: *"ped punches
+       me while I'm on foot -> fight back. Ped attacks me while I'm already
+       in a working stolen car -> FLOOR IT."* Driving away is faster and
+       safer than getting out to trade punches with the man whose car it is,
+       and it is the difference between a joke and the five WASTED counted on
+       stream on 2026-09-02 while he sat in a stolen convertible and let the
+       owner beat him to death through the open door.
+
+       Three guards, each closing a case the old rungs got right:
+
+       * *stationary only* (`vehicle.speed` at/below
+         :data:`vehicle.SEATED_SPEED_MPS`). HP lost while actually driving is
+         overwhelmingly collision damage — a kerb, a lamppost, a head-on — and
+         this module's older note is still true: answering an ordinary crash
+         by preempting the drive is thrash. A crash victim is MOVING; a man
+         being beaten in a parked car is not, and `/state` tells the two
+         apart for free.
+       * *drivable only* (:func:`vehicle.vehicle_can_drive_away`, plus the
+         caller's `vehicle_blocked`). Telling a wedged or wrecked car to drive
+         away is a way of doing nothing while being hit. Those fall through to
+         the fight/cover rungs, which is what the brief asks for.
+       * *outside a mission*. prompts/situations.md ships the opposite order
+         for mission firefights in strong terms — "A mission firefight is not
+         a car chase — fight, don't flee", "Fleeing a scripted firefight fails
+         the mission" — and a reflex preempts a prompt every time. Same
+         precedent as rung 6's `flee_police`.
+    3. **Being hit, by something in reach** — `under_attack` (from
+       :class:`DamageTracker`, or the single-tick
+       :attr:`perception.Delta.big_health_drop`), on foot, and any
+       non-`friendly` ped within :data:`ATTACKER_CLOSE_RADIUS_M` ->
+       ``combat_hated_targets_around``. This is the rung the live bug needed
+       and did not have: a pedestrian who walks up and starts swinging is
+       normally still `neutral` in the snapshot, so rung 4 below never fired
+       and he stood there and died. The action is byte-identical to rung 4's
+       (same type, same radius) so :class:`ThreatLatch` treats the two as one
+       intent and a ped that flips `neutral` -> `hostile` mid-fight cannot
+       cause a re-post.
+
+       On foot, or in a car that CANNOT leave. Rung 2 above is the
+       working-car half of the operator's rule and this is the other half:
+       leaving is always the better answer when it is available, and when it
+       is not — upside down, in the water, a burnt-out shell, or a car the
+       state machine has measured as immobile — fighting back is what is
+       left. (Before this rung was widened, a `neutral` ped beating him in a
+       wedged car produced NOTHING at all: the old rung was `not
+       player.in_vehicle`, and a neutral attacker never reaches the hostile
+       rung.) A `neutral` attacker counts here because
+       :class:`DamageTracker` is the evidence and `relationship` is only the
+       engine's relationship GROUP.
+
+       What the engine does with this is the engine's business: the contract's
+       ``combat_hated_targets_around`` hands off to the game's own combat AI,
+       which picks its own target among the peds it considers hated. Whether
+       it will engage a specific ped that `/state` still reports as `neutral`
+       cannot be established from here — see the module note; it needs the
+       live game. If it finds nothing to fight the task simply reports `done`
+       (CONTRACTS §1) and the latch's hold-down keeps the retry to one post
+       every :data:`THREAT_HOLD_S`, which is a cheap way to be wrong.
+    4. Healthy, and a hostile ped is present within
+       :data:`HOSTILE_CLOSE_RADIUS_M` -> ``combat_hated_targets_around``, the
+       engine's own combat task. This fires REGARDLESS of `wanted`. It no
+       longer fires regardless of `in_vehicle`, which is the second half of
+       the operator's reversal, and the change has to be spelled out because
+       the old behaviour was deliberate and documented: the bug it closed was
+       "sitting in a car near visible hostiles, healthy, doing nothing at
+       all". The answer to that bug is still "stop doing nothing" — it is just
+       no longer "get out and fight". In a WORKING vehicle, outside a mission:
+
+       * already moving, or already under a running drive order -> fall
+         through to the rungs below. He is already doing the best available
+         thing; posting here would preempt a working escape, and falling
+         through means stars still get ``flee_police`` instead of aimless
+         wandering. It also leaves the wheel free for the ordinary layers
+         instead of freezing them out with `_threat_has_the_wheel`.
+       * stationary, nothing driving -> ``wander_drive``. Start leaving.
+
+       In a car that cannot leave, or during a mission, it fights exactly as
+       before. `combat_hated_targets_around` hands off entirely to the game's
+       own combat AI (it aims and shoots; nothing here aims manually —
+       CONTRACTS §1's own description). Engaging a hostile cop this way is a
+       response to an already-hostile encounter, never an initiation — the
+       brain's own hard rule ("never initiate combat with police", rules.md
+       rule 6) is about starting one, not defending against one already close
+       enough to be a `nearby.peds` hostile.
+    5. Taking damage with nothing in reach to hit back at — a sniper, a fire,
+       drowning, a beating he has already backed away from -> break contact,
+       same two actions as rung 1. In a VEHICLE only the single-tick cliff
+       (`Delta.big_health_drop`, >= 25 HP between snapshots) counts here, for
+       the collision reason given in rung 2; on foot the sliding window counts
+       too.
+    6. `wanted > 0`, **no mission active**, and no engageable hostile present
+       (stars accumulating from range, nobody actually in range yet, or
+       fighting is not survivable) -> ``flee_police``, the ordinary
+       evade-by-driving-or-running response (situations.md's whole
+       wanted-level playbook). The `not mission.active` half is deliberate:
+       plenty of story missions ARE a scripted firefight with police, and
+       prompts/situations.md's own rule for that case is "fight, don't
+       flee" — a reflex that drives him away from a mission gunfight the
+       moment a star appears contradicts the prompt shipping beside it and
+       fails the mission. Outside a mission, stars mean the ordinary
+       free-roam chase and fleeing is right.
+
+    Returns ``None`` when nothing here needs to fire, so the tick falls
+    through to the ordinary reflexes/brain. This function itself is pure and
+    stateless — it re-evaluates from the current signals every tick — so once
+    a threat passes it simply stops firing. Whether a returned action is
+    actually POSTed is :class:`ThreatLatch`'s decision, because posting the
+    same action at 3 Hz preempts (and therefore restarts) the engine task it
+    just asked for. Mission-following and the activity runner notice their
+    task was preempted and back off on their own (the same "someone else has
+    the wheel, don't fight it" idiom already in
+    :class:`missions.MissionFollower` / :class:`activities.ActivityRunner`),
+    then resume once nothing here is claiming the wheel. That is what keeps
+    one gunshot from permanently abandoning a mission.
+
+    Dead/arrested is not this function's problem: `main._reflex` does not
+    call it in that state (nothing left to defend), and it returns `None` as
+    a belt-and-braces guard if it ever is. A cutscene is refused outright for
+    the same reason: it is a scripted beat, the game has the wheel, and
+    `main._execute_action` would refuse the task anyway — returning `None`
+    here additionally stops the reflex from claiming the tick and from
+    spending the latch's hold-down on a post that cannot happen.
+
+    `under_attack` is :meth:`DamageTracker.feed`'s answer for this tick. It
+    defaults to False so the relationship-driven rungs can still be reasoned
+    about (and tested) on their own; production always passes it.
+
+    `vehicle_blocked` is :class:`vehicle.VehicleController`'s measured answer
+    to "this car has been told to drive and has not moved". It is the only
+    honest way to know a car is a trap rather than an escape, because
+    `/state` has no engine-health, no `driveable` and no obstruction field —
+    the observation that it did not move IS the evidence. Defaults to False so
+    the function stays testable on its own; production always passes it.
+    """
+    player = state.player
+    if player.dead or player.arrested:
+        return None
+    if state.mission.cutscene_active:
+        return None
+
+    #: A car he could actually leave in: right way up, out of the water, not a
+    #: shell, and not one the state machine has already measured as immobile.
+    can_leave = vehicle_can_drive_away(state) and not vehicle_blocked
+    #: Parked, in the terms the bridge itself uses (its "stopped" bar is
+    #: 0.2 m/s). A man taking damage while ROLLING is crashing; a man taking
+    #: damage while STOPPED in a car is being beaten.
+    v = state.vehicle
+    stationary = v is None or v.speed <= SEATED_SPEED_MPS
+    #: Missions get the prompt's order, not the operator's: situations.md says
+    #: fight a scripted firefight, and a reflex beats a prompt every time.
+    free_roam = not state.mission.active
+    #: The engine has already been told to drive somewhere. Posting a second
+    #: drive over the top would preempt and restart it (CONTRACTS §1) — and
+    #: whether that order is actually producing motion is
+    #: :class:`vehicle.VehicleController`'s job to grade, not this function's.
+    already_leaving = state.last_task.status == "running" and state.last_task.type in (
+        "drive_to",
+        "wander_drive",
+        "flee_police",
+    )
+
+    def break_contact() -> dict[str, Any]:
+        if player.in_vehicle and can_leave:
+            return {"type": "wander_drive", "params": {"style": "avoid_traffic"}}
+        # On foot, or in a car that is upside down / in the water / wrecked /
+        # measured immobile: driving away is not on offer, so take cover.
+        return {"type": "seek_cover", "params": {"duration_s": 10}}
+
+    fight = {
+        "type": "combat_hated_targets_around",
+        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
+    }
+    leave = {"type": "wander_drive", "params": {"style": "avoid_traffic"}}
+
+    # 1. Too hurt to trade more hits.
+    max_health = player.max_health if player.max_health > 0 else 200
+    if player.health <= max_health * LOW_HEALTH_FRACTION:
+        return break_contact()
+
+    # Damage arriving right now, from either detector: the sliding window
+    # (a beating, a few HP at a time) or the single-tick cliff.
+    taking_damage = under_attack or delta.big_health_drop
+
+    # 2. THE REVERSAL. Being beaten in a parked, working car outside a mission:
+    #    floor it. Faster and safer than getting out to fight the owner, and
+    #    the exact death this rung was written from.
+    if taking_damage and player.in_vehicle and can_leave and stationary and free_roam:
+        return leave
+
+    # 3. Something is hitting him and it is close enough to hit back — on foot,
+    #    or in a car that cannot leave (upside down, in the water, a shell, or
+    #    one the state machine has measured as immobile). Leaving is always the
+    #    better answer when it is available; when it is not, this is.
+    if taking_damage and _attacker_close(state) and not (player.in_vehicle and can_leave):
+        return fight
+
+    # 4. A hostile in engagement range, healthy: fight — unless he is in a
+    #    working car outside a mission, where leaving outranks fighting.
+    if any(
+        ped.relationship == "hostile" and ped.distance <= HOSTILE_CLOSE_RADIUS_M
+        for ped in state.nearby.peds
+    ):
+        if player.in_vehicle and can_leave and free_roam:
+            if stationary and not already_leaving:
+                return leave
+            # Already moving, or already under a drive order. Do not stop a
+            # working escape to punch someone, and do not preempt the order
+            # either — fall through, because a lower rung may still have
+            # something better to say (stars mean `flee_police`, which beats
+            # aimless wandering).
+        else:
+            return fight
+
+    # 5. Still being hurt, nothing in reach to answer: get away from it.
+    if delta.big_health_drop or (under_attack and not player.in_vehicle):
+        return break_contact()
+
+    # 6. Stars, outside a mission, nothing engageable: the ordinary chase.
+    if player.wanted > 0 and not state.mission.active:
+        return {"type": "flee_police", "params": {}}
+
+    return None
+
+
+# --- threat latch: one post per threat, not one per tick ----------------------
+
+#: Minimum gap between two IDENTICAL threat actions. Belt-and-braces behind the
+#: "the engine is already running exactly this task" check below: a task can
+#: legitimately report `done`/`failed` for a tick or two mid-fight (the combat
+#: task ends the moment no hated target is in radius, then a fresh one walks
+#: into it), and re-posting at 3 Hz through that window is the same thrash by
+#: another route.
+THREAT_HOLD_S = 4.0
+
+
+@dataclass
+class ThreatLatch:
+    """Decides whether a :func:`threat_action` result is worth POSTing.
+
+    Observed live, and the reason this exists: the threat reflex re-evaluates
+    at the 3-4 Hz poll rate and returned the same action every tick, and
+    CONTRACTS §1 says every POST /task preempts the running one (old task ->
+    `failed`, `detail: "preempted"`). So the engine's combat task was torn down
+    and rebuilt three times a second: it never got past the start of its
+    aim/approach cycle. On stream that is "walks like someone is pressing W
+    constantly, stuttering" and "fires but not at the cops" — the ped restarts
+    before a shot lands.
+
+    The rule is deliberately dumb and stateless-ish, so it cannot itself latch
+    the agent into doing nothing:
+
+    * if the engine is ALREADY running a task of the type we would post, say
+      nothing — the game is doing it;
+    * if we posted this same type within :data:`THREAT_HOLD_S`, say nothing;
+    * anything else (task finished/failed, someone else took the wheel, or the
+      situation changed class — fight -> break contact when health drops) posts
+      immediately.
+
+    Nothing here holds across a change of intent: the action TYPE is the
+    intent, so a health drop that turns `combat_hated_targets_around` into
+    `seek_cover`/`wander_drive` is issued on the very next tick.
+    """
+
+    hold_s: float = THREAT_HOLD_S
+    clock: Any = time.monotonic
+    _last_type: str | None = None
+    _last_issued_at: float = 0.0
+
+    def should_issue(self, action: dict[str, Any], state: GameState) -> bool:
+        action_type = str(action["type"])
+        lt = state.last_task
+        if lt.status == "running" and lt.type == action_type:
+            # The engine is already doing exactly this. Posting again would
+            # preempt it (CONTRACTS §1) and restart it from scratch.
+            return False
+        if self._last_type == action_type:
+            now = self.clock()
+            if now - self._last_issued_at < self.hold_s:
+                return False
+        return True
+
+    def issued(self, action: dict[str, Any]) -> None:
+        self._last_type = str(action["type"])
+        self._last_issued_at = self.clock()
+
+    def reset(self) -> None:
+        """Forget the last threat action (new game process, respawn)."""
+        self._last_type = None
+        self._last_issued_at = 0.0
+
+
+# --- death / arrest recovery --------------------------------------------------
+
+#: A normal GTA V death fade-to-respawn is seconds, not minutes; past this the
+#: game has not handed control back and something is actually wrong (a stuck
+#: loading screen, a crashed process the watchdog has not caught yet).
+DEAD_STUCK_TIMEOUT_S = 90.0
+#: An arrest runs a longer scripted sequence (cuffs, ride, drop-off) than a
+#: death fade, so it gets a longer ceiling before this calls it stuck.
+ARRESTED_STUCK_TIMEOUT_S = 180.0
+#: Re-announce a stuck recovery this often so it does not disappear the moment
+#: it stops being brand new, without logging it every tick either.
+STUCK_RENOTIFY_S = 60.0
+
+
+@dataclass
+class DeathArrestRecovery:
+    """Detects `dead`/`arrested` transitions and the game's own respawn.
+
+    What this is for, precisely: while `player.dead` or `player.arrested` is
+    true there is nothing useful to decide — he cannot move, fight or drive —
+    so every bridge task issued in that state is pointless and a wasted API
+    call to produce it. `main._reflex`/`main.run` gate on
+    `state.player.dead`/`.arrested` directly for that suppression at each call
+    site (and `main._execute_action` refuses any bridge task outright while
+    either is true, the same single choke point it already uses for a
+    cutscene); this class's job is the two things that need memory across
+    ticks:
+
+    1. noticing the *moment* he comes back so stale mission/goal state can be
+       cleared before normal behaviour resumes (never inventing a respawn —
+       only the game's own `dead`/`arrested` clearing counts, per CLAUDE.md
+       rule 5: no cheating death); and
+    2. saying so loudly if "down" runs past a sane ceiling instead of polling
+       forever in silence.
+
+    Self-contained transition tracking (its own previous-tick memory, the
+    same idiom as :class:`GameRestartDetector` above) rather than reaching
+    into :class:`perception.Delta`: `Delta` already tracks `died`/`respawned`
+    (dead-flag transitions) but has no `arrested -> not arrested` field, and
+    this needs both — one consistent mechanism for both is simpler than two.
+
+    **Not this class's job (superseded by observation from the real
+    server):** an earlier version of this class also fired one mission-retry
+    keypress once `dead` cleared. Confirmed live: a mission failure freezes
+    the SHVDN script thread entirely on the "MISSION FAILED"/retry screen
+    (`/health.tick_hz` pinned at 0.0, `/state` frozen on the last snapshot),
+    so `player.dead` never clears on its own to wait for — there is nothing
+    for THIS class to observe until something outside the frozen bridge
+    presses a key. That is now :class:`BlockingScreenWatchdog` below, which
+    detects the freeze independently of `dead`/`arrested` and drives the
+    keypress; once it succeeds, the game resumes ticking, the real respawn
+    happens, and this class's ordinary `respawned` detection below still
+    fires exactly the same way it always did — this class's job did not
+    change, only who unblocks it in the frozen case.
+    """
+
+    clock: Any = time.monotonic
+    dead_timeout_s: float = DEAD_STUCK_TIMEOUT_S
+    arrested_timeout_s: float = ARRESTED_STUCK_TIMEOUT_S
+    renotify_s: float = STUCK_RENOTIFY_S
+    _down_since: float | None = None
+    _down_cause: str | None = None  # "dead" | "arrested"
+    _last_stuck_log: float = 0.0
+
+    def feed(self, state: GameState) -> dict[str, Any]:
+        """Advance from the current dead/arrested flags for this tick.
+
+        Returns ``{"respawned": bool, "respawn_cause": "dead"|"arrested"|None}``.
+        A stuck-timeout is logged internally (loudly, rate-limited) rather
+        than returned — nothing outside this class needs to act on it, only
+        to know it happened.
+        """
+        dead, arrested = state.player.dead, state.player.arrested
+        down_now = dead or arrested
+        if down_now and self._down_since is None:
+            self._down_cause = "dead" if dead else "arrested"
+            self._down_since = self.clock()
+            self._last_stuck_log = 0.0
+            log.info(
+                "player is down; suppressing tasks until the game's own respawn",
+                extra={"kv": {"cause": self._down_cause}},
+            )
+
+        result: dict[str, Any] = {"respawned": False, "respawn_cause": None}
+        if self._down_since is None:
+            return result
+
+        if down_now:
+            timeout = (
+                self.dead_timeout_s if self._down_cause == "dead" else self.arrested_timeout_s
+            )
+            elapsed = self.clock() - self._down_since
+            if elapsed >= timeout and self.clock() - self._last_stuck_log >= self.renotify_s:
+                self._last_stuck_log = self.clock()
+                log.error(
+                    "still down well past a sane timeout; waiting on the game's "
+                    "own respawn (never faking one, never spinning)",
+                    extra={"kv": {"cause": self._down_cause, "down_for_s": round(elapsed, 1)}},
+                )
+            return result
+
+        result["respawned"] = True
+        result["respawn_cause"] = self._down_cause
+        self._down_since = None
+        self._down_cause = None
+        return result
+
+
+# --- blocking-screen watchdog (pause menu / MISSION FAILED / retry prompt) ---
+#
+# Confirmed live, twice, with DIFFERENT button wording:
+#     MISSION FAILED            MISSION FAILED
+#     T. died.                  Franklin lost Lamar.
+#     Restart [Tab]  Retry [Enter]      Skip [Tab]   Restart [Enter]
+# The label on each key varies by failure type; what does NOT vary is that
+# ENTER is the non-destructive one (retry/restart this attempt) and TAB is
+# the destructive one (skip the mission entirely, or throw the attempt away).
+# TAB IS THEREFORE NEVER SENT BY THIS WATCHDOG, under any label.
+# In both cases the SHVDN script thread stopped ticking entirely — `/health.tick_hz`
+# pinned at 0.0 with `game_fps` frozen at the exact same reading sample after
+# sample (a real, still-ticking FPS reading fluctuates; an identical value
+# every sample means nothing is refreshing it), `/state.tick`/`.ts` frozen,
+# and GTA5.exe's resident memory dropped from ~2300 MB (in-world) to ~600 MB
+# (on this menu/failed screen) — corroborating, not depended on alone. Also
+# confirmed live, twice: `System.Windows.Forms.SendKeys.SendWait` does
+# nothing at all against this game (it reads raw/DirectInput, the same
+# reason RDP mouse/keyboard input does nothing) — the ONLY input path that
+# reaches it is the harness's own SendInput primitives (`primitives.py`),
+# which is why this watchdog calls `Primitives.press_key` directly rather
+# than posting anything through the bridge (bridge tasks cannot help either:
+# the game is not running them while its script thread is not ticking).
+
+#: `state.tick` may hold the exact same value for a legitimate reason (poll
+#: landed twice inside one 60 Hz game frame); past this many seconds
+#: unchanged is well past that — the game runs at ~60 Hz (CONTRACTS
+#: /health.tick_hz), so even one normal poll interval ordinarily moves this
+#: counter by dozens. This is the same underlying signal as the confirmed
+#: `tick_hz: 0.0` observation (both derive from the same SHVDN `Tick` event
+#: not firing); `state.tick` is used here because the harness already polls
+#: it every loop iteration for free, where `/health` would be an extra call.
+SCRIPT_STALL_TIMEOUT_S = 3.0
+
+#: Escalating, bounded key sequence tried to clear a blocking screen.
+#: CONFIRMED live for the "MISSION FAILED" screen, in both wordings seen
+#: (`Retry [Enter]` and `Restart [Enter]`): ENTER is the non-destructive
+#: choice in both, so Enter is tried first and is not a guess for that
+#: screen. TAB is never in this sequence and must never be added: it is
+#: `Skip` in one wording (abandons the mission objective outright) and
+#: `Restart` in the other (throws away checkpoint progress).
+#: Escape is the second, less-certain attempt for any OTHER blocking screen
+#: this watchdog might also encounter (e.g. the pause menu, which Escape
+#: ordinarily closes) — that part has not been watched happening.
+BLOCKING_SCREEN_KEYS: tuple[str, ...] = ("enter", "esc")
+
+#: Whole attempts (one key from the sequence each) before this gives up and
+#: goes loud instead of spamming keys forever.
+MAX_STALL_RECOVERY_ATTEMPTS = 3
+
+#: Gap between attempts — long enough for a keypress to actually land and the
+#: next poll to show whether the tick moved, short enough that three attempts
+#: do not themselves take minutes.
+STALL_RECOVERY_RETRY_GAP_S = 4.0
+
+
+@dataclass
+class BlockingScreenWatchdog:
+    """Detects a frozen SHVDN script thread from OUTSIDE it, and tries to
+    clear it with a small, bounded, escalating keypress sequence.
+
+    This is a different failure mode from :class:`BridgeStallTracker` above:
+    that one covers the bridge *answering* `503 not_ready`/`game_thread_
+    stalled` — an explicit "not now" the bridge is still able to say. Here
+    the bridge keeps answering `200` with a snapshot, but the snapshot itself
+    stops advancing, because GTA V is on a modal/blocking screen (pause menu,
+    a failure screen, a retry prompt) and the same SHVDN `Tick` event that
+    refreshes `/state` and applies queued bridge tasks has stopped firing
+    entirely. Nothing routed through the bridge can help; only a real
+    keypress can.
+
+    Distinguishing a legitimate cutscene (fine — wait it out, the world and
+    the script thread keep ticking through those) from this: this watchdog
+    only ever acts on the LAST snapshot actually seen ticking, and refuses to
+    intervene if that last-known snapshot had `mission.cutscene_active` true.
+    A frozen tick whose last known moment was mid-cutscene is left alone; one
+    whose last known moment was NOT a cutscene (a failure screen, a menu) is
+    what this intervenes on.
+
+    One call per poll tick, `feed(state)`, returns the key to press right
+    now or `None`. Bounded to :data:`MAX_STALL_RECOVERY_ATTEMPTS` whole
+    attempts; past that it logs loudly exactly once and stands down rather
+    than pressing keys forever — a stuck server needs a human at that point,
+    not a bot hammering Enter.
+    """
+
+    clock: Any = time.monotonic
+    stall_timeout_s: float = SCRIPT_STALL_TIMEOUT_S
+    retry_gap_s: float = STALL_RECOVERY_RETRY_GAP_S
+    max_attempts: int = MAX_STALL_RECOVERY_ATTEMPTS
+    _last_tick: int | None = None
+    #: Wall-clock time `_last_tick` was last SEEN TO CHANGE — the stall clock
+    #: runs from here, not from the first repeated observation, because the
+    #: tick was already sitting at this value for the whole gap between that
+    #: change and the poll that noticed it repeating.
+    _last_tick_changed_at: float | None = None
+    _last_cutscene_active: bool = False
+    _attempts: int = 0
+    _last_attempt_at: float = 0.0
+    _gave_up: bool = False
+    #: True while this watchdog believes the game is sitting on a modal screen
+    #: RIGHT NOW — set the moment the stall passes `stall_timeout_s`, cleared
+    #: the moment `state.tick` moves again, and deliberately still true after
+    #: `_gave_up` (giving up on the keypresses does not un-block the screen).
+    #:
+    #: It exists because the screen is user-visible: measured on the broadcast,
+    #: the game was showing "MISSION FAILED / Franklin lost Lamar" while the
+    #: live commentary read "Alpha's right there. Staying on his six." for over
+    #: a minute. `/state` is frozen at that point, so every world fact the
+    #: brain is given is a stale lie; main uses this flag to say so in the
+    #: prompt, to stop posting tasks nothing will run, and to drop the stale
+    #: mission context.
+    blocked: bool = False
+
+    def feed(self, state: GameState) -> str | None:
+        """Returns a key name from :data:`BLOCKING_SCREEN_KEYS` to press via
+        `Primitives.press_key` right now, or `None`. :attr:`blocked` carries
+        the standing answer to "is the game on a modal screen"."""
+        now = self.clock()
+        if self._last_tick is None or state.tick != self._last_tick:
+            # A fresh tick: the script thread is (or is again) alive.
+            if self._attempts > 0:
+                log.info(
+                    "script thread ticking again; blocking-screen watchdog stands down",
+                    extra={"kv": {"attempts": self._attempts}},
+                )
+            self._last_tick = state.tick
+            self._last_tick_changed_at = now
+            self._last_cutscene_active = state.mission.cutscene_active
+            self._attempts = 0
+            self._gave_up = False
+            self.blocked = False
+            return None
+
+        # Same tick as last observed: possibly stalled.
+        if self._last_cutscene_active:
+            self.blocked = False
+            return None  # legitimate cutscene: the world is allowed to hold still
+        elapsed = now - (self._last_tick_changed_at or now)
+        if elapsed < self.stall_timeout_s:
+            return None
+        self.blocked = True
+        if self._gave_up:
+            return None
+        if self._attempts >= self.max_attempts:
+            self._gave_up = True
+            log.error(
+                "blocking-screen watchdog gave up: the script thread is still "
+                "not ticking after every bounded key-press attempt — needs a "
+                "human on the server",
+                extra={"kv": {"attempts": self._attempts, "stalled_for_s": round(elapsed, 1)}},
+            )
+            return None
+        if self._attempts > 0 and now - self._last_attempt_at < self.retry_gap_s:
+            return None
+
+        key = BLOCKING_SCREEN_KEYS[min(self._attempts, len(BLOCKING_SCREEN_KEYS) - 1)]
+        self._attempts += 1
+        self._last_attempt_at = now
+        log.warning(
+            "script thread appears stalled on a blocking screen; pressing a "
+            "key to try to clear it (see BLOCKING_SCREEN_KEYS)",
+            extra={"kv": {"key": key, "attempt": self._attempts, "stalled_for_s": round(elapsed, 1)}},
+        )
+        return key
 
 
 #: Vehicle-search radii, in order, as being stranded drags on. The bridge
@@ -317,6 +1318,139 @@ class BridgeStallTracker:
         return min(_STALL_BACKOFF_CAP_S, 0.5 * 2 ** min(max(self.consecutive - 1, 0), 4))
 
 
+# --- screen capture that cannot own the loop thread ---------------------------
+
+#: How long the loop thread will wait for a frame before giving up on it for
+#: this tick. A dxcam grab is normally a few milliseconds; anything past this is
+#: the capture device in trouble, and the loop has perception, reflexes and a
+#: heartbeat to run.
+GRAB_TIMEOUT_S = 0.5
+#: Failures are counted inside a sliding window: ten bad grabs spread over an
+#: afternoon is a flaky display, ten in a minute is a display that is gone.
+GRAB_FAILURE_WINDOW_S = 60.0
+#: Consecutive failures inside the window before screen capture is given up on
+#: for the rest of the session.
+GRAB_FAILURES_BEFORE_DISABLE = 10
+
+
+class OffLoopGrab:
+    """Runs one slow, blocking call on a worker thread with a hard deadline.
+
+    Built for exactly one job: `dxcam` screen capture. Observed live on the
+    real server — the display flipped to exclusive fullscreen, dxcam logged
+    "Output change/access loss detected", and its INTERNAL recovery loop
+    retried inside `grab()` for 172 s (16:53:53 -> 16:56:35, "Output recovery
+    succeeded after 90 attempt(s)"), with a second block of 76 s earlier. That
+    call was made straight from the main loop, so for those three minutes the
+    harness produced no perception, no reflex, no decision and no heartbeat:
+    the show was frozen because a screenshot was slow.
+
+    Contract:
+
+    * :meth:`poll` never blocks longer than ``timeout_s``;
+    * at most one worker is ever in flight — a wedged grab is left alone
+      rather than piled on with more grabs of the same device;
+    * the worker is a daemon thread, so a permanently wedged capture device
+      can never hold up shutdown;
+    * a run of failures flips :attr:`dead`, and the owner is expected to drop
+      screen capture for the session (the show keeps running, screenshots
+      degrade to unavailable).
+
+    A late result from a timed-out attempt IS used when it eventually arrives:
+    a capture that takes 0.6 s on a 0.5 s deadline is still telling the truth
+    about the screen, just one tick later, and discarding it would mean a
+    permanently blind harness on a merely slow machine.
+    """
+
+    def __init__(
+        self,
+        work: Any,
+        *,
+        name: str = "grab",
+        timeout_s: float = GRAB_TIMEOUT_S,
+        window_s: float = GRAB_FAILURE_WINDOW_S,
+        max_failures: int = GRAB_FAILURES_BEFORE_DISABLE,
+        clock: Any = time.monotonic,
+    ) -> None:
+        self._work = work
+        self._name = name
+        self._timeout_s = timeout_s
+        self._window_s = window_s
+        self._max_failures = max_failures
+        self._clock = clock
+        self._thread: threading.Thread | None = None
+        self._done = threading.Event()
+        self._value: Any = None
+        self._error: BaseException | None = None
+        self._timed_out = False
+        self._window_started = 0.0
+        self.failures = 0
+        self.dead = False
+        self.last_reason = ""
+
+    def poll(self) -> Any:
+        """Return this tick's result, or None if there is not one to be had."""
+        if self.dead:
+            return None
+        if self._thread is None:
+            self._done.clear()
+            self._value = None
+            self._error = None
+            self._timed_out = False
+            self._thread = threading.Thread(
+                target=self._run, name=self._name, daemon=True
+            )
+            self._thread.start()
+            ready = self._done.wait(self._timeout_s)
+        else:
+            # A previous attempt is still out there. Never wait on it twice:
+            # that is how a 172 s grab turns into a 172 s stall one 0.5 s slice
+            # at a time.
+            ready = self._done.is_set()
+        if not ready:
+            if not self._timed_out:
+                self._timed_out = True
+                self._record_failure(
+                    f"screen grab did not return within {self._timeout_s:.2f}s"
+                )
+            return None
+        self._thread = None
+        self._timed_out = False
+        error, self._error = self._error, None
+        value, self._value = self._value, None
+        if error is not None:
+            self._record_failure(f"{type(error).__name__}: {error}")
+            return None
+        self.failures = 0
+        self._window_started = 0.0
+        return value
+
+    def _run(self) -> None:
+        try:
+            self._value = self._work()
+        except BaseException as exc:
+            # Handed back to the loop thread as a counted failure. Nothing may
+            # escape a worker thread: an unhandled exception here would kill
+            # capture silently and leave the loop waiting on an Event forever.
+            self._error = exc
+        finally:
+            self._done.set()
+
+    def _record_failure(self, reason: str) -> None:
+        now = self._clock()
+        if self._window_started == 0.0 or now - self._window_started > self._window_s:
+            self._window_started = now
+            self.failures = 0
+        self.failures += 1
+        self.last_reason = reason
+        log.warning(
+            "screen grab failed",
+            extra={"kv": {"reason": reason[:200], "failures": self.failures}},
+        )
+        if self.failures >= self._max_failures:
+            self.dead = True
+
+
 # --- Claude API backoff -------------------------------------------------------
 
 
@@ -326,11 +1460,58 @@ class BridgeStallTracker:
 BACKOFF_FLOOR_S: dict[str, float] = {
     "rate_limit": 30.0,
     "overloaded": 15.0,
+    # A decision the model produced but OUR schema rejected. The API is
+    # healthy; the only thing wrong is one response. There is nothing to wait
+    # out, so the floor is zero — and `main._think` does not even record it as
+    # a failure (see `invalid_output` there). The entry exists so that if any
+    # other caller does record it, it is not silently downgraded to "other"
+    # and given the outage escalation.
+    "invalid_output": 0.0,
     "other": 0.0,
 }
 #: Cause names this backoff understands. `classify_api_failure` maps exceptions
 #: onto them so main never has to reason about HTTP status codes.
-API_FAILURE_CAUSES: tuple[str, ...] = ("rate_limit", "overloaded", "other")
+API_FAILURE_CAUSES: tuple[str, ...] = (
+    "rate_limit",
+    "overloaded",
+    "invalid_output",
+    "other",
+)
+
+
+def _is_anthropic_api_error(exc: BaseException) -> bool:
+    """True when `exc` is one of the SDK's own error types.
+
+    Checked by walking the class MRO by name/module rather than importing
+    anthropic, so this module keeps working (and keeps classifying) whether the
+    SDK raised a typed error or a plain transport error.
+    """
+    return any(
+        base.__name__ in ("APIError", "AnthropicError")
+        and base.__module__.split(".")[0] == "anthropic"
+        for base in type(exc).__mro__
+    )
+
+
+def _is_invalid_output(exc: BaseException | None) -> bool:
+    """True when the chain is a LOCAL rejection of the model's output.
+
+    That means a `pydantic.ValidationError` (a `ValueError` subclass) or a bare
+    `ValueError` — the shapes `brain.tactical`/`brain.director` raise when a
+    response fails the decision schema or comes back unparseable — and NO
+    `anthropic` API error anywhere in the chain. If the SDK complained, the
+    call itself failed and this is not a schema problem.
+    """
+    seen: set[int] = set()
+    local = False
+    while exc is not None and id(exc) not in seen:
+        seen.add(id(exc))
+        if _is_anthropic_api_error(exc):
+            return False
+        if isinstance(exc, ValueError):
+            local = True
+        exc = exc.__cause__
+    return local
 
 
 def classify_api_failure(exc: BaseException | None) -> str:
@@ -339,6 +1520,7 @@ def classify_api_failure(exc: BaseException | None) -> str:
     Kept string-based and import-light so it works whether the SDK raised a
     typed error or a plain transport error.
     """
+    root = exc
     seen: set[int] = set()
     while exc is not None and id(exc) not in seen:
         seen.add(id(exc))
@@ -362,6 +1544,14 @@ def classify_api_failure(exc: BaseException | None) -> str:
             # seconds is pure log noise.
             return "rate_limit"
         exc = exc.__cause__
+    # Nothing in the chain said the API was unhappy. Before calling this an
+    # unknown transport failure, check whether it is OUR schema rejecting the
+    # model's answer — observed live for minutes at a stretch while the API was
+    # perfectly healthy, escalating the outage backoff 1.8 -> 4.1 -> 6.8 ->
+    # 16.5 s and leaving the agent standing still between attempts for a bug that
+    # had nothing to do with the network.
+    if _is_invalid_output(root):
+        return "invalid_output"
     return "other"
 
 

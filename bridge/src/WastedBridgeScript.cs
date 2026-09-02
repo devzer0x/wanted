@@ -13,7 +13,7 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.0.0";
+        public const string BridgeVersion = "1.1.0";   // v1.1.0: CONTRACTS v1.9 follow_entity style/speed_mps + animals excluded from combat targeting
 
         private const float UnstickMinStoppedS = 20f;
         private const float UnstickNudgeBackM = 2.5f;   // total displacement stays ≤ 3 m (contract)

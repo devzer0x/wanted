@@ -342,11 +342,24 @@ class ActivityPicker:
             out.append((a, w))
         return out
 
-    def peek(self, mood: str) -> Activity | None:
-        """Choose without booking anything. Pure apart from the RNG draw."""
+    def peek(self, mood: str, prefer: str | None = None) -> Activity | None:
+        """Choose without booking anything. Pure apart from the RNG draw.
+
+        `prefer` is the day planner's idea for this roam block (behavior/planner.py).
+        It is honoured only when that activity is genuinely ELIGIBLE — cooldown,
+        chaos budget and the death-spot precondition still decide. A preference
+        that cannot be honoured falls through to the normal weighted draw
+        silently, and the planner reports what actually started rather than what
+        it asked for, so the plan a viewer reads is never a claim the runner
+        refused.
+        """
         candidates = self.eligible(mood)
         if not candidates:
             return None
+        if prefer is not None:
+            for activity, _weight in candidates:
+                if activity.name == prefer:
+                    return activity
         total = sum(w for _, w in candidates)
         r = self._rng.uniform(0, total)
         acc = 0.0
@@ -378,8 +391,8 @@ class ActivityPicker:
             },
         )
 
-    def pick(self, mood: str) -> Activity | None:
-        chosen = self.peek(mood)
+    def pick(self, mood: str, prefer: str | None = None) -> Activity | None:
+        chosen = self.peek(mood, prefer)
         if chosen is not None:
             self.commit(chosen)
         return chosen
@@ -475,9 +488,15 @@ class ActivityRunner:
     def due(self) -> bool:
         return self.current is None and self._clock() >= self._next_allowed_at
 
-    def start(self, mood: str, mood_style: str) -> tuple[Activity, dict[str, Any]] | None:
-        """Pick an activity and return it with its first action, or None."""
-        activity = self._picker.peek(mood)
+    def start(
+        self, mood: str, mood_style: str, prefer: str | None = None
+    ) -> tuple[Activity, dict[str, Any]] | None:
+        """Pick an activity and return it with its first action, or None.
+
+        `prefer` comes from the day planner's current roam block; see
+        :meth:`ActivityPicker.peek` for why it is a preference and not an order.
+        """
+        activity = self._picker.peek(mood, prefer)
         if activity is None:
             # Nothing eligible: try again after a short gap rather than
             # hammering the picker every tick.

@@ -28,6 +28,7 @@ namespace WastedBridge
         [JsonProperty("arrested")] public bool Arrested;
         [JsonProperty("in_vehicle")] public bool InVehicle;
         [JsonProperty("control_enabled")] public bool ControlEnabled;
+        [JsonProperty("protagonist")] public string Protagonist;   // v1.7: michael|franklin|trevor|unknown
     }
 
     internal sealed class VehicleDto
@@ -63,12 +64,38 @@ namespace WastedBridge
         [JsonProperty("handle")] public int Handle;
     }
 
+    internal sealed class MissionStartDto
+    {
+        [JsonProperty("pos")] public Vec3Dto Pos;
+        [JsonProperty("protagonist")] public string Protagonist; // michael|franklin|trevor|unknown
+    }
+
+    /// <summary>
+    /// CONTRACTS v1.8: one blip the game is currently drawing a route line to. objective_blip is
+    /// the bridge's single best pick out of this set; the list is here so the harness can reason
+    /// when there is more than one (e.g. a follow-target plus a drop-off), and so a wrong pick is
+    /// recoverable instead of invisible.
+    /// </summary>
+    internal sealed class RouteBlipDto
+    {
+        [JsonProperty("pos")] public Vec3Dto Pos;
+        [JsonProperty("kind")] public string Kind;   // "coord" | "entity"
+        [JsonProperty("handle")] public int Handle;
+        // BlipColor member name ("Yellow", "Blue", ...). An index with no name in the pinned SHVDN
+        // enum serializes as its integer rendered as a string; consumers must tolerate that.
+        [JsonProperty("color")] public string Color;
+    }
+
     internal sealed class MissionDto
     {
         [JsonProperty("active")] public bool Active;
         [JsonProperty("random_event_active")] public bool RandomEventActive;
         [JsonProperty("cutscene_active")] public bool CutsceneActive;
         [JsonProperty("objective_blip")] public ObjectiveBlipDto ObjectiveBlip;
+        [JsonProperty("starts")] public List<MissionStartDto> Starts;    // v1.7: M/F/T markers on the map
+        // v1.8: route-enabled blips, nearest first, at most 5. Initialized so the key is always an
+        // array — never null — even if a caller forgets to set it.
+        [JsonProperty("route_blips")] public List<RouteBlipDto> RouteBlips = new List<RouteBlipDto>();
     }
 
     internal sealed class NearbyVehicleDto
@@ -79,6 +106,7 @@ namespace WastedBridge
         [JsonProperty("class")] public string Class;
         [JsonProperty("distance")] public float Distance;
         [JsonProperty("driver")] public string Driver; // "player" | "npc" | "empty"
+        [JsonProperty("pos")] public Vec3Dto Pos;      // v1.6: world position, same shape as player.pos
     }
 
     internal sealed class NearbyPedDto
@@ -86,7 +114,8 @@ namespace WastedBridge
         [JsonProperty("handle")] public int Handle;
         [JsonProperty("model")] public string Model;
         [JsonProperty("distance")] public float Distance;
-        [JsonProperty("relationship")] public string Relationship; // "neutral" | "hostile"
+        [JsonProperty("relationship")] public string Relationship; // "neutral" | "hostile" | "friendly"
+        [JsonProperty("pos")] public Vec3Dto Pos;                 // v1.6: world position - the minimap dot, as data
     }
 
     internal sealed class NearbyDto

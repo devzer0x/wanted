@@ -1,0 +1,734 @@
+{
+  "domain": "map_markers",
+  "items": [
+    {
+      "id": "refute_naive_colour_rule",
+      "category": "disambiguation",
+      "cue": "Any blip appears in the structured game state with a colour attribute (blue / red / yellow / green / orange).",
+      "context": "Always. This is the governing rule for every other item in this domain.",
+      "meaning": "The rule \"blue = friendly, red = enemy, yellow = destination\" is FALSE in GTA V and will get the agent killed or make him narrate nonsense. Counter-examples confirmed in sources: blue is Michael's protagonist colour, so a blue letter blip is a MISSION START, not a friend. Light blue is also a non-hostile random-event victim. Red is a hostile ped, but red is ALSO the colour of some story-mission blips (Trevor-associated and multi-character mission givers), and red is one half of the flashing police blip. Yellow is the mission GPS route AND an objective checkpoint, but the player's own waypoint route is PURPLE, not yellow. A flashing red/blue dot is a random event where the outcome is not yet decided, not a police car.",
+      "suggested_action": "Never branch on colour alone. Resolve every marker with the full tuple: icon/sprite type + colour + size + whether it flashes + current protagonist + mission-active flag + objective text. Treat colour as one weak feature among six.",
+      "avoid": "Writing a decision rule of the form `if blip.color == red: attack` or `if blip.color == blue: follow`. Both produce wrong behaviour on common, frequently-encountered blips.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Mods, trainers or a custom bridge can recolour blips arbitrarily. If the bridge itself creates blips, its own colour convention overrides the game's.",
+      "sources": [
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v",
+        "https://gta.wiki/w/Random_Events_in_GTA_V",
+        "https://gta.wiki/w/GPS",
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "marker_disambiguation_algorithm",
+      "category": "disambiguation",
+      "cue": "A blip needs to be classified before choosing a task.",
+      "context": "Every decision tick where blips are present in the state.",
+      "meaning": "The reliable resolution order is: (1) SHAPE/SPRITE first \u2014 a letter glyph, a \"?\", a shop pictogram, a plain dot, a chevron and a police shield are different classes regardless of colour. (2) FLASHING \u2014 flashing is a state signal (police pursuit, undecided random event), never decoration. (3) SIZE \u2014 an enlarged mission letter means the current protagonist can start it now. (4) COLOUR \u2014 only now, to pick which protagonist or which hostility. (5) OBJECTIVE TEXT \u2014 if the game exposes an objective string, it outranks every visual inference. (6) MISSION-ACTIVE FLAG \u2014 during a mission almost every non-objective blip is noise.",
+      "suggested_action": "Implement classification as sprite-then-state-then-size-then-colour. Log the full tuple in commentary so a wrong call is debuggable on stream.",
+      "avoid": "Collapsing the tuple to a single colour enum in the bridge before the brain sees it \u2014 that discards the information that actually disambiguates.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "When the bridge cannot read sprite IDs and only exposes colour, confidence in any classification drops sharply; prefer conservative tasks (wander_drive, stop) over combat.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v"
+      ]
+    },
+    {
+      "id": "protagonist_colour_michael_blue",
+      "category": "protagonist_colour",
+      "cue": "A blue letter/mission blip, or a blue tint on the HUD and radar chrome.",
+      "context": "Story Mode with all three protagonists unlocked. Before Trevor and Franklin are playable the palette is not yet meaningful.",
+      "meaning": "Blue is Michael De Santa's colour. Blue mission blips are missions Michael plays. The HUD accent lines also turn blue while Michael is the active character, so the whole interface is a protagonist indicator, not just the blips.",
+      "suggested_action": "Use the HUD/blip accent colour as a cheap confirmation of who the agent is currently controlling, cross-checked against the model name the bridge reports.",
+      "avoid": "Reading a blue mission letter as \"a friendly NPC\" or as a generic destination.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Blue is also used for non-Michael things: light-blue random-event dots, some ally blips, and the blue half of the flashing police blip. Shape disambiguates.",
+      "sources": [
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v",
+        "https://gta.wiki/w/HUD",
+        "https://gta.wiki/w/Busted"
+      ]
+    },
+    {
+      "id": "protagonist_colour_franklin_green",
+      "category": "protagonist_colour",
+      "cue": "A green letter/mission blip, or green HUD accents.",
+      "context": "Story Mode, Franklin unlocked.",
+      "meaning": "Green is Franklin Clinton's colour. Green mission blips are Franklin's missions.",
+      "suggested_action": "Treat a green letter blip as a Franklin mission: startable only while Franklin is already the active protagonist. There is no harness action to switch protagonist (see CAPABILITIES and character_switch_to_reach_mission), so while any other character is controlled, a green blip is informational only \u2014 log it, do not route to it, and do not narrate an intention to switch.",
+      "avoid": "Confusing Franklin's green with the green used for money/property-for-sale iconography.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Green also appears in multi-colour blips for missions playable by more than one character.",
+      "sources": [
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v",
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "protagonist_colour_trevor_orange",
+      "category": "protagonist_colour",
+      "cue": "An orange (or orange-red) letter/mission blip, or orange HUD accents.",
+      "context": "Story Mode, Trevor unlocked (after the mission that introduces him).",
+      "meaning": "Orange is Trevor Philips' colour per Rockstar's own support article. Orange mission blips are Trevor's missions.",
+      "suggested_action": "Classify orange letter blips as Trevor's. If the bridge reports a coarse colour bucket, allow orange and red-orange to both map to Trevor for LETTER blips specifically.",
+      "avoid": "Treating an orange mission letter as a hostile red blip \u2014 they are different shapes and different meanings.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "SOURCE DISAGREEMENT: Rockstar support says orange; the GTA Wiki mirror's GTA V missions page describes Trevor-associated mission icons as 'red'. The rendered colour is a red-leaning orange, so both descriptions point at the same swatch. Do not use this hue to distinguish Trevor from a hostile \u2014 use shape.",
+      "sources": [
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v",
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "mission_blip_size_means_playable_now",
+      "category": "mission_blips",
+      "cue": "Two mission letter blips of different colours are visible and one is visibly LARGER than the other.",
+      "context": "Free roam, no mission active, more than one protagonist unlocked.",
+      "meaning": "Rockstar states icons render larger for the character currently in play. A large blue letter while playing Michael means that mission is startable right now. A small orange letter belongs to Trevor and is not startable while playing anyone else \u2014 the harness has no switch-protagonist action, so it stays non-actionable until the game itself hands control to that character (a scripted handoff or cutscene); it is not something the agent can trigger. Size is still the single most actionable visual cue among blips the agent CAN act on in free roam.",
+      "suggested_action": "Filter candidate mission destinations to the ENLARGED blips matching the active protagonist only. Route drive_to at a large letter blip; treat every small, off-colour letter as non-actionable noise rather than a future plan.",
+      "avoid": "Driving across the map to a small off-colour mission letter and then standing in the marker with nothing happening \u2014 a classic wasted-airtime failure.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "If the bridge does not expose blip scale, fall back to matching blip colour against the active protagonist's colour, which encodes the same fact.",
+      "sources": [
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v"
+      ]
+    },
+    {
+      "id": "mission_blip_letter_is_giver_initial",
+      "category": "mission_blips",
+      "cue": "A blip rendered as an alphabet letter rather than a dot or pictogram.",
+      "context": "Free roam, story progression available.",
+      "meaning": "Story-mission blips are letter glyphs naming the mission GIVER, not the protagonist. L = Lester, D = Devin Weston, S = Steve Haines / FIB, M / F / T when a protagonist gives another protagonist a mission. The LETTER says who is handing out the work; the COLOUR says who has to play it. These two facts are independent and are the most common source of confusion. Any claim elsewhere that the letter itself names the protagonist (e.g. treating 'M' as meaning 'play as Michael') is wrong and must defer to marker_disambiguation_algorithm and mission_blip_size_means_playable_now.",
+      "suggested_action": "Report both in commentary (\"a green L \u2014 Lester job, Franklin's turn\"). Decide playability from the colour/size, decide narrative flavour from the letter.",
+      "avoid": "Assuming a letter M blip means \"play as Michael\" \u2014 the colour, not the letter, determines that.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Not every mission-giver initial was individually verified in-session; the letter-equals-giver pattern is confirmed by the wiki's per-giver icon listings but the full alphabet was not enumerated.",
+      "sources": [
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "multicolour_mission_blip",
+      "category": "mission_blips",
+      "cue": "A single mission blip that carries two or three colours at once (e.g. blue+green, or blue+green+red).",
+      "context": "Heist setups and missions with multiple eligible protagonists.",
+      "meaning": "The GTA Wiki mission listing records givers whose icons carry combinations \u2014 Lester as blue and green, Devin and the FIB as blue, green and red. This encodes that the mission is available to more than one protagonist, or that the mission involves switching between them mid-mission.",
+      "suggested_action": "Treat a multi-colour blip as startable if ANY of its colours matches the active protagonist. Expect a forced character switch during the mission and do not panic when control jumps to a different body.",
+      "avoid": "Refusing to start a multi-colour mission because it does not exactly match the current protagonist's single colour.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The wiki lists these colour combinations per giver but does not explicitly state the combination means multi-protagonist availability; that is an inference from the pattern.",
+      "sources": [
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "strangers_question_mark_icon",
+      "category": "mission_blips",
+      "cue": "A blip whose glyph is a question mark \"?\".",
+      "context": "Free roam, after Strangers and Freaks unlock through story progress.",
+      "meaning": "\"?\" marks a Strangers and Freaks side-mission giver the agent has not met yet. Confirmed: all Strangers are initially marked with a \"?\" on the map. It is coloured with the protagonist palette, so a green \"?\" is a Franklin stranger, blue is Michael's, orange is Trevor's.",
+      "suggested_action": "Treat \"?\" blips as high-value stream content \u2014 they are self-contained side stories. Apply the same size/colour playability test as story missions before routing to one.",
+      "avoid": "Reading \"?\" as \"unknown/ignore\". It is a concrete, startable content marker.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some Strangers and Freaks strands are protagonist-locked; only a subset (notably Franklin's) count toward 100% completion.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/strangers/",
+        "https://gta.wiki/wiki/Strangers_and_Freaks"
+      ]
+    },
+    {
+      "id": "stranger_icon_becomes_letter",
+      "category": "mission_blips",
+      "cue": "A blip that was a \"?\" on a previous tick is now a letter glyph at the same location.",
+      "context": "After the agent has walked into a Stranger's marker once and triggered the introduction.",
+      "meaning": "Stranger names are revealed only after interacting with them; the blip then changes from \"?\" to that character's initial. A changed glyph at a known location means progress was made, not that a new mission appeared.",
+      "suggested_action": "Use the \"?\"-to-letter transition as positive confirmation that an interaction actually landed. Good commentary beat.",
+      "avoid": "Double-counting the same stranger as two separate discoveries because the glyph changed.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/strangers/"
+      ]
+    },
+    {
+      "id": "random_event_light_blue_dot",
+      "category": "random_events",
+      "cue": "A light blue dot appears on the radar in free roam, usually within a short radius and with no accompanying letter or pictogram.",
+      "context": "Free roam, after 'Pulling Favors' unlocks the random-event pool (further sets unlock after 'Mr. Philips' and others).",
+      "meaning": "A light blue dot marks a non-hostile random encounter \u2014 someone the agent can HELP. Hitch lifts, muggings in progress where the victim is blue, stranded drivers. This is a genuine friendly/neutral marker.",
+      "suggested_action": "These are cheap, high-entertainment detours. If no mission is active and the dot is close, walk_to or drive_to it and engage non-violently.",
+      "avoid": "Opening fire near a light blue dot. Attacking flips the encounter hostile and destroys the content.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some events are protagonist-locked (e.g. the drug shootout is Trevor-only, the countryside gang fight is Michael or Franklin only), so an event may not fire even when the dot is visible.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "random_event_red_dot",
+      "category": "random_events",
+      "cue": "A red dot on the radar in free roam with no mission active.",
+      "context": "Free roam. Also applies to hostile peds generally.",
+      "meaning": "Red marks a hostile situation or hostile participant \u2014 a combat random event, an armed robber, a gang member who has aggroed. In the random-event system specifically, red means the encounter requires combat.",
+      "suggested_action": "Cross-check with the ped hostility field the bridge supplies. If peds near the dot are flagged hostile, seek_cover first, then combat_hated_targets_around. Do not walk into the open toward a red dot.",
+      "avoid": "Treating every red dot as an enemy to charge. A red dot can also be an armed robber fleeing (chase, not brawl) or an ambient hostile the agent can simply drive away from.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Red also appears as the red half of a flashing police blip and in some mission-giver icon combinations \u2014 shape and flashing disambiguate.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "random_event_flashing_blue_red",
+      "category": "random_events",
+      "cue": "A dot that alternates between blue and red rather than holding one colour.",
+      "context": "Free roam random events.",
+      "meaning": "A flashing blue/red dot marks an event whose moral outcome is UNDECIDED \u2014 the player may choose to help or hinder the participants. It is not a police vehicle and not a settled threat.",
+      "suggested_action": "Approach cautiously and pick a side deliberately; announce the choice in commentary before acting. This is one of the few genuinely branching decisions available in free roam.",
+      "avoid": "Mistaking it for a police blip and triggering flee_police. There is no wanted level here unless the agent creates one.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Visually similar to the flashing police blip at small radar scale. Check the wanted-level field: if wanted_stars is 0, it is not police.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "random_event_colour_is_mutable",
+      "category": "random_events",
+      "cue": "A random-event dot changes colour between ticks without moving.",
+      "context": "During an active random encounter.",
+      "meaning": "The dot's colour tracks the agent's own behaviour: attacking a participant turns their dot red, helping turns it light blue. The marker is a live readout of the relationship, not a fixed label assigned at spawn.",
+      "suggested_action": "Re-read event blip colours every tick during an encounter rather than caching the first reading. Use a colour flip to red as the signal that the agent has just made an enemy.",
+      "avoid": "Caching \"this dot is friendly\" from the moment of spawn and then walking into gunfire.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "yellow_route_is_objective",
+      "category": "navigation",
+      "cue": "A yellow line is drawn along the roads on the radar and pause map.",
+      "context": "A mission is active, or a mission/objective destination has been set by the game rather than by the player.",
+      "meaning": "Yellow is the game's own objective routing. Mission-related waypoints and routes appear in yellow. A yellow line means \"the game wants you here\" \u2014 it is authoritative about mission progress.",
+      "suggested_action": "When a yellow route exists and a mission is active, follow it. Prefer drive_to the yellow destination over any self-chosen goal.",
+      "avoid": "Overriding a yellow route with a self-set purple waypoint mid-mission \u2014 this loses the objective routing and usually strands the agent.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Yellow routing does not appear for every objective; some objectives are marked only by a blip or an in-world marker with no road route (e.g. off-road or interior objectives).",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "purple_route_is_player_waypoint",
+      "category": "navigation",
+      "cue": "A purple line is drawn along the roads on the radar, ending at a purple marker.",
+      "context": "Free roam or during a mission, after a waypoint has been placed on the pause map.",
+      "meaning": "Purple is the PLAYER-SET waypoint route. Player-defined waypoints display in purple, distinguishing them from the game's yellow objective routes. A purple route reflects the agent's own intent, nothing the game is asking for. This directly refutes the assumption that all destination routing is yellow.",
+      "suggested_action": "Use purple as the signal that this destination is self-authored and freely abandonable. If a yellow route appears while a purple one is active, yellow takes priority.",
+      "avoid": "Reporting a purple route as a mission objective in commentary \u2014 it is the agent's own idea and claiming otherwise misleads viewers.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "If the bridge sets waypoints programmatically for drive_to, every route the agent creates will be purple; only game-authored objectives will be yellow. That makes purple-vs-yellow a clean self/other test.",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "gps_shortest_legal_route",
+      "category": "navigation",
+      "cue": "A GPS route line is present and appears to take a longer path than the straight line to the target.",
+      "context": "Any routed drive.",
+      "meaning": "The GPS calculates the shortest LEGAL route; closed roads and alleyways are not taken into account. The line is a road-network suggestion, not the geometrically shortest path and not necessarily the fastest under pursuit.",
+      "suggested_action": "Follow the route for normal travel. When fleeing police or racing a timer, allow deviation from the line \u2014 off-road and alley shortcuts are legitimate and the GPS will recalculate automatically.",
+      "avoid": "Treating divergence from the purple/yellow line as an error state and steering back onto it while being shot at.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Automatic recalculation means the line will re-draw after a deviation; do not interpret a re-drawn line as a new objective.",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "gps_no_water_route",
+      "category": "navigation",
+      "cue": "A waypoint was set but no route line appears.",
+      "context": "Waypoint placed over water, or on terrain with no road connection.",
+      "meaning": "Waypoints in the middle of a body of water will not be routed. Absence of a route line does not mean the waypoint failed to set \u2014 it means the road network cannot reach it.",
+      "suggested_action": "Fall back to bearing-and-distance navigation toward the raw coordinates, or pick a boat/aircraft. Do not retry setting the waypoint repeatedly.",
+      "avoid": "Interpreting a missing route as a bridge/API failure and re-issuing the waypoint command in a loop.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Some coastal/island destinations route partially then stop at the shoreline.",
+      "sources": [
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "gps_lost_in_tunnel",
+      "category": "navigation",
+      "cue": "The route line and satellite guidance vanish while the vehicle is underground.",
+      "context": "Driving through tunnels, subway tunnels, or the storm drain underpasses.",
+      "meaning": "If the player enters a tunnel, connection to the GPS satellites is lost until the player exits the tunnel. This is scripted behaviour, not a glitch or a lost objective.",
+      "suggested_action": "Hold the current heading and continue through; the route restores on exit. Suppress any \"lost the objective\" reasoning while underground.",
+      "avoid": "Aborting a mission or re-planning because the route disappeared in a tunnel.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Blips themselves may still be present even when the route line is not.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/GPS"
+      ]
+    },
+    {
+      "id": "police_search_cone",
+      "category": "police",
+      "cue": "Cone/wedge shapes appear projecting from police blips on the radar.",
+      "context": "Wanted level is active AND the police have lost line of sight on the agent.",
+      "meaning": "When out of sight of the cops, cones appear on the radar showing the area each unit is searching. This is the single most important escape-decision cue in the game: the cones ARE the police field of vision. Being inside a cone re-establishes contact and resets the escape timer.",
+      "suggested_action": "During flee_police in search mode, route AWAY from cone interiors, not merely away from police positions. Prefer movement perpendicular to a cone's axis, and prefer cover/interiors/tunnels over open ground.",
+      "avoid": "Treating the cop's dot as the only thing to avoid. A stationary cop with a cone pointed at the agent is far more dangerous than a moving cop facing away.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Cones only render during the search phase. While police still have active line of sight there are no cones \u2014 the pursuit is already live.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "flashing_stars_mean_search_mode",
+      "category": "police",
+      "cue": "The wanted-level stars flash/pulse instead of holding steady.",
+      "context": "Wanted level greater than zero.",
+      "meaning": "Flashing stars mean the police have lost sight of the agent and the game has entered search-cone mode. Steady stars mean he is actively being seen and pursued. The transition from steady to flashing is the moment escape becomes possible.",
+      "suggested_action": "Branch hard on this flag. Steady stars: break line of sight (turn corners, enter tunnels, get off the main road). Flashing stars: stop generating attention, stay out of cones, and hold position or move quietly until the stars clear.",
+      "avoid": "Continuing to drive at top speed in a straight line once the stars start flashing \u2014 high-visibility movement re-enters cones and restores steady pursuit.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None known in Story Mode.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "star_flash_rate_is_progress_bar",
+      "category": "police",
+      "cue": "The rate at which the wanted stars flash changes over time during search mode.",
+      "context": "Search mode only (stars already flashing).",
+      "meaning": "The flash rate is a progress readout: the SLOWER the stars flash, the closer the player is to escaping. It is effectively a countdown timer rendered as a blink rate.",
+      "suggested_action": "If the bridge can sample flash period, use \"slowing\" as the signal to hold the current hiding strategy rather than gamble on a new one. Narrate it \u2014 it is naturally dramatic on stream.",
+      "avoid": "Changing hiding spot right as the flash slows; movement risks re-entering a cone with the escape nearly complete.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Flash rate is a visual-only signal; if the bridge cannot sample it, fall back on elapsed-time-in-search-mode as a proxy. Required search duration scales with star count.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "appearance_change_drops_a_star",
+      "category": "police",
+      "cue": "Search-cone mode is active and the agent has a mask, hat or sunglasses available.",
+      "context": "Search mode ONLY \u2014 not during active line-of-sight pursuit.",
+      "meaning": "A human player can reduce the wanted level by one star during search-cone mode by changing appearance (mask, hat, sunglasses) via the Interaction Menu. This is a real Story Mode mechanic, but the agent's harness exposes no menu access at all \u2014 of the 11 bridge tasks and 8 harness primitives, none opens or navigates any menu (CAPABILITIES: 'no phone, no menus'). The mechanic is therefore unreachable regardless of whether it is real, and it should not be planned around.",
+      "suggested_action": "Do not attempt this. No harness action opens the interaction menu or toggles appearance. Build wanted-level escape entirely on the flee_police / seek_cover / cone-avoidance items in this domain (police_search_cone, flashing_stars_mean_search_mode, rail_lines_break_pursuit); never include an appearance change as a step in any recovery sequence.",
+      "avoid": "Queuing an 'appearance change' step in a flee_police or recovery plan \u2014 it is not an action in the agent's vocabulary, and a plan that stalls on it is a silent dead end mid-evasion.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "If a future harness version adds menu navigation, this item must be re-verified end-to-end against the real running game before being restored as an active escape step.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "police_blip_density_by_star",
+      "category": "police",
+      "cue": "Count and type of police blips on the radar.",
+      "context": "Active wanted level.",
+      "meaning": "Blip density is a direct readout of star level and therefore of survivability. 1 star: one or two police vehicles, arrest at gunpoint. 2 stars: minimum three cars, shoot to kill, ramming and roadblock ambushes. 3 stars: roadblocks with transporters and spike strips laid behind them, plus a Police Maverick helicopter delivering NOOSE. 4 stars: NOOSE TRU in dedicated vehicles, up to three Mavericks (typically two airborne), officers firing from vehicles unprovoked. 5 stars: an effectively unlimited LSPD/Sheriff response with a high proportion of NOOSE TRU officers, plus up to three Police Mavericks. GTA V has NO open-world military response to a wanted level \u2014 no Rhino tanks, no army squads; Fort Zancudo's military only engages a player who intrudes on the base itself, never for an ordinary street wanted level.",
+      "suggested_action": "Use blip count and the appearance of an airborne blip as the trigger to escalate from wander/flee to hard evasion (interiors, tunnels, rail lines). A helicopter blip means line-of-sight from above \u2014 ground cover alone will not break contact.",
+      "avoid": "Attempting to out-drive a 3+ star wanted level on open highway. Roadblocks and spike strips are placed on the road AHEAD, and the strips sit behind the blockade.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Wanted response differs in some scripted missions where the police behaviour is overridden.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "rail_lines_break_pursuit",
+      "category": "police",
+      "cue": "A railway line is within reach while a wanted level is active.",
+      "context": "Evasion, ideally already in search mode.",
+      "meaning": "Police have a hard time following the player on rail. Rail corridors are a terrain-level exploit of the police navigation mesh and are one of the most reliable escape routes.",
+      "suggested_action": "When flee_police is active and a rail line is nearby, route onto it. Combine with the tunnel effect where the rail goes underground.",
+      "avoid": "Standing on the tracks after the stars clear \u2014 trains are lethal.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Verified on one source. Helicopters still track from above on open rail sections.",
+      "sources": [
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "noise_ring_around_player_blip",
+      "category": "disambiguation",
+      "cue": "A red or blue expanding circle/ring drawn AROUND the agent's own player blip at the centre of the radar.",
+      "context": "Any time, most visible during stealth and combat.",
+      "meaning": "This is the SOUND indicator, not an enemy or ally marker. It shows how far the agent's noise carries: blue when sprinting or talking loudly, red during gunfire and explosions. It is centred on the player and expands/contracts \u2014 it is not a ped blip at all. A red ring means \"you just made a lot of noise\", not \"an enemy is here\".",
+      "suggested_action": "Read the ring as a detection-radius estimate. During any stealth objective, keep it blue or absent: use walk_to with run=false rather than sprinting, and do not trigger combat_hated_targets_around, which is the only source of engine-generated gunfire noise available to the harness.",
+      "avoid": "Feeding the ring into the hostile-ped classifier. A red ring around the player is the single most misleading red thing on the radar.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The ring is a HUD overlay, not an entity \u2014 it will not appear in a ped list. If the bridge only forwards ped blips, it may never see this at all.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "elevation_arrow_in_blip",
+      "category": "blip_geometry",
+      "cue": "A circular blip contains a small arrow rather than being a plain filled circle.",
+      "context": "Any blip representing a target at a different height than the agent.",
+      "meaning": "In GTA IV and V, mission targets use coloured circles; if the target is higher or lower there is a small arrow inside the circle. An up arrow means the target is above (upper floor, rooftop, helicopter, freeway overpass); down means below (tunnel, storm drain, basement, ground level while the agent is elevated).",
+      "suggested_action": "Treat an arrowed blip as a routing warning: 2D distance is small but the path requires finding stairs, a ramp, an elevator or an aircraft. Do not report \"arrived\" on 2D proximity alone.",
+      "avoid": "Looping walk_to against a target directly above or below the agent. This is a classic infinite-retry trap \u2014 horizontal distance goes to zero and the objective never completes.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Small elevation differences (kerbs, gentle slopes) do not trigger the arrow.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "blip_clamped_to_radar_edge",
+      "category": "blip_geometry",
+      "cue": "A blip sits exactly on the border of the radar rectangle.",
+      "context": "Target is farther away than the radar's display range.",
+      "meaning": "Blips beyond radar range are clamped to the edge and act as direction indicators only. Their position gives BEARING, not distance. A blip pinned to the edge is somewhere between \"just off the radar\" and \"across the map\".",
+      "suggested_action": "For edge-clamped blips, use bearing to choose an initial heading and rely on the GPS route or the distance readout for actual planning, never on the blip's apparent position.",
+      "avoid": "Estimating travel time or choosing walk_to over drive_to based on an edge-clamped blip's apparent nearness.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Inferred from the radar's fixed rectangular display plus the documented direction/mileage indicators; the clamping behaviour itself was not stated verbatim in a source.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "gps_direction_and_distance_readout",
+      "category": "navigation",
+      "cue": "Small indicators at the bottom of the radar while a GPS route is active.",
+      "context": "Any routed travel.",
+      "meaning": "When using the GPS, a direction indicator is shown at the bottom-left of the radar and a mileage/distance indicator at the bottom-right. These give authoritative bearing and remaining distance, independent of blip rendering.",
+      "suggested_action": "Prefer this numeric distance over any inference from blip position when deciding whether to walk, drive, or steal a vehicle.",
+      "avoid": "Ignoring the distance readout and committing to walk_to across half the map.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Only present while a route is active; absent for unrouted targets and water waypoints.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "radar_perspective_changes",
+      "category": "blip_geometry",
+      "cue": "The radar's projection changes between top-down and a slanted/3D view.",
+      "context": "Transitioning between on-foot and in-vehicle.",
+      "meaning": "The radar is rectangular and displays a top-down perspective on foot and a slanted perspective in any vehicle. The Enhanced/next-gen versions use a three-dimensional-looking radar with a revised colour scheme. Blip positions therefore distort differently depending on the agent's state.",
+      "suggested_action": "Do not do geometry on radar-space pixel positions. Always work from world coordinates the bridge supplies; use the radar only for classification cues (shape, colour, flashing).",
+      "avoid": "Estimating relative angles between two blips from their apparent radar positions while in a vehicle \u2014 the slanted projection makes that unreliable.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The colour scheme differs between the Legacy and Enhanced editions, so any hard-coded RGB thresholds must be calibrated against the installed build.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/Grand_Theft_Auto_V"
+      ]
+    },
+    {
+      "id": "altimeter_replaces_radar_detail",
+      "category": "blip_geometry",
+      "cue": "An altitude bar appears alongside the radar.",
+      "context": "Flying an aircraft or parachuting.",
+      "meaning": "An altimeter is integrated into the radar in GTA V during flight and parachute descent. Ground blips remain but vertical separation becomes the dominant factor in whether a target is reachable.",
+      "suggested_action": "While airborne, gate any \"arrived at target\" conclusion on altitude as well as horizontal distance; plan a landing site before descending on a blip.",
+      "avoid": "Issuing an exit-vehicle or walk_to task against a ground blip while still at altitude.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "None known.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "world_marker_vs_radar_blip",
+      "category": "world_markers",
+      "cue": "A translucent coloured cylinder or glowing ring (a corona) rendered in the 3D world, distinct from anything on the radar.",
+      "context": "Standing or driving near a mission start, shop entrance, or objective point.",
+      "meaning": "Radar blips and in-world markers are two separate systems for the same destination. The blip tells the agent WHERE to go; the corona is the actual trigger volume he must physically occupy for anything to happen. Reaching the blip's coordinates is not the same as entering the corona.",
+      "suggested_action": "Treat arrival as a two-stage goal: navigate to the blip coordinates, then move onto the visible marker until the game responds (prompt, cutscene, or objective change).",
+      "avoid": "Declaring an objective complete on blip-distance alone and moving on while standing two metres outside the trigger.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Blip-and-corona pairing is standard but was not confirmed by a dedicated source page in-session; some objectives are blip-only and complete on proximity.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Customs",
+        "https://gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "marker_entry_starts_mission",
+      "category": "world_markers",
+      "cue": "the agent is standing inside a mission marker matching the active protagonist's colour and nothing happens.",
+      "context": "Attempting to start a story or stranger mission.",
+      "meaning": "Missions start by occupying the marker with the CORRECT character. Each character's respective missions can only be completed in the order listed, and some givers are not unlocked until earlier missions are done. A silent marker usually means wrong protagonist, wrong story order, or a locked giver \u2014 not a bug.",
+      "suggested_action": "On a silent marker, check (a) does the blip colour match the active protagonist, (b) is the blip the enlarged one. If both pass and it still does nothing, abandon and pick another goal rather than retrying.",
+      "avoid": "Standing in a marker repeatedly for minutes of dead airtime. Cap marker-entry retries and fall back to wander_drive.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some markers require the agent to be in a vehicle, or on foot specifically; a few require a specific vehicle class.",
+      "sources": [
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "drive_in_marker_los_santos_customs",
+      "category": "poi_icons",
+      "cue": "A Los Santos Customs blip, and the agent is in a vehicle at its entrance.",
+      "context": "Vehicle modification or repair.",
+      "meaning": "Los Santos Customs is entered by DRIVING a vehicle far enough into the garage entrance so the door opens \u2014 it is a vehicle-only trigger, unlike shops entered on foot. There are four branches: Burton (Carcer Way), La Mesa (Popular Street), LSIA (Greenwich Parkway) and Harmony (Route 68, Blaine County).",
+      "suggested_action": "Never issue exit_vehicle before an LSC blip. Drive the nose of the car into the entrance and hold position until the door animation plays. Useful for repairing a wrecked car mid-stream and for resetting a wanted-level-flagged vehicle.",
+      "avoid": "Walking up to the LSC marker on foot and expecting a prompt.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Harmony branch is far from Los Santos; do not route there when a city branch is closer.",
+      "sources": [
+        "https://gta.wiki/w/Los_Santos_Customs"
+      ]
+    },
+    {
+      "id": "property_for_sale_marker",
+      "category": "poi_icons",
+      "cue": "A property/business blip in free roam that the agent does not own.",
+      "context": "Free roam with sufficient money.",
+      "meaning": "Available commercial property is marked on the map and is purchased ON SITE by approaching the 'For Sale' sign outside \u2014 there is no menu purchase from a distance. Owned properties then pay a weekly profit into the bank account every seven in-game days, and may occasionally generate their own missions for the owner.",
+      "suggested_action": "Treat a for-sale blip as an on-foot approach target, not a drive-through. Buying property creates recurring income and future mission blips, which is good long-run stream content.",
+      "avoid": "Routing to a property blip expecting a purchase menu to open on arrival by car.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Some properties are gated behind story progress or a specific protagonist; ignoring an owned property's follow-up requests reduces its profit.",
+      "sources": [
+        "https://gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "safehouse_blip_function",
+      "category": "poi_icons",
+      "cue": "A safehouse/house blip, typically associated with the active protagonist.",
+      "context": "Free roam.",
+      "meaning": "Safehouses let the agent save AND restore health by sleeping in the bed (which also advances the in-game clock \u2014 6 hours for Michael, 8 for Franklin, 12 for Trevor), change clothing at a wardrobe, store vehicles in the garage, and use the in-game internet and TV. There is no first-aid-kit interaction in a GTA V safehouse; health there is restored only by sleeping. Franklin has the Clinton Residence (Forum Drive, Strawberry) and 3671 Whispymound Drive; Michael has the De Santa Residence (Portola Drive, Rockford Hills); Trevor has his trailer in Sandy Shores, plus Floyd's apartment and the Vanilla Unicorn at points in the story.",
+      "suggested_action": "Route to the active protagonist's safehouse to heal by sleeping (accepting the clock skip), to change appearance, or to bank a vehicle. For a quick heal without losing time, use a nearby vending machine or food/snack purchase instead (see failure_recovery). Useful as a safe default when no mission is available.",
+      "avoid": "Routing to another protagonist's safehouse expecting to sleep or change clothes there.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Trevor's Vanilla Unicorn and Floyd's apartment are only available during specific story windows. Whether the safehouse blip is tinted with the owner's protagonist colour was not verified in-session.",
+      "sources": [
+        "https://gta.wiki/w/Safehouses_in_GTA_V"
+      ]
+    },
+    {
+      "id": "hospital_blip_wasted",
+      "category": "poi_icons",
+      "cue": "A hospital blip; or the agent's health approaching zero.",
+      "context": "Any time health is low.",
+      "meaning": "Hospitals are the respawn point on death (Wasted). Death costs a medical fee and fails any active mission. The hospital blip is therefore both a service marker and a consequence marker.",
+      "suggested_action": "At low health with no mission active, prefer a health source (sleeping at the active protagonist's safehouse, or a nearby food/snack purchase \u2014 see failure_recovery) over pushing on. Nearest-hospital distance is a decent proxy for how far a death would displace the agent from his current goal.",
+      "avoid": "Continuing combat at critical health because the objective blip is close. A death resets the mission and teleports him away.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The wiki page consulted documents the Busted flow in GTA V in detail but does not fully specify the Wasted flow; the hospital respawn is described as historical series behaviour.",
+      "sources": [
+        "https://gta.wiki/w/Busted"
+      ]
+    },
+    {
+      "id": "police_station_blip_busted",
+      "category": "poi_icons",
+      "cue": "A police station blip; or the agent is surrounded by police at gunpoint at one star.",
+      "context": "Active wanted level, especially one star where officers attempt arrest rather than lethal force.",
+      "meaning": "Being Busted respawns the agent outside the NEAREST POLICE STATION, costs bail, and fails the active mission exactly like being killed does \u2014 the game shows a 'Mission Failed: [name] was arrested' screen, offering the same checkpoint-retry option a death would (with some gold-medal objectives disabled). In free roam only, with no mission active, the loss is comparatively narrow: ammo and body armour are confiscated, plus only the specific weapon he had drawn at the moment of arrest \u2014 other owned weapons are retained. The screen greys out after a brief flash in the active character's colour.",
+      "suggested_action": "Arrest during a mission is an immediate mission failure \u2014 never treat surrender as a 'safe' alternative to a doomed firefight, because it produces the same Mission Failed outcome dying would, with no cost advantage. Keep fighting or keep fleeing (flee_police / seek_cover / combat_hated_targets_around) until the objective is done or contact is genuinely broken. In free roam with no mission active, an arrest is recoverable and cheap enough to accept rather than force a fight to the death; afterwards walk into Ammu-Nation to replace ammo and armour, and treat the one drawn weapon as the only lasting loss.",
+      "avoid": "Steering deliberately toward arrest as a mission-safe option \u2014 it is not; arrest during a mission fails it just as death would. Also avoid treating Busted as unconditionally cheaper than Wasted in free roam: death costs up to 5% of cash (capped near $5,000) but keeps every weapon, while arrest keeps most weapons but strips ammo, armour and the one drawn weapon \u2014 neither is unambiguously 'the cheap one'.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "At two stars and above police shoot to kill on sight, so a voluntary one-star surrender is not reachable once the level has escalated. This free-roam cost comparison does not apply while any mission is active \u2014 see suggested_action.",
+      "sources": [
+        "https://gta.wiki/w/Busted",
+        "https://gta.wiki/w/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "ammunation_blip",
+      "category": "poi_icons",
+      "cue": "An Ammu-Nation blip (gun-shop pictogram).",
+      "context": "After being busted (ammo and armour confiscated), or before a combat-heavy mission.",
+      "meaning": "Ammu-Nation is the weapon, ammunition and body-armour vendor. It is the direct remedy for the specific losses a Bust inflicts, PROVIDED the purchase itself can be completed: buying items there is normally driven by an in-game purchase menu (browsing and selecting weapons/ammo/armour), and the harness has no menu-navigation capability (CAPABILITIES: 'no menus') beyond the single contextual press_prompt_key.",
+      "suggested_action": "Chain a post-Bust recovery: police station respawn to nearest Ammu-Nation, attempt to rearm via press_prompt_key, then resume. Treat entering the store as a safe, useful waypoint in every case; treat an actual completed purchase as unverified until confirmed against the real running game, since selecting specific items may need menu interaction beyond press_prompt_key.",
+      "avoid": "Starting a shootout-heavy mission straight out of a police station with no ammo and no armour.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "The exact Ammu-Nation blip glyph and colour could not be verified in-session (the wiki page reached was a disambiguation stub). Entering while at a wanted level is not possible. Whether press_prompt_key alone can complete a purchase, or whether it only opens a menu the harness cannot navigate, was not verified in-session and must be checked live.",
+      "sources": [
+        "https://gta.wiki/w/Busted",
+        "https://gta.wiki/w/Ammu-Nation"
+      ]
+    },
+    {
+      "id": "shop_blips_are_pictograms",
+      "category": "poi_icons",
+      "cue": "A blip whose glyph is a small pictogram (t-shirt, scissors, pistol, spray can, dollar sign, bed, helipad) rather than a letter, a plain dot, or a \"?\".",
+      "context": "Free roam.",
+      "meaning": "Service and shop blips are a distinct visual class: clothing stores, barbers, tattoo parlours, convenience stores, Ammu-Nation, Los Santos Customs, hospitals, police stations, safehouses, garages, helipads and docks. They are static, always present once discovered, and never objectives in themselves. Their colour carries no hostility meaning at all.",
+      "suggested_action": "Classify pictogram blips as a persistent SERVICES layer and exclude them wholesale from threat evaluation and from mission-candidate selection. Query them only when the agent has a specific need (heal, rearm, repair, change appearance).",
+      "avoid": "Letting the sheer number of static shop blips dominate the blip list the brain reasons over. Filter them out by default.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "During some missions a shop location IS the objective (e.g. a robbery), in which case an objective blip or yellow route will be co-located with the shop blip. The objective marker, not the shop pictogram, is the thing to act on.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/Los_Santos_Customs",
+        "https://gta.wiki/w/Safehouses_in_GTA_V"
+      ]
+    },
+    {
+      "id": "objective_vehicle_blip",
+      "category": "mission_blips",
+      "cue": "A blip attached to a moving vehicle during an active mission, distinct from the destination blip.",
+      "context": "Mission active; chase, tail, steal, or protect objectives.",
+      "meaning": "An objective vehicle carries its own blip that MOVES. A moving objective blip means the goal is an entity (follow_entity, ram, board, or steal it), not a place. Confusing it with a static destination produces the wrong task entirely.",
+      "suggested_action": "Test blip position across ticks. If it moves, dispatch follow_entity or a pursuit behaviour, not drive_to a cached coordinate. Re-read the target position every tick.",
+      "avoid": "Snapshotting a moving objective's position once and issuing drive_to that stale point. The agent arrives where the target used to be.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Some objective vehicles are parked and static until approached, then become mobile. Do not assume stationary-now means stationary-always.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "mission_active_suppresses_free_roam_blips",
+      "category": "mission_blips",
+      "cue": "The mission-active flag is set, or a cutscene flag is set.",
+      "context": "During any story or stranger mission.",
+      "meaning": "While a mission runs, mission-giver letter blips and random-event dots are not actionable \u2014 starting one mission from inside another is not possible, and random events do not fire. Almost every blip other than the mission's own objective markers is noise for the duration.",
+      "suggested_action": "When mission_active is true, restrict the candidate set to objective blips, the yellow route, and hostile peds. Ignore letter blips, \"?\" blips and shop pictograms entirely until the mission ends.",
+      "avoid": "Abandoning an active mission to chase a newly-visible \"?\" blip. It fails the mission and wastes the run.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Inferred from mission-ordering and unlock rules rather than stated verbatim. Some missions legitimately present optional side objectives with their own blips.",
+      "sources": [
+        "https://gta.wiki/w/Missions_in_GTA_V",
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "cutscene_blip_state_unreliable",
+      "category": "mission_blips",
+      "cue": "The cutscene flag is set.",
+      "context": "Mission intros, transitions, and scripted sequences.",
+      "meaning": "During cutscenes the player entity may be teleported, swapped to a different protagonist, or placed in a vehicle. Blip and position readings taken during a cutscene do not describe the state the agent will be in when control returns.",
+      "suggested_action": "Freeze decision-making and issue `stop` while the cutscene flag is set. Re-read protagonist identity, position, vehicle state and the full blip list on the first tick after control resumes.",
+      "avoid": "Planning a route or queuing tasks from mid-cutscene state. Also avoid re-issuing the previous task on resume without re-reading \u2014 the agent may be a different character in a different part of the map.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Inferred from the documented forced-character-switch and mission-teleport behaviour rather than from a source describing blip staleness directly.",
+      "sources": [
+        "https://gta.wiki/w/Missions_in_GTA_V",
+        "https://gta.wiki/w/Grand_Theft_Auto_V"
+      ]
+    },
+    {
+      "id": "read_blips_by_sprite_not_pixel_colour",
+      "category": "harness_integration",
+      "cue": "Implementing blip classification in the bridge.",
+      "context": "ScriptHookVDotNet bridge development.",
+      "meaning": "The game stores each blip as a structured object with a SPRITE id (which glyph), a COLOUR id (a palette index, not an RGB value), a scale, an alpha, a flashing flag and a short-range flag. Reading these fields is exact; sampling rendered pixels off the minimap is not. The palette-index colour is also what makes the Legacy/Enhanced colour-scheme difference irrelevant at the API level.",
+      "suggested_action": "Expose sprite id, colour id, scale, is_flashing, is_short_range, is_on_minimap_edge and world position for every blip. Let the brain reason over sprite ids; never downsample to a human colour name in the bridge.",
+      "avoid": "OCR or pixel-sampling the minimap. Also avoid hard-coding specific numeric sprite ids from web references without verifying them against the installed SHVDN enum \u2014 published sprite-id tables disagree with each other.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Specific numeric sprite ids could NOT be reliably verified in-session: the one reference reached (FiveM's blip table) returned entries that look partly garbled, and gtamods.com and GTAForums both refused the fetch. Enumerate the ids empirically from the running game via SHVDN's BlipSprite/BlipColor enums before relying on any number.",
+      "sources": [
+        "https://docs.fivem.net/docs/game-references/blips/",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "no_actionable_blip_fallback",
+      "category": "decision_policy",
+      "cue": "No mission-colour-matching letter blip, no \"?\", no random-event dot, no objective, and no wanted level.",
+      "context": "Free roam idle state.",
+      "meaning": "An empty actionable-blip set is a normal, frequent state, not an error. Random events only spawn after certain story missions unlock them, mission givers unlock in order, and there are long stretches of map with only shop pictograms.",
+      "suggested_action": "Fall back to wander_drive toward an unexplored district, or toward a known cluster of mission blips belonging to the active protagonist. Movement generates random-event spawns and keeps the stream alive.",
+      "avoid": "Idling with `stop`, or re-scanning in a tight loop hoping a blip appears. Standing still is both bad television and actively suppresses event spawning.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "If health is low or the vehicle is wrecked, prefer a service blip (safehouse, hospital, Los Santos Customs) over aimless wandering.",
+      "sources": [
+        "https://gta.wiki/w/Random_Events_in_GTA_V",
+        "https://gta.wiki/w/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "character_switch_to_reach_mission",
+      "category": "decision_policy",
+      "cue": "The only available mission blips are small and in a colour that does not match the active protagonist.",
+      "context": "Free roam, all three protagonists unlocked, no mission active.",
+      "meaning": "Switching protagonist is a real, human-accessible GTA V mechanic, but the harness's frozen action vocabulary (CAPABILITIES: 11 bridge tasks, 8 primitives) has no switch_protagonist task and no arbitrary keypress to open the phone/character-wheel UI. Off-colour, off-size mission letters belonging to another protagonist are therefore permanently unreachable from the current protagonist under the agent's current tools \u2014 this is a hard capability gap, not a planning choice. Only game-FORCED switches (a scripted mission handoff, a cutscene) ever change which protagonist the agent controls.",
+      "suggested_action": "Filter the candidate set to only ENLARGED, colour-matched blips for the currently active protagonist. Treat every other-protagonist mission letter as non-actionable noise, exactly like a locked giver, and fall back to no_actionable_blip_fallback (wander_drive, or a service blip) instead of waiting on it.",
+      "avoid": "Narrating an intention to 'switch to Franklin' or 'switch to Trevor' \u2014 no such action exists, and announcing one on stream when nothing happens is exactly the false-action failure this knowledge base exists to prevent. Also avoid treating a game-forced switch (during a cutscene) as something the agent chose to do.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "If a future harness version adds a switch_protagonist task, this item must be re-verified and rewritten \u2014 until CAPABILITIES.md changes, this rule is unconditional.",
+      "sources": [
+        "https://support.rockstargames.com/articles/1bDc5lkHAry9GrKjCpJRMp/information-about-character-icons-in-grand-theft-auto-v",
+        "https://gta.wiki/w/Grand_Theft_Auto_V"
+      ]
+    },
+    {
+      "id": "blue_dot_ally_ambiguity",
+      "category": "disambiguation",
+      "cue": "A plain blue dot with no letter, no pictogram and no flashing, during a mission.",
+      "context": "Missions with companions (heist crew, Lamar, Lester, a co-protagonist under AI control).",
+      "meaning": "Plain blue dots in mission context are most often ALLIES to protect or follow. But blue is heavily overloaded \u2014 it is also Michael's mission colour, also the light-blue helpable random-event dot, also the blue half of a flashing police blip, and blue is the stealth noise ring around the player. The plain-dot shape plus mission-active context is what makes the ally reading likely, not the colour.",
+      "suggested_action": "Confirm an ally reading against the ped hostility field the bridge supplies (friendly / neutral / hostile) before issuing follow_entity or before letting combat_hated_targets_around run near it. The hostility flag outranks the blip colour.",
+      "avoid": "Running combat_hated_targets_around near anything blue because it moved unexpectedly \u2014 the engine's own hostility check should already exclude a genuine ally, but a stale hostility read is the real risk \u2014 and equally, walking into a light-blue dot assuming it is a scripted ally when it is an unrelated random event.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "Ally-blip conventions in GTA V single player could not be confirmed against a dedicated source in-session; the general series convention that blue/green marks objects or characters while red marks threats is documented, but the GTA V specifics are not. Treat this item as a prior to be corrected by observed play, and always defer to the hostility flag.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/w/Random_Events_in_GTA_V"
+      ]
+    }
+  ],
+  "notes": "SOURCES THAT WORKED: gta.wiki (the mirror) was by far the most productive \u2014 its GTA V pages for Radar, Wanted Level in GTA V, Random Events in GTA V, GPS, Missions in GTA V, Strangers and Freaks, Busted, Los Santos Customs, Properties in GTA V and Safehouses in GTA V all returned usable detail. Note the mirror uses BOTH /wiki/<Page> and /w/<Page> paths inconsistently, and many top-level names (Blip, Blips, Marker, Checkpoint, Waypoint, HUD-for-V) are either 404 or disambiguation stubs. gtabase.com worked for the Strangers \"?\" icon confirmation.\n\nSOURCES THAT FAILED: gta.fandom.com is 402 as warned. ign.com is blocked outright for this fetcher. pcgamingwiki.com returned 403, so I could NOT verify any PC key bindings \u2014 no keybinding claims are made in this KB. gtamods.com returned 403 and the GTAForums NPC-blip-colour thread returned 403, which cost me the two best community references on blip internals. The Rockstar Games support article on character icons timed out on four separate fetch attempts; its key content is quoted in this KB from a WebSearch result snippet rather than from a successful page fetch, so treat the protagonist-colour and icon-size claims as first-party-sourced but fetch-unverified. My WebSearch budget (200 calls) was exhausted by the second search, so I could not run follow-up searches to route around the blocked domains.\n\nWHAT I COULD NOT VERIFY \u2014 the following are marked low/medium confidence in the items above and should be corrected by observation once the bridge is live against the real game:\n1. Numeric blip sprite and colour IDs. The only reference I reached (FiveM's blip table) returned entries that appear partly garbled by summarisation (e.g. \"76 - Armenian family contact\"), and both authoritative alternatives were 403. Do NOT hard-code any sprite id from this KB. Enumerate them empirically from SHVDN's BlipSprite/BlipColor enums against the installed game build.\n2. Ally/friendly blip conventions in single player. This is the weakest item in the set (blue_dot_ally_ambiguity, confidence low). The documented material covers the general series convention and the random-event colours, but not GTA V single-player ally blips specifically. The agent should always defer to the bridge's ped hostility flag over blip colour here.\n3. The exact glyphs and colours of most shop/service pictograms (Ammu-Nation, clothing, barber, hospital, police station, garage, helipad). I confirmed these location types exist and what they do, but not their icon appearance. The shop_blips_are_pictograms item deliberately generalises rather than asserting per-icon detail.\n4. Whether safehouse blips are tinted with the owner protagonist's colour. Plausible given the pervasive protagonist palette, but unstated in any source I reached.\n5. The blip-plus-corona pairing (world_marker_vs_radar_blip) is assembled from the Los Santos Customs drive-in description and the property For Sale sign description rather than from a page documenting the marker system itself.\n6. Star flash-rate sampling. The wiki states slower flashing means closer to escape, but whether the bridge can actually sample HUD flash period is an open engineering question; elapsed-time-in-search-mode is given as the fallback.\n\nSOURCE DISAGREEMENT: Trevor's icon colour. Rockstar's own support article says ORANGE (\"green for Franklin, blue for Michael, and orange for Trevor\"); the gta.wiki GTA V missions page describes Trevor-associated mission icons as RED. The rendered swatch is a red-leaning orange and I believe both descriptions point at the same colour, but I lowered protagonist_colour_trevor_orange to medium confidence and explicitly instructed that this hue must never be used to distinguish Trevor from a hostile blip \u2014 shape must do that work instead.\n\nDELIBERATE OMISSIONS: nothing GTA Online-only is included. I dropped several tempting items (nightclub/business/CEO blips, Online friend/crew blip colours, the Online player-blip system with its head-icons and passive-mode variants) because they do not exist in Story Mode. The random-event colour semantics I did include are from the GTA V single-player random events page specifically, not the Online freemode-event system.\n\nREPAIR PASS (post-critic review, capabilities-aware): Fixed police_station_blip_busted \u2014 arrest during a mission is an immediate Mission Failure exactly like death, so surrender is never a 'safe' alternative to fighting; softened the free-roam Busted-vs-Wasted cost comparison instead of asserting arrest is 'much cheaper' (verified against gta.wiki Busted/Wasted pages: death keeps all weapons and costs up to 5% cash/$5,000 cap; arrest keeps most weapons but strips ammo, armour and the drawn weapon). Downgraded appearance_change_drops_a_star to low confidence and removed the 'trigger it through the interaction menu' instruction \u2014 the harness has zero menu-navigation capability, so this step is unreachable even if the mechanic is real; it must not appear in any flee_police recovery sequence. Removed the GTA IV/San Andreas-style 'military' and 'Rhino tanks' claim from police_blip_density_by_star's 5-star description (GTA V has no open-world military response; Fort Zancudo only engages base intruders). Fixed safehouse_blip_function and hospital_blip_wasted: GTA V safehouses have no first-aid-kit interaction, only sleep-to-heal (which advances the clock); pointed low-health guidance at sleeping or a food/snack purchase instead. Found on fresh re-read (not in the critic list): several items instructed the agent to 'switch protagonist/character' as an action, but CAPABILITIES.md's frozen vocabulary (11 bridge tasks + 8 primitives) has no switch_protagonist task and no menu/keypress that could trigger one \u2014 rewrote character_switch_to_reach_mission, protagonist_colour_franklin_green and mission_blip_size_means_playable_now so a non-matching-protagonist blip is filtered out as permanently non-actionable rather than something the agent is told to 'switch' toward. Also reworded noise_ring_around_player_blip and blue_dot_ally_ambiguity, which spoke of the agent 'firing' or 'withholding fire' \u2014 no such manual action exists; reworded around combat_hated_targets_around, the only engine-mediated combat trigger available. Softened ammunation_blip: an actual purchase there likely needs menu navigation the harness cannot do, so treat entering the store as a safe waypoint, not a guaranteed rearm, until verified live. Left mission_blip_letter_is_giver_initial, refute_naive_colour_rule and marker_disambiguation_algorithm unchanged as already-correct per critic; appended a cross-reference note to mission_blip_letter_is_giver_initial pointing other domains at this domain's rule. No items deleted."
+}

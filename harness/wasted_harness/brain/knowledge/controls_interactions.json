@@ -1,0 +1,589 @@
+{
+  "domain": "controls_interactions",
+  "items": [
+    {
+      "id": "bindings_are_remappable_verify_on_machine",
+      "category": "harness_input",
+      "cue": "Any plan that assumes a specific raw keypress reaches the game (including the recovery watchdog's Enter/Esc, or reading a contextual prompt for narration).",
+      "context": "Always, before the first live show on a given machine.",
+      "meaning": "the agent's own decisions never choose a raw key. The brain's action catalog is fixed to 11 bridge tasks (drive_to, walk_to, enter_nearest_vehicle, exit_vehicle, wander_drive, flee_police, combat_hated_targets_around, seek_cover, follow_entity, set_waypoint, stop) plus 8 harness primitives (look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn) — and press_prompt_key takes no key parameter; it presses whichever contextual prompt is currently showing. The only literal keypresses the harness itself ever sends outside that catalog are Enter and Esc, used exclusively by the infra-level recovery watchdog to dismiss blocking screens, never chosen by the brain. Everything else in this file naming a specific letter/key (F, Q, Space, RMB...) is retained only as descriptive knowledge of what the underlying game does with that input — useful for narration and for recognizing state changes, never as something the agent can decide to press. GTA V lets a human rebind almost everything under Settings -> Key Bindings, and keyboard layout matters too (AZERTY vs QWERTY), which matters only for the Enter/Esc infra path and for correctly narrating anything captured on a rare screenshot.",
+      "suggested_action": "Before the first live show, confirm on the real server that Enter/Esc still dismiss the fail screen and any blocking dialog (the recovery watchdog depends on this) and force the OS keyboard layout to US English. Do not build brain-level plans around any other raw key.",
+      "avoid": "Assuming the brain can send an arbitrary key beyond its 8 primitives, or hardcoding a default key into new harness code without checking this domain's capability list first.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Enter/Esc for menu confirm/back are not exposed in the underlying game's rebinding UI and are effectively fixed — which is exactly why the recovery watchdog can rely on them.",
+      "sources": [
+        "https://tutorialtactic.com/blog/gta-v-cheats-shortcuts/",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "gamepad_swaps_onscreen_glyphs",
+      "category": "harness_input",
+      "cue": "On-screen prompts show controller button glyphs (A/X/LB) instead of keyboard key names.",
+      "context": "Any time a gamepad, or a device the game reads as one (some wheels, some VR/streaming shims), is connected to the server.",
+      "meaning": "GTA V switches its prompt glyphs to match the last input device used. Because the agent does not read on-screen prompt text as input (press_prompt_key needs no key name, and he otherwise gets no on-screen-prompt data at all — only a rare screenshot on a few big events), a gamepad glyph swap does not change what the brain decides. It does corrupt what viewers see and what any screenshot-based narration reports.",
+      "suggested_action": "Keep every gamepad-class device unplugged/disabled on the show machine so any captured screenshot renders keyboard glyphs. If glyphs appear anyway, tap a keyboard key to force the scheme back before the next narration-relevant capture.",
+      "avoid": "Narrating a prompt's key name from a screenshot when the glyph shown is actually a controller button.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Unverified whether GTA V switches instantly on the first keyboard input or only at the next prompt refresh.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "input_requires_focused_window",
+      "category": "harness_input",
+      "cue": "A primitive appears to be sent but nothing happens in game; state stream shows no change.",
+      "context": "Whenever a harness primitive fires, and after any alt-tab, Steam overlay, crash dialog or RDP reconnect.",
+      "meaning": "GTA V only acts on input while its window has OS focus. A remote-desktop session, an overlay, or another window stealing focus silently swallows every primitive's keypress/mouse event. Because the agent's bridge tasks go through the SHVDN bridge (in-process native calls) they keep working, so a focus loss shows up as: tasks work, primitives do not.",
+      "suggested_action": "Before any primitive, assert the game window is foreground; if not, restore focus first. Prefer a bridge task over a primitive wherever one exists for the goal, precisely because tasks survive focus loss.",
+      "avoid": "Retrying the same primitive in a loop when the real fault is that the window is not focused.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Exact behaviour with synthetic input (SendInput scan-code injection, which is how the harness's primitives are implemented) is unverified for GTA V beyond what has been tested on the real machine; pcgamingwiki was unreachable to confirm.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "enter_exit_vehicle_f",
+      "category": "keybind_vehicle",
+      "cue": "State shows a vehicle within a few metres, or the agent is seated in a vehicle and needs to get out.",
+      "context": "On foot next to a vehicle, or seated in one.",
+      "meaning": "F is Enter/Exit Vehicle on PC by default in the underlying game — background knowledge for narration only; the agent never presses it directly. On foot it makes the character walk to and enter the nearest valid seat (jacking the occupant if there is one); seated, it exits normally.",
+      "suggested_action": "Always use the bridge's enter_nearest_vehicle / exit_vehicle task. There is no raw-key fallback available to the brain — if the task stalls, treat it as a task failure (one retry, then re-route or try a different vehicle / seek_cover) rather than reaching for F.",
+      "avoid": "Assuming a raw F press is available as a fallback when enter_nearest_vehicle/exit_vehicle stalls — it is not in the action catalog. Exiting a moving vehicle at speed by any means causes a ragdoll bail-out, usually with damage — always let the vehicle stop first.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Holding F while moving is the deliberate 'dive out' input in the underlying game, but the agent cannot reach it. Some mission and cutscene-locked vehicles refuse exit entirely regardless of method.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a",
+        "https://www.gta-db.com/gta-5-controls/",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad"
+      ]
+    },
+    {
+      "id": "cover_key_q_context_collision",
+      "category": "keybind_onfoot",
+      "cue": "Hostile peds nearby and the agent needs cover.",
+      "context": "Q is Take Cover on foot / Radio Wheel in a vehicle by default in the underlying game — background knowledge only; the agent has no raw-key path to either.",
+      "meaning": "The only way the agent reaches cover is the seek_cover bridge task, which resolves a real cover point through the game's own natives rather than hoping a raw keypress lands near one. There is no raw-key fallback for cover, so the on-foot/in-vehicle Q collision that trips up a human player cannot happen to him.",
+      "suggested_action": "Use seek_cover whenever taking cover is the right call; it is the only path there is.",
+      "avoid": "Expecting any raw keypress to produce cover — none is in the action catalog. If seek_cover reports no valid cover point, treat that as the real answer (none is available nearby) rather than retrying blindly.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Some mods and editions separate on-foot vs in-vehicle Q bindings in the underlying game, which is irrelevant here since the agent never sends Q.",
+      "sources": [
+        "https://gta.wiki/wiki/Cover_System",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "cover_behaviour_blindfire_and_corners",
+      "category": "interaction",
+      "cue": "the agent is in cover (via seek_cover) and taking fire, or health is dropping.",
+      "context": "In cover during a firefight, with an equipped firearm.",
+      "meaning": "From cover, a human player can blind-fire without aiming, peek out to aim and re-expose the reticle, or move around a corner while staying in cover — all manual inputs the agent does not have. His only combat lever is combat_hated_targets_around, which lets the engine's own AI aim and fire at hostile-relationship targets within a radius; he cannot choose to blind-fire, peek, or reposition within cover.",
+      "suggested_action": "When health is low, prefer holding seek_cover and either a modest-radius combat_hated_targets_around or stopping the engagement outright, over trying to force an aggressive push. If the situation keeps worsening, escalate to disengaging (flee_police-style movement away, or stop and wait) rather than reaching for a manual combat maneuver that does not exist.",
+      "avoid": "Writing or expecting a plan step that 'blind fires from cover' or 'peeks to aim' — neither is an available action. Also avoid treating seek_cover as safe indefinitely: cover is destructible/penetrable and enemies flank, so re-check nearby-ped distances every decision cycle.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Cover safety depends on weapon type and enemy flanking in the underlying game; a cover point that was safe can stop being safe with no warning in the state stream beyond falling health.",
+      "sources": [
+        "https://gta.wiki/wiki/Cover_System"
+      ]
+    },
+    {
+      "id": "climb_vault_is_contextual_space",
+      "category": "interaction",
+      "cue": "walk_to task is not progressing and the path is blocked by a low wall, fence or ledge.",
+      "context": "On foot, obstacle roughly waist-to-chest height directly ahead.",
+      "meaning": "The underlying game auto-vaults and auto-climbs a low obstacle when the player runs into it holding a manual jump key — an input the agent does not have. He has no jump, vault, or climb action of any kind; walk_to is his only foot-movement lever, and ledges above about one body height cannot be climbed by anyone regardless.",
+      "suggested_action": "If a walk_to stalls against geometry, re-issue it once in case the stall was a transient pathing hiccup. If it stalls again, treat the obstacle as impassable and choose a different destination or route rather than repeating the same call a third time.",
+      "avoid": "Interpreting a stalled walk_to as something a jump/vault input would fix — no such input exists for the agent. Repeating an identical destination more than twice wastes decision cycles on a route that will not resolve itself.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Exact vault-height thresholds in the underlying game are not documented precisely, and are moot for the agent either way since he cannot trigger a vault deliberately.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://www.gta-db.com/gta-5-controls/"
+      ]
+    },
+    {
+      "id": "ladders_are_automatic",
+      "category": "interaction",
+      "cue": "A ladder is the only route to the objective (rooftop, scaffold, construction site).",
+      "context": "On foot at the base or top of a ladder.",
+      "meaning": "Ladders in GTA V are mounted by walking into them; the character grabs on automatically. There is no dedicated ladder action, and getting off at the top is automatic too.",
+      "suggested_action": "Issue walk_to a point at or just past the ladder base (or top), and let the auto-grab happen. Verify altitude (z) in the state stream over successive cycles to confirm the climb is actually progressing rather than stalled at the base.",
+      "avoid": "Expecting a combat or cover action to work while state shows the agent mid-ladder — there is none available in that state. Route around a ladder instead of approaching it with hostiles nearby.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Not confirmed against a primary source; whether walk_to alone carries a character through a full ladder climb (versus stalling at the base and needing a fresh call) must be verified on the real machine before relying on it in a mission.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "sprint_shift_hold",
+      "category": "keybind_onfoot",
+      "cue": "Objective is more than a few tens of metres away on foot, or the agent is under fire in the open.",
+      "context": "On foot. A human player sprints by holding Left Shift, an input the agent does not have.",
+      "meaning": "walk_to takes a run parameter — that is the agent's actual sprint lever, expressed through the bridge task rather than a raw key. Stamina limits still apply in the underlying simulation regardless of how the run state was requested.",
+      "suggested_action": "Set run=true on any walk_to over roughly 30m, and always while crossing open ground under fire.",
+      "avoid": "Assuming there is a separate 'sprint' action distinct from walk_to's run parameter — there is not one.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Running/sprinting may be disabled by the underlying game in some stealth mission sections regardless of the run parameter; verify on the real machine.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad"
+      ]
+    },
+    {
+      "id": "aim_rmb_fire_lmb",
+      "category": "keybind_combat",
+      "cue": "State reports hostile peds within engagement range.",
+      "context": "On foot or during a drive-by.",
+      "meaning": "the agent has no aim key and no fire key. Manual RMB-aim/LMB-fire from the underlying game is not in his action catalog at all. His only combat lever is combat_hated_targets_around, which hands the engine's own combat AI a radius and lets it choose targets, aim and fire; he cannot aim at, or choose to fire on, one named ped, an object, a tyre, or a specific person in a crowd.",
+      "suggested_action": "Use combat_hated_targets_around with a radius sized to the situation and trust the engine's own targeting rather than trying to express a specific target. If no hostile-relationship ped is nearby, this action has nothing to do — fall back to seek_cover, flee_police, or wait as appropriate.",
+      "avoid": "Ever writing a plan step that aims or fires at a named target, an object, or a specific ped in a crowd — no such action exists. A radius sized large enough to catch a distant hostile can also catch a misclassified or newly-hostile neutral/friendly ped, so check the nearby-ped relationship field before choosing it.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The underlying game's Targeting Mode setting (Assisted/Traditional/Free Aim) affects only manual aim, which the agent never uses, so it has no effect on him.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "reload_r_context_collision",
+      "category": "keybind_combat",
+      "cue": "combat_hated_targets_around has been engaging targets for a sustained stretch.",
+      "context": "Any ongoing engagement.",
+      "meaning": "Reload is a manual R press in the underlying game — the agent has no reload action. Ammo count is also not exposed in the state stream at all, so there is nothing to observe or manage here even if he had the key.",
+      "suggested_action": "Treat ammo/reload as entirely outside the agent's control: combat_hated_targets_around is the only combat lever, and whatever the engine's own AI does about reloading happens automatically behind it. If a fight seems to be going badly, respond to the actual symptom (health dropping, no visible effect from continued engagement) with disengagement — seek_cover, flee_police, or stop — not with a reload attempt that cannot be made.",
+      "avoid": "Writing a plan step that reloads, or reasoning about 'ammo running low' from anything in the state stream — it is not there to reason about.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Whether the underlying engine's own combat AI auto-reloads is unconfirmed and irrelevant to what the agent can decide either way.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "incoming_mission_call_is_a_trigger",
+      "category": "phone",
+      "cue": "No mission blip is available for the current character and nothing else is progressing the story after finishing content.",
+      "context": "Story mode free roam. Some incoming calls are how the underlying game hands out the next objective.",
+      "meaning": "the agent has no phone action of any kind — answering, ignoring, or navigating the phone UI are all unavailable to him. Some scripted story calls answer themselves and progress automatically; others wait for a manual Answer he cannot give.",
+      "suggested_action": "Do not build any plan step around answering a call. If a mission blip fails to appear after finishing content and nothing else is progressing the story, treat it as a known capability gap, narrate it honestly, and fall back to whatever other mission blips or free-roam content is available rather than looping on the same dead end.",
+      "avoid": "Repeating the same wander/wait cycle expecting a call to resolve itself — some calls need a manual answer this harness cannot give, so waiting alone will not produce a new blip.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Which specific calls auto-answer versus wait for manual input is not documented per chapter. This is a real product gap worth flagging in STATUS.md if it blocks story progress for long stretches — it is not something to solve at the knowledge-base level.",
+      "sources": [
+        "https://gta.wiki/wiki/Mobile_Phone"
+      ]
+    },
+    {
+      "id": "contextual_prompt_is_high_value_signal",
+      "category": "contextual_prompt",
+      "cue": "A short line of help text naming a key appears on screen, typically lower-centre or lower-right (e.g. 'Press ~key~ to ...').",
+      "context": "Any time the player character is standing in or next to something interactive: a shop counter, a door, a vending machine, a mission trigger, an ATM, a ladder, a pickup, a seat.",
+      "meaning": "GTA V surfaces almost every optional interaction through a transient prompt rather than through the map. The agent does not choose which key to press for it: press_prompt_key takes no parameters and always presses whatever contextual prompt is currently active. Reading the named key is for commentary/narration accuracy only (when a rare screenshot makes it legible), never for deciding which key to send — there is only ever the one action.",
+      "suggested_action": "Treat prompt appearance as a first-class event: when state or a screenshot indicates one is up, issue press_prompt_key and decide whether taking it is the right call. Narrate what the prompt was for when a screenshot makes that legible.",
+      "avoid": "Ignoring an available interaction and continuing to wander when press_prompt_key would take it. Do not attempt to parse and select a specific key from the prompt text as if there were a choice to make.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Prompt position and phrasing vary by interaction type and are not documented precisely; confirm against real capture on the show machine. If a gamepad is connected, a captured screenshot shows a controller glyph instead of a key name.",
+      "sources": [
+        "https://gta.wiki/wiki/Heads-Up_Display",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "context_action_key_e",
+      "category": "contextual_prompt",
+      "cue": "the agent is on foot near a shop counter, door, ATM or interactive object and a contextual prompt would plausibly be showing.",
+      "context": "On foot, near an interactive object. E is the underlying game's generic Context Action key by default — background knowledge only.",
+      "meaning": "Whatever key the underlying game maps to context actions (E by default), the agent only ever reaches it through the single press_prompt_key primitive, which has no key parameter and presses whichever prompt is currently up. In a vehicle the same physical key is the horn in the underlying game, but the agent's horn goes through the dedicated horn primitive instead, so there is no risk of him honking by accident while trying to interact with something.",
+      "suggested_action": "Use press_prompt_key only when the state/context indicates a prompt is actually up (on foot, next to something interactive). If nothing happens, reposition slightly and re-evaluate rather than repeating press_prompt_key with no new evidence.",
+      "avoid": "Assuming press_prompt_key does anything when no interaction is actually available — nothing happens, and it costs a decision cycle.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Not every interaction uses E in the underlying game (some use F, some a held key), but this is irrelevant to the agent since he never chooses a key — press_prompt_key handles all of them uniformly.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "corona_marker_triggers_missions",
+      "category": "interaction",
+      "cue": "A coloured translucent cylinder or circular glow on the ground ahead, matching a blip on the radar.",
+      "context": "Free roam, standing on or driving toward a marker. Story mission triggers, activity triggers and delivery points all use these markers.",
+      "meaning": "The marker (corona) is the physical trigger volume. Walking or driving into it starts the associated content — often instantly and without confirmation, sometimes after a short prompt. Reaching the blip on the radar is not enough; the character has to be inside the marker.",
+      "suggested_action": "When the objective is 'go to the blip', navigate to the blip with drive_to/walk_to and then confirm the character has physically entered the marker. If the mission does not start, step out and back in.",
+      "avoid": "Driving into a mission marker at speed with a wanted level or a damaged mission-relevant vehicle — the mission starts anyway and inherits the mess.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some triggers require the player to be on foot, or to be a specific character, or to have a specific vehicle. Corona mechanics are widely observed but were not confirmed in a dedicated wiki article in this pass.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/wiki/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "mission_blip_letter_identifies_character",
+      "category": "hud_reading",
+      "cue": "A letter blip (M, F, T) on the map or radar.",
+      "context": "Story mode free roam. Each story mission blip carries a letter.",
+      "meaning": "The letter names the mission GIVER's initial (for example L = Lester, D = Devin, S = Steve Haines), not the protagonist who must play it — a blip's letter routinely does not match whoever gives it. Playability is determined by blip colour matching the currently controlled protagonist plus the blip being enlarged/flashing, per the map_markers domain's marker_disambiguation_algorithm, which is authoritative for this. Treating the letter as 'which character must play this' is the most common error and will make the agent wrongly refuse startable missions, or drive across the map to blips that were never going to trigger for him.",
+      "suggested_action": "Defer entirely to map_markers' disambiguation rule (colour match to the active protagonist plus enlarged/flashing) when deciding whether a blip is startable now. Do not filter candidate destinations on the letter.",
+      "avoid": "Filtering or refusing a mission blip because its letter does not match the current protagonist, or driving to a same-letter blip on the assumption that alone makes it playable.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Colour semantics and the enlarged-blip signal are documented in the map_markers domain; this item covers only what the letter itself means (the giver, not the player).",
+      "sources": [
+        "https://gta.wiki/wiki/Missions_in_GTA_V",
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "radar_bars_health_armour_ability",
+      "category": "hud_reading",
+      "cue": "The bar strip along the bottom edge of the radar.",
+      "context": "Always visible in single player.",
+      "meaning": "The bottom of the radar carries the health and armour meters, plus a third meter for the special ability that converts to an oxygen meter while underwater. The radar flashes red when the character is losing health, and heavy damage smears blood over the screen edges. The special-ability meter is pure HUD observation for the agent — he has no action that spends it, so a full or draining ability bar is informational only and should never factor into a combat or driving decision.",
+      "suggested_action": "Cross-check the numeric health/armour in the state stream against these visual cues. Radar flashing red plus falling health means the agent is being hit RIGHT NOW by something, even if the shooter is not in the nearby-ped list — seek cover first, identify second.",
+      "avoid": "Waiting to identify the attacker before taking cover. In GTA V health regenerates only up to a threshold; the rest needs a health/armour source or a hospital trip, neither of which is a lever the agent currently has.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Underwater, the same third bar means oxygen, so a draining third bar underwater is a drowning warning, not an (unusable) ability warning.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/wiki/Heads-Up_Display",
+        "https://gta.wiki/wiki/Special_Ability"
+      ]
+    },
+    {
+      "id": "radar_target_circle_altitude_arrow",
+      "category": "hud_reading",
+      "cue": "A coloured circle blip on the radar with a small arrow inside it.",
+      "context": "Navigating to any objective or target.",
+      "meaning": "The arrow inside the blip means the target is at a DIFFERENT ALTITUDE than the agent — up arrow for above, down for below. This is why a drive_to can report 'arrived' at the right ground coordinates while the objective is on a rooftop, in a basement car park, or on a different freeway level.",
+      "suggested_action": "If a navigation task reaches the map position but the objective is not reached, check the blip's altitude arrow and look for the route up or down (ramp, ladder, lift, freeway on-ramp) rather than re-issuing the same drive_to.",
+      "avoid": "Circling the ground-level position repeatedly. Repeated arrival-without-completion almost always means an altitude mismatch.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Interiors show a floor plan on the radar instead, which changes what the blip is relative to.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "radar_interior_floorplan",
+      "category": "hud_reading",
+      "cue": "The radar switches from street map to an interior floor plan.",
+      "context": "The character has entered an accessible building.",
+      "meaning": "GTA V draws the interior layout on the radar when inside. This is a reliable signal that the agent is indoors — useful because indoor state changes what is sensible: vehicles are unreachable, police behave differently, and cover geometry is tight.",
+      "suggested_action": "Use the floor-plan switch as an 'am I indoors' check. Indoors, drop vehicle-related plans and prefer walk_to and seek_cover.",
+      "avoid": "Issuing drive_to or enter_nearest_vehicle while indoors — the path resolution will fail or send the character on a long walk back out.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Only some buildings are accessible and have floor plans; many shops are marked but do not change the radar.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "police_blip_vision_cone",
+      "category": "hud_reading",
+      "cue": "Police blips on the radar showing a field-of-vision cone.",
+      "context": "Wanted level active, police searching rather than actively chasing.",
+      "meaning": "When police lose sight of the player, their radar blips gain a vision cone showing where each officer is looking. Staying out of every cone until the search timer expires is how the wanted level clears.",
+      "suggested_action": "Once cones appear, prefer stop or a slow, deliberate walk_to/wander_drive over sprinting or continuing combat. Route away using geometry that breaks line of sight to the cones, then hold via stop or wait until the wanted level clears.",
+      "avoid": "Continuing flee_police, combat_hated_targets_around, or a fast wander_drive while cones are up — re-entering a cone resets the search and the stars come back solid.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Higher wanted levels add helicopters whose cones sweep from above and are much harder to avoid; indoors and tunnels break helicopter sight.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar"
+      ]
+    },
+    {
+      "id": "pause_key_p_or_esc",
+      "category": "menu_state",
+      "cue": "The state stream stops updating or freezes unexpectedly.",
+      "context": "Story mode. P/Esc open the pause menu in the underlying game — the agent has no menu action and cannot open, navigate, or close it.",
+      "meaning": "the agent cannot cause the pause menu to open himself — he has no P/Esc or menu action at all — so a genuine freeze in the state stream was not something his own decisions did. It means either an external event (RDP reconnect, overlay, crash dialog, a human at the machine) or an actual game/bridge hang.",
+      "suggested_action": "If the state stream freezes, stop issuing further tasks — they will queue against a paused or hung game. Let the harness's own recovery/watchdog layer handle detection and recovery; when the stream resumes, re-read full state before continuing rather than assuming anything is where it was.",
+      "avoid": "Assuming the agent opened a menu himself and needs to 'close' it — he has no way to do either, so troubleshooting should start from 'what external thing paused this,' not from a menu-navigation angle.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "This is a story-mode-only concern; pause behaves differently in GTA Online, which is irrelevant since the bridge refuses to run in a network session.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "distinguish_paused_menu_live",
+      "category": "menu_state",
+      "cue": "The state stream stops updating, or slows dramatically, or keeps updating while a UI is drawn.",
+      "context": "Every decision cycle. The agent must know which state the game is in before acting.",
+      "meaning": "Three distinct states exist, none of which the agent can trigger himself since he has no menu, phone, or weapon-wheel action. PAUSED (pause menu / map screen): world frozen, state stream static — only an external pause caused this. SLOWED (weapon wheel held in the underlying game): world moving slowly — this can only happen from an external cause (a human at the machine, a scripted moment), since the agent has no way to open or hold a weapon wheel. LIVE-WITH-OVERLAY (phone / radio wheel / interaction menu up): world running at full speed while a UI is drawn — again nothing the agent can open himself, so if this state appears he is nonetheless fully exposed to danger, because the world never stopped. Cutscenes are a fourth state where all task issuing is ignored.",
+      "suggested_action": "Derive the actual state from evidence every cycle: frozen positions across consecutive frames = paused (external); slow but non-zero motion = an externally-opened wheel; normal-speed motion with a UI flag = overlay, and the agent is exposed — prioritize seek_cover or stop if any threat is nearby. Never issue a task meant to 'close' any of these; none of them are his to open or close.",
+      "avoid": "Treating a live-with-overlay state as safe. That assumption gets the agent shot or crashed, because the world never stopped and there is no action available to dismiss the overlay himself.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Exact per-menu pause behaviour was not confirmed against a single authoritative source; the weapon-wheel slow-time effect and single-player pause are confirmed on gta.wiki, the phone's non-pausing behaviour is well established but secondary-sourced.",
+      "sources": [
+        "https://gta.wiki/wiki/Weapon_Wheel",
+        "https://gta.wiki/wiki/Mobile_Phone",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "map_zoom_z_and_pause_map",
+      "category": "menu_state",
+      "cue": "The apparent distance from the agent to a blip on the radar seems to change between decision cycles with no matching change in his actual position.",
+      "context": "Any time the radar (not the bridge's own coordinates) is read for navigation planning.",
+      "meaning": "No PC keybind for manually zooming the radar/minimap is documented anywhere checked (gta.wiki's control page lists none); the one zoom control gta.wiki does document — D-Pad down — is a controller-only input on a console, and the agent has neither a gamepad nor any zoom-related primitive. There is also no reachable full pause-map screen for the agent, since he has no menu action at all. Whatever drives the radar's apparent scale, it is not something the agent can set or rely on frame-to-frame.",
+      "suggested_action": "Do all distance and route-planning reasoning from the bridge's own coordinates (drive_to/walk_to targets, nearby-entity positions), never from how far away something looks on the radar.",
+      "avoid": "Treating a blip that looks closer or farther between frames as a real change in distance, or building any plan step around opening a map screen — neither the zoom nor the full map is reachable by the agent.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Whether the radar's apparent scale changes with speed, waypoint distance, or something else was not confirmed by an authoritative source; it does not matter for the suggested action either way.",
+      "sources": [
+        "https://gta.wiki/wiki/Radar",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "cutscene_skip_read_the_prompt",
+      "category": "menu_state",
+      "cue": "Cutscene flag is true in the state stream; a small skip prompt appears, usually bottom of screen.",
+      "context": "During a skippable story cutscene in story mode.",
+      "meaning": "Gameplay input is ignored during a cutscene; the only meaningful input is whatever the skip prompt names. Community reports list several different keys (Enter, Space, E, Esc, LMB) for different cutscenes, which is consistent with the underlying game showing an explicit contextual prompt each time rather than one fixed key. Some cutscenes are not skippable at all.",
+      "suggested_action": "When cutscene==true, suspend all task issuing. If a skip prompt is showing, use press_prompt_key rather than trying to send one of the reported keys directly — it is the only prompt-press action the agent has, and it presses whatever is actually active. As a show decision, usually let story cutscenes play through — they are the narrative and viewers want them; use press_prompt_key to skip only a long repeat after a mission retry.",
+      "avoid": "Do not attempt Esc as a skip — it may open the pause menu instead (which the agent then cannot close, having no menu action), stopping the stream dead. Also avoid issuing movement/combat tasks during a cutscene; they queue up and fire unpredictably when control returns.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "No authoritative source pins a single skip key; community answers list five different keys. Whether the skip is actually exposed as a press_prompt_key-compatible contextual prompt, versus a fixed non-contextual key, is unverified and should be captured on the real machine. Some cutscenes (prologue, tutorial) cannot be skipped at all.",
+      "sources": [
+        "https://steamcommunity.com/app/271590/discussions/0/611703709829794667/",
+        "https://www.sportskeeda.com/gta/gta-v-how-skip-cutscenes-story-mode"
+      ]
+    },
+    {
+      "id": "mission_failed_screen_options",
+      "category": "mission_flow",
+      "cue": "MISSION FAILED text with a reason line, and a modal set of options (Retry/Restart, Exit Mission, sometimes Skip).",
+      "context": "Immediately after any story mission fails (death, arrest, objective lost, ally killed, timer expired).",
+      "meaning": "This is a modal menu, and the agent has no menu action of any kind — he cannot read or choose Retry/Exit/Skip himself. Dismissing this screen is infrastructure's job: the harness's recovery layer (the blocking-screen watchdog, which sends the fixed, non-rebindable Enter/Esc keys) handles it, not a brain-chosen action.",
+      "suggested_action": "Recognize this state from the state stream (or an occasional screenshot) and stop issuing tasks while it is up — narrate the failure honestly, it is good content. Wait for the recovery layer to resolve it, then treat whatever comes back as a fresh state: re-read position, vehicle, health, armour, and objective before resuming any plan.",
+      "avoid": "Trying to model or plan a specific Retry/Exit/Skip choice as a brain-level action — that decision is made by infra, not by the agent's decision loop. Do not assume a specific outcome (e.g. that it always retries) without checking the state that actually comes back.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Which fail-screen variant appears, and whether Tab is a restart key on some of them, is a detail for the recovery watchdog's implementation, not for anything the agent decides.",
+      "sources": [
+        "https://github.com/drunderscore/GTA-Research/blob/master/Mission-Fail-Retry-Research.md",
+        "https://raw.githubusercontent.com/drunderscore/GTA-Research/master/Mission-Fail-Retry-Research.md"
+      ]
+    },
+    {
+      "id": "mission_skip_after_repeated_failure",
+      "category": "mission_flow",
+      "cue": "A Skip option appears on the fail screen that was not there on earlier attempts.",
+      "context": "Story mode, after failing the same mission section several times.",
+      "meaning": "GTA V's own fail screen sometimes offers to skip a repeatedly-failed mission section, recording a bronze medal rather than a real completion. Whether to take that skip is decided at the recovery-layer/harness-policy level, since only infrastructure can interact with the fail-screen menu at all — it is not reachable from the agent's own decision loop.",
+      "suggested_action": "Nothing for the agent to do here directly. If STATUS.md or the runbook defines a harness-level skip policy, treat any resulting story jump as a fresh state — re-read position, vehicle, health, objective — rather than expecting continuity with whatever plan was running before the repeated failures.",
+      "avoid": "Building a brain-level plan step around choosing to skip or not — that choice sits outside the agent's action catalog entirely.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The 'three failures' threshold is reported by secondary sources only; the technical source ties the skip option to checkpoint metadata instead. Irrelevant to the agent either way, since he cannot act on either condition.",
+      "sources": [
+        "https://github.com/drunderscore/GTA-Research/blob/master/Mission-Fail-Retry-Research.md",
+        "https://gta.wiki/wiki/Missions_in_GTA_V"
+      ]
+    },
+    {
+      "id": "checkpoint_retry_restores_state",
+      "category": "mission_flow",
+      "cue": "Retry chosen (by the recovery layer) on the fail screen; the world reloads at an earlier point in the mission.",
+      "context": "Any mission with checkpoints (most GTA V story missions have them).",
+      "meaning": "Retry restores the mission to the checkpoint active at the moment of failure — position, mission script branch, and mission-supplied equipment. The agent's own pre-mission state is not what comes back; the mission's checkpoint state does.",
+      "suggested_action": "After every retry, discard cached assumptions and re-read full state: position, vehicle, health, armour, and objective blip. Do not resume the plan that was in flight when the failure happened.",
+      "avoid": "Continuing the previous plan step after a retry. The world is at an earlier point and the old plan's preconditions are gone.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Some missions have no mid-mission checkpoint and restart from the beginning; some restore a cutscene rather than gameplay.",
+      "sources": [
+        "https://github.com/drunderscore/GTA-Research/blob/master/Mission-Fail-Retry-Research.md"
+      ]
+    },
+    {
+      "id": "ammunation_buy_menu",
+      "category": "interaction",
+      "cue": "Ammu-Nation blip on the map.",
+      "context": "Story mode, on foot, at an Ammu-Nation counter.",
+      "meaning": "Ammu-Nation sells firearms, ammunition, armour tiers and weapon modifications through a shop menu — a menu the agent has no action to navigate, since he has no menu capability at all. Reaching the counter is possible via walk_to, and a press_prompt_key call might open the counter interaction, but selecting or buying a specific item inside that menu is not reachable.",
+      "suggested_action": "Do not plan a shopping trip as a way to solve low ammo or armour — there is no way for the agent to complete a purchase. Treat cash and combat-readiness gaps as capability limits for now, and flag a buy-menu primitive as a possible future harness capability rather than writing plans that depend on one existing today.",
+      "avoid": "Routing the agent to an Ammu-Nation expecting armour or ammo to result — nothing will happen past, at best, opening a menu he cannot use.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Stock is gated by story progress in the underlying game; irrelevant until buy-menu navigation is an available action.",
+      "sources": [
+        "https://gta.wiki/wiki/Ammu-Nation_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "aiming_inside_a_store_is_a_commit",
+      "category": "interaction",
+      "cue": "the agent is inside Ammu-Nation, or any shop with a clerk.",
+      "context": "Inside Ammu-Nation specifically, and shops with clerks generally.",
+      "meaning": "Ammu-Nation clerks are armed and become hostile the instant a weapon is pointed anywhere in the store, in the underlying game. The agent never aims deliberately, but combat_hated_targets_around could still put an equipped weapon into a firing stance against any hostile-relationship target within its radius — and a misclassified or newly-hostile ped inside the store would trigger exactly this clerk reaction.",
+      "suggested_action": "Never issue combat_hated_targets_around while state shows the agent inside an Ammu-Nation (or any shop with a clerk). If a threat appears while inside, prefer walking out first (walk_to) or seek_cover, rather than engaging indoors.",
+      "avoid": "Treating any store as a place to engage a threat, or as a robbable location — an Ammu-Nation clerk fights back immediately, and any resulting wanted level derails whatever else was queued.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Ammu-Nation clerk behaviour is directly sourced for GTA V. Vice City's escalating store-robbery payout/star mechanics are a different game and must not be quoted for GTA V.",
+      "sources": [
+        "https://gta.wiki/wiki/Ammu-Nation_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "atm_story_mode_is_read_only",
+      "category": "interaction",
+      "cue": "An ATM blip or an ATM prompt on the street.",
+      "context": "Story mode, on foot at an ATM.",
+      "meaning": "In story mode an ATM lets the player check their balance and transaction history. Deposit/withdraw banking is a GTA Online feature and does not apply. The same information is reachable through each character's bank via the phone or a laptop, which the agent cannot use anyway.",
+      "suggested_action": "Do not build plans around ATMs. If cash matters, spend it at shops or earn it; there is nothing to bank in story mode.",
+      "avoid": "Detouring to an ATM 'to deposit money before a risky mission' — that is Online logic and wastes show time.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "There are ambient random events where an NPC is robbed at an ATM and the player can chase the thief — a legitimate opportunistic side beat, reachable through combat_hated_targets_around/follow_entity like any other roaming hostile.",
+      "sources": [
+        "https://gta.wiki/wiki/ATM"
+      ]
+    },
+    {
+      "id": "vehicle_horn_key_disputed",
+      "category": "keybind_vehicle",
+      "cue": "the agent wants a horn honk as a show beat, or to clear traffic ahead.",
+      "context": "Seated in a land vehicle.",
+      "meaning": "The harness exposes a dedicated horn primitive — the agent does not need to know or guess the underlying game's raw horn key, and the source disagreement over whether that raw key is E, G or Left Shift no longer matters to him at all.",
+      "suggested_action": "Call the horn primitive directly whenever a honk is wanted. Use it sparingly as commentary punctuation — good character work when the agent is stuck behind traffic.",
+      "avoid": "Honking at police vehicles or near a stealth objective — noise draws attention, regardless of which primitive triggered it.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Whether the horn primitive also cycles an emergency-vehicle siren the way the underlying raw key reportedly does is unverified; check on the real machine.",
+      "sources": [
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "headlights_h",
+      "category": "keybind_vehicle",
+      "cue": "In-game time is night or the state stream reports low ambient light, and the agent is driving.",
+      "context": "Seated in a land vehicle. Headlights are not automatic on every vehicle in the underlying game.",
+      "meaning": "There is no headlight action or primitive in the harness's catalog — the agent cannot toggle lights himself. Driving at night with lights off (if that is a given vehicle's default state) makes the road harder to read for both the agent's vision pipeline and viewers, and raises crash risk.",
+      "suggested_action": "Treat reduced night visibility as a driving hazard to compensate for with the levers the agent does have — a lower speed_mps and a more cautious style in drive_to, more frequent brake_tap — not as something to fix with a control that does not exist.",
+      "avoid": "Planning around 'turn the headlights on' as an action step — it is not available.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Whether the underlying game or the bridge already forces headlights on automatically at night for AI-driven tasks is unverified and worth checking on the real machine — if it does, this item is moot.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "look_behind_c",
+      "category": "keybind_vehicle",
+      "cue": "Being pursued — police or hostile vehicles behind the agent.",
+      "context": "The harness's look_around primitive is the available lever here; the underlying game's own held-C look-behind is not something the agent can send directly.",
+      "meaning": "look_around is the closest thing the agent has to checking his six during a pursuit. Its exact camera behaviour (whether it swings behind, orbits, or something else) is a harness implementation detail, not documented by any GTA V control source, and should be confirmed against the real primitive rather than assumed from the underlying game's C key.",
+      "suggested_action": "During flee_police or any chase, use look_around briefly to gather visual context, then return to the structured nearby-entity data (the vehicle/ped list with distances) for the actual decision — that data is more reliable than anything read visually.",
+      "avoid": "Relying on look_around as the primary source of pursuer information instead of the state stream's nearby-vehicle list, or using it as a substitute for actually checking distances.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "look_around's precise effect needs confirming against the harness implementation itself, since it is a harness primitive rather than a raw game key.",
+      "sources": [
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a",
+        "https://www.bisecthosting.com/blog/gta-v-controls-guide-pc-playstation-xbox-keyboard-mouse-gamepad"
+      ]
+    },
+    {
+      "id": "radio_control_keys",
+      "category": "keybind_vehicle",
+      "cue": "the agent is driving and the radio is off, or on a station that clashes with the show.",
+      "context": "Seated in a vehicle. The harness exposes a dedicated radio(station) primitive.",
+      "meaning": "the agent does not need any raw key (Q held, period/comma in the underlying game) to control the radio — the radio primitive takes the station directly, sidestepping the underlying game's held-wheel-vs-live-HUD distinction entirely.",
+      "suggested_action": "Call radio(station) directly to change station; there is no need to open any wheel. Consider muting the in-game radio at the OS/game-settings level for the stream to avoid licensed-music issues on Twitch, and let the agent's commentary carry the audio instead.",
+      "avoid": "Assuming a raw Q/period/comma keypress is available or needed — none of that is part of the action catalog.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Which stations are selectable via the primitive's station parameter, and its exact value format, should be confirmed against the harness/bridge implementation rather than gta.wiki.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "handbrake_for_control_not_stopping",
+      "category": "keybind_vehicle",
+      "cue": "A sharp turn ahead at speed, or a need to stop precisely inside a mission marker.",
+      "context": "Seated in a land vehicle. The underlying game's handbrake is a held Space — an input the agent does not have directly.",
+      "meaning": "the agent's driving levers are the drive_to task (with its own speed_mps and style parameters, which govern cornering aggressiveness) plus the brake_tap and swerve primitives. There is no raw handbrake action; tight cornering and precise stops are expressed through drive_to's style/speed rather than a manual handbrake slide.",
+      "suggested_action": "For a sharp corner or an overshoot risk, lower speed_mps ahead of the turn and use brake_tap for a controlled stop; reserve swerve for a genuine last-second avoidance, not as a handbrake substitute.",
+      "avoid": "Planning a step that says 'handbrake' or 'Space' directly — that lever is not available. Do not expect swerve to replicate a handbrake slide; treat it as a distinct avoidance manoeuvre.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Exact behaviour of drive_to's style parameter under sharp cornering is a bridge implementation detail, not documented in any GTA V control source, and should be confirmed against the bridge code / CONTRACTS.md.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://www.gtaboom.com/gta-5-controls-pc-keyboard-playstation-and-xbox-ec1a"
+      ]
+    },
+    {
+      "id": "prefer_bridge_tasks_over_raw_keys",
+      "category": "harness_input",
+      "cue": "Any decision about what the agent can possibly do.",
+      "context": "Always. The action catalog is closed: 11 bridge tasks (drive_to, walk_to, enter_nearest_vehicle, exit_vehicle, wander_drive, flee_police, combat_hated_targets_around, seek_cover, follow_entity, set_waypoint, stop) plus 8 harness primitives (look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn). That is the entire vocabulary; nothing else can be sent to the game.",
+      "meaning": "High-level tasks run through the game's own AI systems: they path, they handle doors and seats and cover selection, and they survive window-focus loss and frame-time variation far better than any manual input would. There is no raw-key fallback for anything not in this list — no aim, no fire, no weapon selection, no special ability, no crouch, no melee, no jump/vault/climb/swim, no character switch, no phone, no menus, no camera control, no headlights. A large amount of publicly documented GTA V control knowledge describes inputs a human player has and the agent does not; this file keeps that knowledge only where it explains what the game will do TO the agent (a clerk fighting back, a marker triggering a mission), never as something to press.",
+      "suggested_action": "Before trusting any suggested_action anywhere in this knowledge base, check it against the 19-item catalog above. If it names an action outside that list, it is wrong regardless of how confidently it reads — replace it with the nearest real bridge task/primitive, or with 'no lever available, narrate only / use the recovery ladder.'",
+      "avoid": "Trusting a suggested_action that names Caps Lock, a weapon number key, RMB/LMB, a menu key, the phone, or a character-switch key — none of these can be sent. Rebuilding driving or combat out of anything not in the catalog will also look worse on stream than the game's own AI, and simply cannot be executed.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None — the catalog is contractually closed. Adding a primitive requires a CONTRACTS.md version bump, not a knowledge-base edit.",
+      "sources": [
+        "harness/wasted_harness/brain/schemas.py (ACTION_TYPES, BRIDGE_TASKS, PRIMITIVES)",
+        "docs/CONTRACTS.md §1-2"
+      ]
+    },
+    {
+      "id": "story_mode_only_online_controls_do_not_apply",
+      "category": "harness_input",
+      "cue": "A source or a memory suggests a control or menu action that involves lobbies, sessions, passive mode, CEO/MC menus, or a full Interaction Menu inventory.",
+      "context": "Every time control knowledge is applied. The bridge refuses to run if a network session is active.",
+      "meaning": "A large fraction of publicly documented GTA V control and menu behaviour is GTA Online behaviour: pause not freezing the game, the deep Interaction Menu, quick-join/quick-job flows, ATM deposits, cutscene-skip voting. None of it exists or behaves the same in story mode. Separately — regardless of Online vs Story — a large share of single-player control knowledge also does not apply to the agent specifically, because his action catalog only exposes bridge tasks and the 8 named primitives; manual aim, weapon selection, special ability, phone and menus are absent for him even though a human playing the same Story Mode session would have them.",
+      "suggested_action": "Filter any control instruction through two questions: does this exist in story mode at all, and is it something the agent's action catalog can actually reach. Discard rather than adapt if either answer is no.",
+      "avoid": "Quoting Online mechanics, or a manual control the agent cannot execute, in commentary as if they were live options — it is wrong and viewers will call it out.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None. This is a hard project constraint as well as a factual one.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://gta.wiki/wiki/ATM"
+      ]
+    }
+  ],
+  "notes": "WHAT I COULD NOT VERIFY\n\n1. The exact mission-failed screen keys. The task brief proposed \"Retry/Restart = Enter, Skip = Tab\". I could NOT confirm this, and it is now moot for the agent's own decisions regardless: the fail screen is a modal menu he has no action to navigate, so dismissing it is the recovery watchdog's job (fixed Enter/Esc), not a brain-chosen action. The only technical source (drunderscore/GTA-Research) documents two fail-screen states and mentions \"Tab to restart the mission\" on the second state for a small set of missions (Prologue, Franklin & Lamar, Jewelry Store Heist, Mr. Philips), plus on-screen options Restart, Exit Mission and Skip with confirmation dialogs. That detail now belongs to the recovery watchdog's implementation, not this knowledge base.\n\n2. The cutscene skip key. Community answers list five different keys (Esc, Enter, Space, E, LMB). No authoritative source. Esc is flagged as actively risky (may open the pause menu, which the agent cannot then close). The item now routes the skip through press_prompt_key rather than a named raw key; whether the skip is actually exposed as a contextual prompt is unverified and needs live capture.\n\n3. The \"skip after 3 failures\" threshold. Widely reported by secondary sources, but the technical source ties the skip option to whether the checkpoint is marked final, not to a failure count. Flagged as unverified, and moot for the agent's own decisions since the skip choice is infra-level.\n\n4. pcgamingwiki.com returned HTTP 403 to this fetcher, so I could not verify PC-specific input behaviour: whether the game accepts synthetic input, whether it pauses when unfocused, mouse acceleration/smoothing, and first-person/FOV details. gta.fandom.com returns 402 as stated in the brief and was skipped.\n\n5. gamepressure.com's \"PC keybinds\" page mixes console face-button mappings into its PC column and was discarded entirely, not cited.\n\n6. Ladder mechanics, elevators, and door interactions have no dedicated wiki coverage found. The ladder item is marked low confidence; no speculative items were written for elevators or specific door types.\n\n7. GTA V store-robbery specifics. gta.wiki's \"Store Robberies\" article is about Vice City, not GTA V; its payout/star numbers are NOT quoted here. The only GTA V-specific hold-up fact sourced is that pointing a weapon inside an Ammu-Nation makes the clerk pull a shotgun and fight back.\n\n8. Whether GTA V's radar zoom scales automatically with speed/waypoint distance (as one critic pass asserted) could not be confirmed on gta.wiki — its Radar article documents only a controller D-Pad-down zoom-out, and its Controls page lists no PC keybind for radar zoom at all. Either way there is no PC key and no harness primitive for it, so the item now stays deliberately agnostic about the mechanism and only asserts what matters operationally: do distance reasoning from bridge coordinates, not the radar.\n\nSOURCE DISAGREEMENTS (all flagged inline, and mostly moot now that raw keys are not the agent's problem)\n- Vehicle horn's underlying raw key (E vs G vs Left Shift): irrelevant now that the agent calls the dedicated horn primitive.\n- Vehicle cinematic camera and look-behind key identity (R vs C): the cinematic-camera item was deleted outright since the agent has no camera-toggle action or primitive; look-behind now routes through look_around instead of a raw key.\n- Radio wheel key (Q held) vs gta.wiki's `.`/`,` station keys: irrelevant now that the agent calls the dedicated radio primitive.\n\nWHAT IS SOLID (three or more independent sources, or a direct gta.wiki article) — background/narration knowledge about the underlying game, even where the agent has no matching action\nEnter/exit vehicle F, cover Q, sprint Left Shift, aim RMB/fire LMB, weapon wheel Tab, stealth Left Ctrl, headlights H, context action E, phone Up Arrow, character selector Left Alt — all confirmed as real Story Mode mechanics for a human player, and all now framed in this file as things the agent cannot do rather than as levers. Also solid: radar bar layout and the altitude arrow inside target blips, police vision cones on the radar, interior floor plans, cover blind-fire/peek/corner-move behaviour (mechanic confirmed, action unavailable), and Ammu-Nation stock/armour/three-reserve-magazines plus the armed-clerk behaviour.\n\nDESIGN NOTE ON THIS REPAIR PASS (2026-09-02)\nA critic review found that this domain, and several others, had been written as if the agent could send arbitrary raw keypresses (F, Q, Space, Shift, Ctrl, RMB/LMB, R, O, G, Tab, number keys, Caps Lock, Alt, F5-7, Up Arrow, P/Esc, Z, M, C, V) — none of which exist in the harness's actual closed action catalog (CONTRACTS.md §1-2, brain/schemas.py ACTION_TYPES: 11 bridge tasks + 8 primitives, confirmed against the frozen CAPABILITIES.md brief). This pass rewrote or deleted every item whose suggested_action depended on an ability the agent does not have, mapping each onto a real bridge task/primitive where one exists (walk_to's run param for sprint, horn/radio primitives for horn/radio, look_around for look-behind, seek_cover for cover, combat_hated_targets_around for all engagement) or onto honest 'no lever, narrate only / recovery ladder' guidance where none does (reload, phone, menus, fail-screen choices, shopping, camera, headlights, weapon selection, special ability, character switch, melee, crouch, jump/vault/climb). Thirteen items were deleted outright as unsalvageable because they described an ability the agent has no path to at all and carried no residual narration/observation value once the raw-key framing was removed: stealth_mode_left_ctrl, melee_light_r_heavy_o_dodge_space, throwable_key_g, weapon_wheel_tab_slows_time, weapon_number_keys_direct_select, special_ability_capslock, character_switch_alt_and_fkeys, phone_up_arrow_does_not_pause, phone_contacts_start_content, interaction_menu_m_low_value_in_story, cinematic_camera_is_a_trap, change_camera_view_v, and space_is_three_different_actions (superseded by the rewritten climb_vault and handbrake items). special_ability_capslock's deletion also resolves this pass's central cross-domain contradiction (other domains built survival policy on Caps Lock; per CAPABILITIES.md that key does not exist for the agent at all) from this domain's side. mission_blip_letter_identifies_character was corrected to stop asserting that a blip's letter identifies the protagonist (it names the mission giver) and now defers to the map_markers domain's colour+size disambiguation rule, per critic finding. All remaining raw-key facts are kept strictly as background/narration knowledge, explicitly labeled as things the agent cannot execute himself."
+}

@@ -1,4 +1,5 @@
 import type { SupabaseClient } from "@supabase/supabase-js";
+import { DECISION_COLUMNS, EVENT_COLUMNS, STATS_COLUMNS } from "@/lib/columns";
 import { createServerSupabase } from "@/lib/supabase/server";
 import {
   type ClipRow,
@@ -78,13 +79,13 @@ async function selectRows<T>(
 
 export function fetchDecisions(limit = FEED_DECISION_LIMIT): Promise<Fetched<DecisionRow>> {
   return selectRows<DecisionRow>("decisions", (c) =>
-    c.from("decisions").select("*").order("id", { ascending: false }).limit(limit)
+    c.from("decisions").select(DECISION_COLUMNS).order("id", { ascending: false }).limit(limit)
   );
 }
 
 export function fetchEvents(limit = FEED_EVENT_LIMIT): Promise<Fetched<EventRow>> {
   return selectRows<EventRow>("events", (c) =>
-    c.from("events").select("*").order("id", { ascending: false }).limit(limit)
+    c.from("events").select(EVENT_COLUMNS).order("id", { ascending: false }).limit(limit)
   );
 }
 
@@ -93,7 +94,7 @@ export async function fetchStats(): Promise<Fetched<StatsRow>> {
   return selectRows<StatsRow>("stats", (c) =>
     c
       .from("stats")
-      .select("*")
+      .select(STATS_COLUMNS)
       .order("heartbeat_at", { ascending: false, nullsFirst: false })
       .limit(1)
   );
@@ -135,49 +136,4 @@ export async function resolveStreamConfig(): Promise<StreamConfig | null> {
     return { provider, channel, video_id: null };
   }
   return null;
-}
-
-export interface TokensToday {
-  input: number;
-  output: number;
-  cached: number;
-}
-
-// PostgREST rejects aggregate functions unless the project has `db-aggregates-enabled` turned on
-// (error PGRST123). That verdict cannot change within a request, so once seen it is remembered
-// for the life of the server process rather than paying a failed round trip on every render.
-// Enabling aggregates on the Supabase project turns the number on with no code change.
-const AGGREGATES_DISABLED_CODE = "PGRST123";
-let aggregatesDisabled = false;
-
-/**
- * Sum of decision tokens since UTC midnight via a PostgREST aggregate. Aggregates may be
- * disabled on a given Supabase project; in that case (or offline) this resolves null and the
- * UI shows an honest em dash instead of a number.
- */
-export async function fetchTokensToday(): Promise<TokensToday | null> {
-  if (aggregatesDisabled) return null;
-  const midnightUtc = new Date();
-  midnightUtc.setUTCHours(0, 0, 0, 0);
-  const fetched = await selectRows<{
-    input: number | null;
-    output: number | null;
-    cached: number | null;
-  }>("tokens_today", (c) =>
-    c
-      .from("decisions")
-      .select("input:input_tokens.sum(), output:output_tokens.sum(), cached:cached_tokens.sum()")
-      .gte("ts", midnightUtc.toISOString())
-  );
-  if (!fetched.ok) {
-    if (fetched.code === AGGREGATES_DISABLED_CODE) aggregatesDisabled = true;
-    return null;
-  }
-  if (fetched.rows.length === 0) return null;
-  const row = fetched.rows[0];
-  return {
-    input: row.input ?? 0,
-    output: row.output ?? 0,
-    cached: row.cached ?? 0,
-  };
 }

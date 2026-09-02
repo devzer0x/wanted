@@ -20,7 +20,10 @@ _TACTICAL_FILES = (
     "action_catalog.md",
     "driving_moods.md",
     "world.md",
+    "hud_legend.md",
+    "mechanics.md",
     "situations.md",
+    "thinking.md",
     "commentary_style.md",
     "decision_guide.md",
 )
@@ -31,6 +34,9 @@ _DIRECTOR_FILES = (
     "action_catalog.md",
     "driving_moods.md",
     "world.md",
+    "hud_legend.md",
+    "mechanics.md",
+    "thinking.md",
     "commentary_style.md",
     "director.md",
 )

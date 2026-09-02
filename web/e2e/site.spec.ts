@@ -149,6 +149,63 @@ test("the feed keeps its AI disclosure while paused @current-build", async ({ pa
   await expect(status).toContainText(/paused/i);
 });
 
+// The public site does not publish what the agent's brain costs to run. Asserting on visible text
+// alone would pass while the numbers still rode along inside the RSC payload, readable in
+// view-source — so this checks the served bytes too. The site's queries name their columns
+// (src/lib/columns.ts) precisely so the spend columns never reach the browser.
+test("the live page publishes no running-cost figures @current-build", async ({ page, request }) => {
+  await page.goto("/");
+  await expect(page.getByLabel("Brain running costs")).toHaveCount(0);
+  await expect(page.getByText(/brain bill/i)).toHaveCount(0);
+  await expect(page.getByText(/per hour/i)).toHaveCount(0);
+
+  // The counters row carries session facts, never money.
+  const labels = await page
+    .locator('section[aria-label="Session counters"] span.ticker')
+    .allTextContents();
+  expect(labels.map((l) => l.trim())).toEqual(["Wasted", "Busted", "Missions", "Hours"]);
+
+  const html = await (await request.get("/")).text();
+  for (const column of ["cost_per_hour_usd", "cost_today_usd", "cost_usd", "cached_tokens"]) {
+    expect(html, `${column} must not be shipped to the browser`).not.toContain(column);
+  }
+});
+
+test("the the agent page does not advertise running costs @current-build", async ({ request }) => {
+  const html = await (await request.get("/agent")).text();
+  expect(html).not.toMatch(/cost/i);
+  expect(html).not.toMatch(/the meter is running/i);
+});
+
+// The feed and the offline banner show relative ages, which are a lie the moment they stop
+// moving: a page left open must not still claim "12s ago" an hour later. The browser clock is
+// moved forward (no row is invented or altered — the same real row is read from a later moment)
+// and the rendered age must follow without a reload. setSystemTime jumps without firing the
+// intervening timers, so this costs one tick, not a day of them.
+test("relative ages keep ticking without a reload @current-build", async ({ page }) => {
+  await page.clock.install({ time: new Date() });
+  await page.goto("/");
+
+  const stamps = page.locator('[data-testid="feed-decision"] time, [data-testid="feed-event"] time');
+  test.skip((await stamps.count()) === 0, "no decision or event rows in this database yet");
+
+  await page.clock.runFor(1200);
+  const datetime = await stamps.first().getAttribute("datetime");
+  const stamp = page.locator(`time[datetime="${datetime}"]`).first();
+  const before = (await stamp.textContent())?.trim();
+
+  // +24 h changes the label from any starting age (s→h, m→h/d, h→d, d→d+1).
+  await page.clock.setSystemTime(new Date(Date.now() + 24 * 60 * 60 * 1000));
+  await page.clock.runFor(1200);
+
+  expect((await stamp.textContent())?.trim(), "the age must advance with the clock").not.toBe(before);
+
+  // A heartbeat a day old is unambiguously stale, so the banner must now be up and saying so.
+  const banner = page.getByTestId("offline-banner");
+  await expect(banner).toBeVisible();
+  await expect(banner).toContainText(/off air|no data/i);
+});
+
 test("stream panel reports exactly one honest state @current-build", async ({ page }) => {
   await page.goto("/");
   const chip = page.getByTestId("stream-status");

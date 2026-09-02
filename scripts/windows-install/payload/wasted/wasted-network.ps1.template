@@ -1,0 +1,121 @@
+<#
+.SYNOPSIS
+    Applies Hetzner's static network configuration to the physical NIC.
+
+.DESCRIPTION
+    Hetzner dedicated servers do NOT run DHCP. An unattended Windows install therefore comes up
+    with no usable address unless the configuration is applied explicitly.
+
+    This cannot be done in autounattend.xml, because Windows binds IP configuration to a specific
+    network adapter identity, and the adapter present during the QEMU install (an emulated NIC) is
+    not the adapter present when the disk is later booted on the real machine (Intel I219-V).
+
+    The script therefore targets the adapter by its real MAC address and runs at every boot. Inside
+    the installer VM that adapter does not exist, so the script is a deliberate no-op there; on the
+    real hardware it is what makes the machine reachable at all.
+
+    Idempotent: safe to run repeatedly.
+#>
+[CmdletBinding()]
+param()
+
+$ErrorActionPreference = 'Stop'
+
+# --- Substituted at build time from infra/.env.server, which is gitignored. ---
+# The real address, gateway and NIC MAC are deliberately NOT in version control: this repository
+# is public, and publishing the address of a box with RDP open is an invitation. Read the values
+# off the rescue system's own routing table (ip -4 addr / ip -4 route) and put them in
+# infra/.env.server; install-windows.sh renders this template.
+$IPv4       = '@@SERVER_IPV4@@'
+$PrefixLen  = @@SERVER_PREFIXLEN@@
+$Gateway    = '@@SERVER_GATEWAY@@'
+$DnsServers = @('@@SERVER_DNS1@@', '@@SERVER_DNS2@@')
+$TargetMac  = '@@SERVER_MAC_DASHED@@'   # onboard NIC, as Windows formats it (AA-BB-CC-...)
+$LogDir     = 'C:\wasted\logs'
+$LogFile    = Join-Path $LogDir 'network.log'
+
+function Write-Log {
+    param([string]$Message)
+    if (-not (Test-Path $LogDir)) { New-Item -ItemType Directory -Force -Path $LogDir | Out-Null }
+    $line = "{0}  {1}" -f [DateTime]::UtcNow.ToString('yyyy-MM-ddTHH:mm:ssZ'), $Message
+    Write-Output $line
+    Add-Content -Path $LogFile -Value $line
+}
+
+Write-Log '--- wasted-network.ps1 start ---'
+
+# 1. Find the real NIC. MAC first (exact), then the controller family as a fallback in case the
+#    board reports a different MAC than the rescue system saw.
+$adapter = Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+           Where-Object { $_.MacAddress -eq $TargetMac } | Select-Object -First 1
+
+if (-not $adapter) {
+    $adapter = Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+               Where-Object { $_.InterfaceDescription -match 'I219' } | Select-Object -First 1
+    if ($adapter) { Write-Log "MAC did not match; matched by controller family: $($adapter.InterfaceDescription)" }
+}
+
+if (-not $adapter) {
+    $seen = (Get-NetAdapter -Physical -ErrorAction SilentlyContinue |
+             ForEach-Object { "$($_.Name)/$($_.MacAddress)/$($_.InterfaceDescription)" }) -join ' | '
+    Write-Log "target NIC not present - this is not the real hardware. Nothing to do. Adapters seen: $seen"
+    Write-Log '--- wasted-network.ps1 end (no-op) ---'
+    exit 0
+}
+
+Write-Log "target NIC: '$($adapter.Name)' ifIndex=$($adapter.ifIndex) mac=$($adapter.MacAddress) status=$($adapter.Status)"
+$ifIndex = $adapter.ifIndex
+
+# 2. Make sure it is actually switched on.
+if ($adapter.Status -eq 'Disabled') {
+    Write-Log 'adapter disabled - enabling'
+    Enable-NetAdapter -Name $adapter.Name -Confirm:$false
+    Start-Sleep -Seconds 3
+}
+
+# 3. Already correct? Then leave it completely alone.
+$existing = Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue
+$route    = Get-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue
+
+if ($existing.IPAddress -contains $IPv4 -and $route.NextHop -contains $Gateway) {
+    Write-Log "already configured: $IPv4/$PrefixLen via $Gateway - no change"
+} else {
+    Write-Log "configuring $IPv4/$PrefixLen via $Gateway"
+
+    Set-NetIPInterface -InterfaceIndex $ifIndex -AddressFamily IPv4 -Dhcp Disabled -ErrorAction SilentlyContinue
+
+    # Clear anything stale (an APIPA address, or config inherited from the installer VM).
+    Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+        Where-Object { $_.IPAddress -ne $IPv4 } |
+        Remove-NetIPAddress -Confirm:$false -ErrorAction SilentlyContinue
+
+    Get-NetRoute -InterfaceIndex $ifIndex -DestinationPrefix '0.0.0.0/0' -ErrorAction SilentlyContinue |
+        Remove-NetRoute -Confirm:$false -ErrorAction SilentlyContinue
+
+    if (-not (Get-NetIPAddress -InterfaceIndex $ifIndex -IPAddress $IPv4 -ErrorAction SilentlyContinue)) {
+        New-NetIPAddress -InterfaceIndex $ifIndex -IPAddress $IPv4 `
+                         -PrefixLength $PrefixLen -DefaultGateway $Gateway | Out-Null
+    }
+
+    Set-DnsClientServerAddress -InterfaceIndex $ifIndex -ServerAddresses $DnsServers
+    Write-Log 'configuration applied'
+}
+
+# 4. Prove it, into the log, so a later RDP session can see what happened at boot.
+Start-Sleep -Seconds 2
+$ip = (Get-NetIPAddress -InterfaceIndex $ifIndex -AddressFamily IPv4 -ErrorAction SilentlyContinue |
+       Select-Object -First 1).IPAddress
+Write-Log "address now: $ip"
+
+$gwOk = Test-Connection -ComputerName $Gateway -Count 2 -Quiet -ErrorAction SilentlyContinue
+Write-Log "gateway $Gateway reachable: $gwOk"
+
+$netOk = Test-Connection -ComputerName '1.1.1.1' -Count 2 -Quiet -ErrorAction SilentlyContinue
+Write-Log "internet (1.1.1.1) reachable: $netOk"
+
+try {
+    $dnsOk = [bool](Resolve-DnsName -Name 'www.microsoft.com' -Type A -ErrorAction Stop)
+} catch { $dnsOk = $false }
+Write-Log "dns resolution working: $dnsOk"
+
+Write-Log '--- wasted-network.ps1 end ---'

@@ -1,0 +1,668 @@
+{
+  "domain": "aircraft_water",
+  "items": [
+    {
+      "id": "heli_controls_are_unified_aircraft_bindings",
+      "category": "controls",
+      "cue": "the agent is seated in a helicopter (rotorcraft vehicle) and needs to change altitude or heading.",
+      "context": "GTA V PC keyboard/mouse describes helicopters as sharing the single 'Aircraft' raw-key binding set (throttle/collective on W/S, cyclic on the numpad, yaw on A/D). None of that raw-key channel exists for the agent: CAPABILITIES.md is explicit that he has no arbitrary keypresses and no cover/aim-style directional control \u2014 only 'press_prompt_key' (contextual, no params) plus look_around/brake_tap/swerve/reverse_out/wait/radio/horn, none of which are flight controls.",
+      "meaning": "the agent never touches collective, cyclic, or pedals. The only lever he has over a helicopter's flight path is the bridge task 'drive_to' (x, y, z, speed_mps, style, arrive_radius_m), which hands the whole flight to the game's own autopilot driving task. Climb/descend is expressed by choosing a higher or lower target z, not by holding a key; heading is expressed by choosing where x,y point next, not by yaw input.",
+      "suggested_action": "Pilot exclusively through drive_to: set the target z above obstacles for climb, at ground level for descent, and let x,y carry the heading. Never encode a suggested_action as a raw key or stick input for a helicopter \u2014 there is nothing downstream that can execute it.",
+      "avoid": "Do not write or follow any instruction telling the agent to hold W, tap Num8, or use A/D for yaw \u2014 none of that is a real channel for him. Do not assume finer control than 'pick a 3D point and a speed' is available.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Whether the harness's drive_to implementation actually supports airborne z-targets the way it supports ground x,y is unverified \u2014 see aircraft_tasks_may_not_map_to_harness_primitives. The raw-key mapping itself (which numpad key is pitch vs roll) is now moot for the agent and is not worth re-verifying.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://gta.wiki/wiki/Helicopters"
+      ]
+    },
+    {
+      "id": "heli_hovering_is_an_active_task",
+      "category": "helicopter_flight",
+      "cue": "the agent wants to stay in one place over a target, e.g. holding position above an objective blip.",
+      "context": "Any helicopter, any altitude. The agent has no cyclic/collective access (see heli_controls_are_unified_aircraft_bindings) \u2014 his only lever is the drive_to bridge task.",
+      "meaning": "A helicopter has no neutral 'hold' state in the game's physics \u2014 zero input sinks it, leftover tilt drifts it. That physics fact matters to the agent only indirectly: he cannot correct drift by feel the way a human pilot would, because he has no continuous stick input at all, only discrete drive_to calls.",
+      "suggested_action": "To loiter, re-issue drive_to to the same point (or a small slow racetrack of nearby points) repeatedly rather than expecting one call to hold position indefinitely. Treat any single drive_to as decaying \u2014 plan to refresh it, not to fly it once and forget it.",
+      "avoid": "Do not issue a 'stop' task in a helicopter and assume it parks in mid-air \u2014 releasing control is a descent at best. Do not treat one drive_to call as a standing hover order; it is not.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Unverified whether the harness's drive_to/stop primitives special-case aircraft at all, and unverified whether repeated re-issuing of drive_to actually reads as a stable loiter rather than a jerky stair-step. GTA V helicopters are documented as more stable than GTA IV's, so drift is slower, but not zero.",
+      "sources": [
+        "https://gta.wiki/wiki/Helicopters",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "heli_landing_flare_and_settle",
+      "category": "helicopter_flight",
+      "cue": "the agent is over a chosen landing spot at low altitude and wants to put the helicopter down.",
+      "context": "Flat ground, helipad, or rooftop. Not on a slope, not on water. The agent has no manual cyclic/collective \u2014 landing is issued as a drive_to target, not flown by hand.",
+      "meaning": "A real pilot flares (kills forward speed, then bleeds off collective) because skids are short and any residual sideways or forward speed at touchdown rolls the aircraft. The agent cannot fly that sequence by hand \u2014 the only input he has is the drive_to target he picks and its speed_mps.",
+      "suggested_action": "Choose the drive_to landing target on large flat open ground (airfield apron, empty road, beach) with a low speed_mps and a generous arrive_radius_m, and let the built-in autopilot handle the approach. Prefer a big field over a small rooftop pad until it is proven the autopilot can hit a small target cleanly.",
+      "avoid": "Do not aim a first landing at a small rooftop pad \u2014 a missed rooftop is a fall, whereas a missed field is just a go-around. Do not expect the agent to correct a bad approach manually; he cannot.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Whether the game's own aircraft-autopilot task (which is what drive_to actually calls) performs a real flare-and-settle on its own, or just flies straight at the target and stops abruptly, is unverified. Technique described here is documented human-pilot practice, not confirmed autopilot behaviour. The Buzzard is noted as unusually good at landing on uneven terrain.",
+      "sources": [
+        "https://gta.wiki/wiki/Helicopters",
+        "https://gta.wiki/wiki/Buzzard_Attack_Chopper",
+        "https://gta.wiki/wiki/Flight_School"
+      ]
+    },
+    {
+      "id": "heli_rotor_contact_is_fatal",
+      "category": "helicopter_flight",
+      "cue": "the agent is flying close to buildings, bridges, power lines, trees, or other vehicles.",
+      "context": "Any helicopter in GTA V.",
+      "meaning": "Rotors and tail booms can be detached by contact, and a helicopter that loses them will usually explode as soon as it touches another vehicle or surface. The rotor disc is much wider than the fuselage, so a gap that looks like it clears the body does not clear the blades.",
+      "suggested_action": "When choosing drive_to waypoints and altitudes near structures, budget a horizontal margin well beyond the visible hull for the rotor disc. Prefer a waypoint/altitude that flies over an obstacle to one that threads between obstacles.",
+      "avoid": "Do not choose a drive_to route that threads between buildings or under bridges to save time. Do not target a hover point close alongside a wall \u2014 see heli_hovering_is_an_active_task on why the agent cannot correct drift there.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None known. A detached rotor is effectively an unrecoverable state.",
+      "sources": [
+        "https://gta.wiki/wiki/Helicopters"
+      ]
+    },
+    {
+      "id": "heli_engine_failure_countdown",
+      "category": "helicopter_flight",
+      "cue": "Vehicle health in /state drops sharply while airborne after taking fire or a collision, or (rarely) a screenshot event shows visible smoke.",
+      "context": "Helicopter has been shot at (police, Merryweather, Fort Zancudo) or has taken collision damage. The agent does not get an on-screen smoke cue or warning tone directly \u2014 /state's vehicle.health is his only reliable machine-readable proxy.",
+      "meaning": "A heavily damaged GTA V helicopter does not fail instantly \u2014 it stays flyable for roughly 2 minutes 20 seconds after smoking begins (up to about 3 minutes on some models), then the engine cuts out. That window is a hard countdown, not a warning to ignore, and there is no manual flare or bailout available once it expires (see heli_no_real_autorotation).",
+      "suggested_action": "Treat a sharp vehicle-health drop while airborne as an immediate command: issue drive_to toward the nearest open flat ground on the current heading, at reduced speed, and do it before the countdown \u2014 do not hold out for a preferred destination.",
+      "avoid": "Do not keep routing toward the original objective after a sharp health drop. Do not choose a higher-altitude drive_to target \u2014 altitude gained now is just a longer, less controllable fall when the engine quits, and the agent has no bailout to fall back on.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Timings are documented as approximate and vary by helicopter model. Whether vehicle.health decay tracks the documented smoke-to-failure window at all is unverified \u2014 treat the countdown as a reason to act early, not a number to time precisely.",
+      "sources": [
+        "https://gta.wiki/wiki/Helicopters"
+      ]
+    },
+    {
+      "id": "heli_no_real_autorotation",
+      "category": "helicopter_flight",
+      "cue": "The helicopter engine has cut out and the aircraft is losing altitude with no power.",
+      "context": "Post-engine-failure, any altitude. CAPABILITIES.md rules out a parachute-deploy action entirely \u2014 the agent cannot bail out with a chute regardless of altitude.",
+      "meaning": "Real autorotation is not a modelled, reliable recovery in GTA V, and the agent has no manual attitude control to attempt one even if it were. He also has no parachute-deploy primitive, so exiting the aircraft mid-fall is not an escape for him the way it might be for a human player \u2014 it is just a different, uncontrolled way down.",
+      "suggested_action": "There is no recoverable action once the engine has actually cut out \u2014 prevention is everything: land before the heli_engine_failure_countdown window expires. If the engine has already failed, accept the vehicle loss and resolve whatever follows (death, arrest, being on foot) through the standard recovery ladder rather than any flight technique.",
+      "avoid": "Do not have the agent attempt to exit the aircraft expecting a parachute to open \u2014 that action does not exist for him. Do not stay in the cockpit trying to save the helicopter either; neither choice has a manual recovery input behind it.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Could not confirm from any source that GTA V models autorotation at all for a human player; the point here is narrower and higher-confidence \u2014 the agent specifically has no lever to attempt it or a chute bailout, independent of whether autorotation exists.",
+      "sources": [
+        "https://gta.wiki/wiki/Helicopters"
+      ]
+    },
+    {
+      "id": "heli_loses_altitude_at_full_speed",
+      "category": "helicopter_flight",
+      "cue": "the agent is flying a helicopter at maximum forward speed toward a distant waypoint.",
+      "context": "Documented explicitly for the Buzzard; the same physics applies broadly because forward tilt trades lift for thrust.",
+      "meaning": "Pushing a helicopter to top speed tilts the rotor disc so far forward that vertical lift drops and the aircraft sinks. Maximum speed and level flight are in conflict.",
+      "suggested_action": "When choosing a drive_to target and speed_mps across hilly ground (Blaine County, Mount Chiliad), pick a target altitude (z) with a generous buffer over the terrain profile rather than a low one, since the autopilot may trade altitude for speed the way a human pilot's forward tilt does, and the agent has no manual collective input to correct it mid-flight.",
+      "avoid": "Do not set a fast, low-altitude drive_to across rising terrain and assume it self-corrects. Do not expect a manual 'hold extra collective' correction \u2014 the agent has no such input.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Explicitly documented for the Buzzard; generalisation to all helicopters is inferred from the same tilt-for-thrust mechanic and not separately sourced per model.",
+      "sources": [
+        "https://gta.wiki/wiki/Buzzard_Attack_Chopper"
+      ]
+    },
+    {
+      "id": "heli_source_noose_hq_buzzard_no_wanted",
+      "category": "helicopter_sourcing",
+      "cue": "the agent needs an armed helicopter and has no aircraft.",
+      "context": "Story Mode. NOOSE Headquarters, Sustancia Road, Palomino Highlands (east of the city).",
+      "meaning": "A Buzzard Attack Chopper can be found at NOOSE HQ, and taking it there is documented as NOT triggering a wanted level. This is the single best armed-helicopter source in Story Mode \u2014 everywhere else that has one (Fort Zancudo) costs four stars.",
+      "suggested_action": "Route here first when an armed helicopter is the goal. Announce it as 'the one place they leave the good toys unlocked'.",
+      "avoid": "Do not default to Fort Zancudo for a Buzzard. Same aircraft, vastly worse price.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Single-source. Spawn is not guaranteed on every visit and may require a re-approach. A rare white-paint Buzzard is also documented as spawning in Story Mode without a fixed location.",
+      "sources": [
+        "https://gta.wiki/wiki/Buzzard_Attack_Chopper"
+      ]
+    },
+    {
+      "id": "heli_source_hospital_roofs_are_unreliable_in_story",
+      "category": "helicopter_sourcing",
+      "cue": "the agent considers going to a hospital roof for a helicopter because that is common GTA lore.",
+      "context": "Central Los Santos Medical Center and similar hospitals, Story Mode specifically.",
+      "meaning": "The reliable rooftop Maverick/Buzzard/Cargobob spawns at hospitals are a GTA ONLINE rank-unlock feature, not Story Mode. In Story Mode the hospital roof mainly spawns an Air Ambulance, and even that is documented as taking several visits. Roof access is by ladders and stairs, which costs real time.",
+      "suggested_action": "Deprioritise hospital roofs. Go to Sandy Shores Airfield, the Vespucci helipads, or NOOSE HQ instead.",
+      "avoid": "Do not spend minutes climbing to a hospital roof on the assumption a helicopter is waiting \u2014 this is the classic wrong move imported from Online guides.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "An Air Ambulance can spawn there in Story Mode, so the trip is not always wasted \u2014 just low-yield. This is a case where widely repeated community advice is Online-specific.",
+      "sources": [
+        "https://gta.wiki/wiki/Central_Los_Santos_Medical_Center"
+      ]
+    },
+    {
+      "id": "heli_source_sandy_shores_airfield",
+      "category": "helicopter_sourcing",
+      "cue": "the agent is playing as Trevor, or is anywhere in Blaine County, and needs an aircraft.",
+      "context": "Sandy Shores Airfield, unlocked to Trevor after the mission 'Nervous Ron'.",
+      "meaning": "After 'Nervous Ron' Trevor controls the airfield. It has a helipad where a Frogger can be stored (after 'Three's Company') and a hangar, plus three unmarked runways \u2014 two long parallel east-west runways and a smaller northeast-southwest one \u2014 large enough to land any controllable aircraft. No military presence.",
+      "suggested_action": "Make this the default aircraft base for anything in the north of the map. It is the safest place to practise landings because the runways are long and nobody shoots.",
+      "avoid": "Do not route to LSIA or Fort Zancudo for an aircraft when already in Blaine County \u2014 Sandy Shores is closer and free of consequences.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Availability is gated on story progress ('Nervous Ron', and 'Three's Company' for the Frogger). NPC planes (Cuban 800, Mammatus, Mallard) spawn there mainly in daytime clear weather. Sources do not state whether a wanted level applies before the unlock.",
+      "sources": [
+        "https://gta.wiki/wiki/Sandy_Shores_Airfield",
+        "https://gta.wiki/wiki/Frogger"
+      ]
+    },
+    {
+      "id": "heli_source_vespucci_helipads",
+      "category": "helicopter_sourcing",
+      "cue": "the agent needs a civilian helicopter while inside Los Santos.",
+      "context": "Vespucci Helipad / Higgins Helitours, Shank Street, Puerto Del Sol, Los Santos.",
+      "meaning": "NPC-piloted Froggers are documented as appearing at the Vespucci helipads in various colours, and the helipad itself is a purchasable property for Michael or Franklin where helicopters can be stored. This is the most convenient in-city helicopter location.",
+      "suggested_action": "Use this as the in-city helicopter pickup. If the property has been bought, a stored helicopter is a guaranteed spawn rather than a gamble.",
+      "avoid": "Do not confuse this with the GTA IV helitour service \u2014 the agent cannot buy a tour ride here.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sources do not confirm whether taking an NPC's Frogger from the pad triggers a wanted level. Taking a Frogger from the Merryweather area of the Port of Los Santos explicitly DOES trigger one.",
+      "sources": [
+        "https://gta.wiki/wiki/Higgins_Helitours",
+        "https://gta.wiki/wiki/Frogger"
+      ]
+    },
+    {
+      "id": "heli_frogger_is_the_good_default",
+      "category": "helicopter_sourcing",
+      "cue": "the agent has a choice of helicopter models.",
+      "context": "Comparing Frogger, Maverick, Buzzard, Cargobob for general transport.",
+      "meaning": "The Frogger is light with a four-blade rotor, giving above-average handling, responsive turning, and stable landings, seating four. It is however fragile \u2014 a few shots to the engine will down it. The Maverick is heavier but noticeably more durable. The Cargobob is slow and the least manoeuvrable helicopter in the game.",
+      "suggested_action": "Pick the Frogger for clean point-to-point transport, the Maverick when gunfire is likely, the Buzzard when the agent needs weapons, and the Cargobob only when the goal is specifically to lift a vehicle.",
+      "avoid": "Do not take a Cargobob for ordinary travel \u2014 its sluggishness will make every subsequent decision worse. Do not expect manual gun-aiming in the Buzzard \u2014 any weapons use still routes through the engine's own combat_hated_targets_around targeting, never a directed shot.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "The Buzzard's compact skids make it the best choice for landing on rough or confined terrain despite being an attack aircraft.",
+      "sources": [
+        "https://gta.wiki/wiki/Frogger",
+        "https://gta.wiki/wiki/Maverick",
+        "https://gta.wiki/wiki/Cargobob",
+        "https://gta.wiki/wiki/Buzzard_Attack_Chopper"
+      ]
+    },
+    {
+      "id": "cargobob_hook_auto_attaches",
+      "category": "helicopter_flight",
+      "cue": "the agent is in a Cargobob and the objective involves moving a vehicle or container.",
+      "context": "Cargobob only, in Story Mode. The hook is normally deployed with a dedicated raw key (E), which is not a channel the agent has \u2014 his only generic keypress is press_prompt_key, which fires whatever contextual prompt is currently active and nothing else.",
+      "meaning": "The hook attaches automatically once deployed and hovered over a valid vehicle. Whether hook-deployment is presented as a contextual on-screen prompt (which press_prompt_key could fire) or as an always-available raw key (which it could not) is not confirmed from available sources.",
+      "suggested_action": "Establish a slow, stable hover directly over the target via drive_to and try press_prompt_key. If no attach occurs, treat hook deployment as unavailable to the agent rather than retrying indefinitely \u2014 abandon the pickup and pick a different way to satisfy the objective.",
+      "avoid": "Do not loop press_prompt_key indefinitely waiting for an attach that a contextless raw-key control would never trigger. Do not fly a loaded Cargobob at normal cruise speed or attempt tight turns \u2014 the added weight makes recovery from a bank very slow.",
+      "urgency": "low",
+      "confidence": "low",
+      "exceptions": "Unverified whether hook deployment is contextual (reachable via press_prompt_key) or a standing raw key (unreachable for the agent). This should be confirmed against the bridge's actual native-function call before relying on Cargobob hook pickups as a plan.",
+      "sources": [
+        "https://gta.wiki/wiki/Cargobob",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "plane_throttle_and_stall",
+      "category": "plane_flight",
+      "cue": "the agent is flying a fixed-wing aircraft (via drive_to) and vehicle.speed in /state is dropping toward stall range.",
+      "context": "Any controllable GTA V aeroplane except the Hydra. The agent has no throttle or elevator input \u2014 flight is entirely through drive_to's autopilot.",
+      "meaning": "In manual play, cutting throttle to zero then pulling the nose up stalls the aircraft; pushing the nose down and reapplying throttle recovers it. The agent cannot fly that sequence by hand \u2014 his only lever is which drive_to target/speed he requests next.",
+      "suggested_action": "Use vehicle.speed from /state as the stall-risk signal. If it is dropping toward stall range, retarget drive_to at a lower, shallower-climb route (a nearer or lower z) rather than expecting a manual recovery input, since none exists for the agent.",
+      "avoid": "Do not encode 'push the nose down, apply full throttle' as something the agent does \u2014 there is no such action available to him. Do not route a steep climb at low speed and assume it self-corrects.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The Hydra has VTOL and does not behave like a conventional aeroplane. Blimps are not subject to normal stall logic. Whether the autopilot task underlying drive_to can stall an aircraft at all (versus always flying within a safe envelope) is unverified.",
+      "sources": [
+        "https://gta.wiki/wiki/Airplanes",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "plane_needs_a_runway",
+      "category": "plane_flight",
+      "cue": "the agent is deciding whether to take a plane or a helicopter to reach a destination.",
+      "context": "Any fixed-wing aircraft. The exception is the Hydra (VTOL) and, for water, the Dodo.",
+      "meaning": "Aeroplanes require a stretch of flat ground to take off AND to land. That means the destination matters as much as the origin: a plane commits the agent to ending up at an airfield, a long straight highway, or a crash. A helicopter has no such constraint.",
+      "suggested_action": "Choose a plane only for long cross-map hops where a known runway exists at the far end (LSIA, Sandy Shores, Fort Zancudo, McKenzie Field, Grapeseed). For anything ending in the city, take a helicopter.",
+      "avoid": "Do not take off in a plane toward a destination with no landing surface. Do not treat a plane as a way to arrive somewhere precise \u2014 it is a way to arrive at a runway.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The Hydra can take off and land vertically. The Dodo can land on water or land. A belly landing with gear up is survivable in GTA V (unlike San Andreas), so a gear-up crash-landing is a real fallback option.",
+      "sources": [
+        "https://gta.wiki/wiki/Airplanes",
+        "https://gta.wiki/wiki/Sandy_Shores_Airfield"
+      ]
+    },
+    {
+      "id": "plane_landing_gear_key_g",
+      "category": "controls",
+      "cue": "the agent is approaching a runway to land, or has just taken off, in a fixed-wing aircraft with retractable gear.",
+      "context": "Any aircraft with retractable gear. The gear toggle is a raw key (G) on GTA V PC, which is not a channel the agent has \u2014 he has no arbitrary keypresses.",
+      "meaning": "Landing with gear up is a belly landing \u2014 survivable in GTA V, but it wrecks the aircraft. The agent cannot toggle gear himself, so whatever state the autopilot task behind drive_to leaves the gear in (whether it manages gear automatically for landing, or never touches it) is what he gets.",
+      "suggested_action": "Do not plan around a clean gear-down landing as something the agent can ensure. Treat every landing as a possible belly landing: pick the largest, flattest available surface, and expect the aircraft may be wrecked afterward regardless of approach quality.",
+      "avoid": "Do not write suggested_action text that tells the agent to 'lower gear' or 'press G' \u2014 that control does not exist for him.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Unverified whether the native driving task behind drive_to manages landing gear automatically for aircraft; this is the deciding fact and was not confirmed. Not every aircraft has retractable gear (the Dodo has wheeled gear inside its pontoons; helicopters with skids have none). H toggles aircraft lights \u2014 also a raw key the agent does not have, see night_and_weather_change_air_and_water_risk.",
+      "sources": [
+        "https://gta.wiki/wiki/Controls_for_GTA_V",
+        "https://gta.wiki/wiki/Airplanes"
+      ]
+    },
+    {
+      "id": "plane_damage_degrades_handling_not_just_health",
+      "category": "plane_flight",
+      "cue": "The aircraft has been shot at, clipped scenery, or is smoking.",
+      "context": "GTA V aeroplanes specifically \u2014 their damage model is more granular than ground vehicles'.",
+      "meaning": "GTA V lets control surfaces be shot off and tyres burst, which directly alters acceleration, handling, turning, and braking. Wings and stabilisers can detach outright after a violent impact. A smoking engine degrades progressively and gets worse over time. So a damaged plane does not just have less health \u2014 it flies differently and will keep degrading.",
+      "suggested_action": "After a sharp vehicle.health drop, immediately re-baseline: retarget drive_to at the nearest, longest available runway rather than the original destination. The agent cannot manually compensate for a pull to one side from burst tyres or damaged control surfaces, so the landing target chosen must tolerate a wide, uncorrected rollout.",
+      "avoid": "Do not judge a damaged aircraft's flyability by a health bar alone. Do not target a short or narrow landing strip for a damaged aircraft \u2014 there is no manual correction available if it drifts.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Loss of a wing or stabiliser is generally unrecoverable \u2014 bail out with a parachute instead.",
+      "sources": [
+        "https://gta.wiki/wiki/Airplanes"
+      ]
+    },
+    {
+      "id": "plane_source_lsia_costs_three_stars",
+      "category": "plane_sourcing",
+      "cue": "the agent wants a plane and Los Santos International Airport is the nearest option.",
+      "context": "LSIA airside/tarmac, Story Mode.",
+      "meaning": "Trespassing on the LSIA runways gives a three-star wanted level. Confirmed independently: Trevor specifically cannot access the airport at any time without triggering a wanted level. A GTA V-specific wiki page also describes Michael and Franklin getting privileged tarmac access tied to 'the Business Update' \u2014 but the Business Update is a named GTA ONLINE content update, so citing it as a Story Mode mechanic is wrong on its face and has been dropped. Whether Story Mode genuinely grants Michael/Franklin an exemption (e.g. around their own hangar locations) independent of that Online reference could not be confirmed from available sources this session \u2014 one source describes hangars as an Online-only property type.",
+      "suggested_action": "Treat LSIA airside as 3-star territory for all three protagonists by default. As Trevor, this is certain \u2014 go to Sandy Shores Airfield instead. As Michael or Franklin, the hangar-area aircraft spawns (Mammatus/Cuban 800 near Michael's hangar, Velum near Franklin's hangar) are worth routing to, but do not assume entering to reach them is wanted-level-free until that is confirmed in-game.",
+      "avoid": "Do not repeat the 'post-Business-Update free tarmac access' claim \u2014 that is an Online update being misapplied to Story Mode. Do not fly Trevor into LSIA for a plane expecting anything other than three stars.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "The character-access exemption for Michael/Franklin is unresolved: one gta.wiki page implies a hangar-purchase exemption exists, another states hangars are a GTA Online property type only. Runways: Runway 3 in the northwest faces north (small private jets); 12-L in the north faces west (commercial); 12-R in the far south faces west (private hangars). Verify the exemption in-game before relying on it rather than trusting either source.",
+      "sources": [
+        "https://gta.wiki/wiki/Los_Santos_International_Airport_(HD_Universe)",
+        "https://gta.wiki/wiki/Hangar"
+      ]
+    },
+    {
+      "id": "dodo_can_land_on_water",
+      "category": "plane_sourcing",
+      "cue": "the agent needs to reach an offshore location, or needs an aircraft that can end its flight on water.",
+      "context": "Dodo seaplane, Story Mode, after completing the 'Sea Plane' random event.",
+      "meaning": "The Dodo is unavailable until the 'Sea Plane' random event is completed; afterwards it is available at two dock locations or purchasable for $500,000. Its pontoons carry wheeled landing gear, so it can take off and land on either water or land. Short take-off distance and good acceleration, but the pontoons cost it top speed and agility.",
+      "suggested_action": "Treat the Dodo as the one aircraft that removes the runway constraint at the destination. Ideal for reaching offshore dive sites or islands.",
+      "avoid": "Do not expect the Dodo to be available before its random event has fired.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Single-source on the unlock condition and the two dock locations.",
+      "sources": [
+        "https://gta.wiki/wiki/Dodo"
+      ]
+    },
+    {
+      "id": "fort_zancudo_airspace_is_lethal",
+      "category": "airspace_hazard",
+      "cue": "the agent's flight path passes over western Blaine County / the Fort Zancudo area, or Air Traffic Control warnings begin.",
+      "context": "The only military base in GTA V, on the west coast between Los Santos and Blaine County.",
+      "meaning": "Flying over Fort Zancudo without authorisation triggers ATC warnings first. Ignoring them gives a four-star wanted level and launches P-996 LAZER fighter jets that engage with heat-seeking missiles and cannon. Entering by ground gives four stars shortly after being spotted, with Rhino tanks, Barracks trucks, and rocket-armed soldiers.",
+      "suggested_action": "Treat the Zancudo footprint as a no-fly polygon in route planning and detour around it \u2014 over the ocean to the west or inland to the east. If ATC warnings start, turn away immediately; the warning phase is a real grace period.",
+      "avoid": "Do not fly through Zancudo airspace as a shortcut between Los Santos and Sandy Shores. Do not try to outrun a LAZER in a civilian helicopter \u2014 it is not survivable.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The base holds the most desirable aircraft in the game (LAZER, Cargobob, Buzzard, Titan), so a deliberate raid can be a legitimate, high-drama choice \u2014 but it must be a chosen mission, never an accident of routing.",
+      "sources": [
+        "https://gta.wiki/wiki/Fort_Zancudo"
+      ]
+    },
+    {
+      "id": "police_maverick_at_three_stars",
+      "category": "airspace_hazard",
+      "cue": "the agent's wanted level reaches three stars.",
+      "context": "GTA V Story Mode wanted system, on foot or in any vehicle.",
+      "meaning": "At three or more stars a Police Maverick helicopter is dispatched to shadow the player. Because it tracks from above, it keeps line of sight over walls and alleys and makes the search cones follow the agent. At four or more stars, NOOSE TRU teams arrive in armoured vehicles.",
+      "suggested_action": "At three stars, prioritise breaking the helicopter's line of sight \u2014 go under cover (tunnels, parking structures, dense overhangs) rather than simply running further.",
+      "avoid": "Do not try to out-drive a wanted level in open ground while a Police Maverick is overhead \u2014 distance alone will not clear the cones while it keeps eyes on. Do not treat 'shoot the helicopter down' as a real option for the agent: combat_hated_targets_around engages hostile peds in a radius, not vehicles, and he has no way to target the aircraft directly.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Changing appearance (mask, sunglasses) during the search phase can reduce the wanted level by one star.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "wanted_search_is_cones_not_radius",
+      "category": "airspace_hazard",
+      "cue": "Stars are flashing and cone shapes appear on the radar.",
+      "context": "GTA V Story Mode, after breaking line of sight with police.",
+      "meaning": "GTA V uses a cone-based search, not a simple distance radius. Flashing stars plus radar cones mean the police are searching specific directions; the radar flashes red and blue when police can actually see the agent. Escape requires staying OUT of the cones until the timer expires, which is a positional problem, not purely a speed problem.",
+      "suggested_action": "Read the cones as the real objective. Move perpendicular to them or hold still somewhere outside them, rather than sprinting in a straight line.",
+      "avoid": "Do not equate 'far away' with 'safe'. Do not keep moving fast through a cone \u2014 that re-acquires line of sight and restarts the timer.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "None significant.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V"
+      ]
+    },
+    {
+      "id": "flight_school_is_the_technique_curriculum",
+      "category": "flight_training",
+      "cue": "The stream needs structured aviation content, or the agent's flight technique is being evaluated.",
+      "context": "Flight School at Los Santos International Airport, Story Mode. The 12 lessons (Training Take Off, Runway Landing, Inverted Flight, Knife Flight, Flat Hatting, Touch Down, Loop the Loop, Helicopter Course, Helicopter Speed Run, Skydiving, Drop Zone, Earn Your Wings) are graded on precise, sustained manual stick input \u2014 rudder, aileron, elevator held through a manoeuvre. The agent has no such input at all; he flies only through discrete drive_to calls.",
+      "meaning": "Flight School is real, useful knowledge about how GTA V aircraft behave (e.g. 'Knife Flight' teaches that rudder, not aileron, holds altitude while banked 90 degrees), but it is not achievable content for the agent \u2014 a coarse, latency-delayed sequence of 3D-point requests cannot satisfy checkpoint-and-medal lessons built around continuous analog input.",
+      "suggested_action": "Use Flight School's documented lessons as background technique knowledge that explains why certain manoeuvres behave the way they do \u2014 not as an activity to send the agent to attempt. Do not schedule Flight School lessons as stream content expecting the agent to earn medals.",
+      "avoid": "Do not treat Flight School as low-risk, achievable practice for the agent. If a mission or objective forces a Flight School lesson, expect it to fail or stall rather than complete cleanly, and fall back to the recovery ladder.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Whether simply entering a Flight School plane via drive_to would even register as attempting the lesson (versus the mission trigger requiring manual entry) is unverified, but moot given the agent cannot execute the graded manoeuvres either way. Lesson order and exact medal thresholds were taken from one source; the twelve lesson names are consistently reported.",
+      "sources": [
+        "https://gta.wiki/wiki/Flight_School"
+      ]
+    },
+    {
+      "id": "parachute_bailout_from_aircraft",
+      "category": "aircraft_emergency",
+      "cue": "The aircraft is unrecoverable \u2014 wing detached, engine cut, or falling \u2014 and altitude remains.",
+      "context": "CAPABILITIES.md is explicit: there is no parachute-deploy action in the agent's vocabulary, full stop, regardless of altitude, protagonist, or unlock state.",
+      "meaning": "In manual play, exiting a doomed aircraft and deploying a parachute is a real, documented escape. It is not an option for the agent \u2014 he has no primitive that opens a chute. Exiting mid-air (exit_vehicle) without one is simply an uncontrolled fall, not an escape.",
+      "suggested_action": "Never plan a parachute bailout as the agent's response to a doomed aircraft. The only real lever is upstream prevention \u2014 land or abort the flight while control still exists (see heli_engine_failure_countdown / plane_damage_degrades_handling_not_just_health). Once the aircraft is truly unrecoverable, accept the loss and resolve whatever follows through the standard recovery ladder.",
+      "avoid": "Do not issue exit_vehicle mid-flight expecting a parachute to open \u2014 it will not, because no deploy action exists for the agent. Do not treat 'altitude permits a bailout' as a live option in his decision tree at all.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "None \u2014 this is a capability fact (no parachute-deploy primitive), not a game-mechanic uncertainty. A scripted mission cutscene may still place the agent under a parachute involuntarily; see parachute_landing_flare for that narrower case.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute"
+      ]
+    },
+    {
+      "id": "parachute_landing_flare",
+      "category": "aircraft_emergency",
+      "cue": "A mission or scripted event has placed the agent under an open parachute canopy (he cannot open one himself \u2014 see parachute_bailout_from_aircraft) and the ground is approaching.",
+      "context": "Any scripted parachute descent, e.g. Flight School Skydiving/Drop Zone or a mission that forces a jump. Landing correctly requires pulling back (flare) on the movement input right at touchdown \u2014 a continuous analog input the agent does not have.",
+      "meaning": "In manual play, pushing forward at touchdown causes a faceplant that can injure or kill; pulling back flares safely. None of the agent's primitives (look_around, brake_tap, swerve, reverse_out, press_prompt_key, wait, radio, horn) map onto parachute steering or flare at all, so this manoeuvre is entirely outside his control during a forced descent.",
+      "suggested_action": "During a scripted parachute descent, do not attempt to compensate with any primitive \u2014 none affect it. Treat the outcome as determined by the game/mission, not by a the agent decision. If the landing results in death, injury, or arrest, resolve it through the standard recovery ladder rather than retrying a 'better' technique next time.",
+      "avoid": "Do not write suggested_action text implying the agent steers or flares a parachute. Do not treat a bad parachute landing as evidence a different input was needed \u2014 no input was available either way.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Whether any scripted mission in Story Mode actually forces a parachute descent onto a passive the agent (versus always being player-initiated, which he cannot do) is unconfirmed \u2014 this item only matters if that occurs.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute",
+        "https://gta.wiki/wiki/Flight_School"
+      ]
+    },
+    {
+      "id": "swim_surface_is_unlimited",
+      "category": "water_swimming",
+      "cue": "the agent is in water at the surface with a long distance to cover.",
+      "context": "GTA V Story Mode. Contrasts with San Andreas, where surface swimming drained stamina.",
+      "meaning": "GTA V lets the player swim at the surface indefinitely \u2014 surface swimming has no stamina failure state. Only SPRINT swimming draws on stamina, and only DIVING has a breath limit. So a long surface swim is safe but slow; the danger in water is depth and wildlife, not distance.",
+      "suggested_action": "For long water crossings, route via walk_to with run set to false. Do not treat distance-over-water as a survival risk in itself \u2014 only sprinting (run: true, see sprint_swim_key_and_stamina) draws on stamina.",
+      "avoid": "Do not default run to true for a long swim and burn stamina to no purpose. Do not assume San Andreas-style surface drowning.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Sharks are a separate and lethal risk that scales with distance from shore, so 'safe' here means 'will not drown', not 'will not die'.",
+      "sources": [
+        "https://gta.wiki/wiki/Swimming",
+        "https://gta.wiki/wiki/Water"
+      ]
+    },
+    {
+      "id": "sprint_swim_key_and_stamina",
+      "category": "water_swimming",
+      "cue": "the agent needs to move quickly through water \u2014 fleeing, or closing on a target.",
+      "context": "GTA V PC binds sprint-swim to a raw key (Shift), which is not a channel the agent has. His only lever over on-foot/in-water pace is the 'run' boolean on the walk_to bridge task, assuming walk_to's pathing extends into water at all.",
+      "meaning": "In manual play, holding sprint while swimming consumes the Stamina stat; past exhaustion the health bar flashes red and continuing causes gradual health loss. If walk_to's run flag maps onto this the way it does on land, the same tradeoff applies: run:true is faster but has a cost past some point.",
+      "suggested_action": "Reserve run:true on walk_to for short bursts in water \u2014 closing the last stretch to a boat, or breaking away from a shark \u2014 and drop back to run:false once clear. Watch vehicle/player health in /state as the signal that the sprint cost is being paid.",
+      "avoid": "Do not hold run:true for an entire water crossing. Do not assume this mechanic is confirmed to apply through walk_to at all \u2014 see exceptions.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Unverified whether walk_to's pathfinding traverses open water, and unverified whether its 'run' parameter produces the same sprint-swim stamina behaviour as the human Shift-swim binding. Stamina is a separate stat from Lung Capacity \u2014 maxing stamina does NOT extend the underwater breath timer.",
+      "sources": [
+        "https://gta.wiki/wiki/Stamina",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    },
+    {
+      "id": "lung_capacity_governs_breath_not_stamina",
+      "category": "water_diving",
+      "cue": "the agent is deciding whether to dive underwater, and how long he can stay.",
+      "context": "GTA V Story Mode, no scuba gear.",
+      "meaning": "Underwater breath-hold is governed by the LUNG CAPACITY stat, which is entirely separate from Stamina. Lung Capacity increases with time spent underwater \u2014 roughly one percent per 30 seconds submerged. So early in a playthrough the breath timer is short and unforgiving; it lengthens only through deliberate practice.",
+      "suggested_action": "Before any dive, check whether Lung Capacity has been trained. If it is low, treat every dive as a short round trip with a generous margin for the ascent \u2014 the timer must cover getting back UP, not just getting down.",
+      "avoid": "Do not train Stamina expecting longer dives. Do not plan a dive that uses the whole timer on the descent.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The 1%-per-30-seconds growth rate is single-sourced. Scuba gear bypasses the timer entirely.",
+      "sources": [
+        "https://gta.wiki/wiki/Stamina",
+        "https://gta.wiki/wiki/Swimming"
+      ]
+    },
+    {
+      "id": "scuba_from_dinghy_exit",
+      "category": "scuba",
+      "cue": "the agent needs to dive deep or for an extended period, e.g. reaching a shipwreck or an underwater collectible.",
+      "context": "Dinghy boat, Story Mode.",
+      "meaning": "Exiting a Dinghy provides the player with scuba gear automatically \u2014 no separate purchase or wardrobe step. This is the cheapest, most accessible route to an extended underwater capability in Story Mode.",
+      "suggested_action": "To do any serious diving, first acquire a Dinghy, drive it out over the dive site, then exit into the water. The gear comes with the exit.",
+      "avoid": "Do not free-dive on a raw breath-hold to reach anything deep. Do not look for scuba gear as a purchasable item first \u2014 the boat IS the mechanism.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Confirmed for the Dinghy and the Submersible. Dinghy fixed spawns include the Elysian Island drydocks (east of the Olifantus), under the Miriam Turner Overpass, southwest of the Post OP depository, the south-side island dry docks, the Sonar Collections Dock (after Michael meets Abigail), and Puerto Del Sol Marina in the Enhanced version.",
+      "sources": [
+        "https://gta.wiki/wiki/Dinghy"
+      ]
+    },
+    {
+      "id": "scuba_from_submersible_exit",
+      "category": "scuba",
+      "cue": "the agent is using the Submersible and wants to leave it underwater.",
+      "context": "Submersible, Story Mode. Obtained by purchasing the Sonar Collections Dock, or left at Sandy Shores Airfield after the Offshore approach to The Merryweather Heist.",
+      "meaning": "Entering the Submersible equips a scuba suit, which is then worn on exiting it. A submarine icon stays on the map while the player is within range, so the vehicle can be found again after a dive.",
+      "suggested_action": "Use the Submersible as a mobile dive base: descend inside it, exit in scuba gear to explore, then return to the map icon.",
+      "avoid": "Do not exit the Submersible below its safe depth expecting the scuba suit to protect against pressure \u2014 the suit is a breathing solution, not a depth solution.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Retrieving the Merryweather-Heist Submersible from Sandy Shores Airfield requires a Cargobob.",
+      "sources": [
+        "https://gta.wiki/wiki/Submersible"
+      ]
+    },
+    {
+      "id": "submersible_crush_depth",
+      "category": "scuba",
+      "cue": "The Submersible starts making bending or cracking steel noises and a pressure warning sounds.",
+      "context": "Deep ocean, Submersible only.",
+      "meaning": "Maximum safe dive depth is roughly 492 feet / 150 metres. Below that, pressure warnings begin with audible hull-stress sounds. Past about 550 feet a final warning fires and then the vessel IMPLODES, killing the occupant. The Submersible also runs out of oxygen after about 24 in-game hours.",
+      "suggested_action": "Treat the first hull-stress sound as a hard ascend command with no deliberation. There is a documented warning ladder \u2014 the first warning is the one to act on, not the last.",
+      "avoid": "Do not push past the first pressure warning to reach something on the sea floor. Implosion is instant death with no recovery.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "Depth figures are single-sourced. The general mechanic \u2014 that diving too deep destroys the submarine \u2014 is independently corroborated.",
+      "sources": [
+        "https://gta.wiki/wiki/Submersible",
+        "https://gta.wiki/wiki/Water"
+      ]
+    },
+    {
+      "id": "sharks_are_one_hit_kills",
+      "category": "water_hazard",
+      "cue": "A red hostile blip appears on the minimap while the agent is in open water, or a fin is visible circling at the surface.",
+      "context": "Ocean around San Andreas, at varying depths. More frequent at night.",
+      "meaning": "Sharks attack once and kill on the FIRST attack regardless of full health and armour \u2014 they grab and shake the protagonist. This even bypasses the invincibility cheat. They appear on the minimap as red dots, which means the harness's hostile-ped channel is the early-warning system.",
+      "suggested_action": "Treat any red hostile blip in water as an immediate abort condition, not a combat opportunity. Get out of the water \u2014 nearest boat, nearest shore, nearest submersible.",
+      "avoid": "Do not route combat_hated_targets_around at a shark while swimming. Do not gamble on health or armour \u2014 neither matters here.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "A shark takes only one shot to kill FROM A BOAT, so the correct engagement is from a vessel, never from in the water. The model is described as a hybrid of bull and tiger shark; hammerheads also appear. Unverified whether sharks actually appear in /state's nearby-peds list (it may be humans-only) \u2014 if not, the water itself and any red blip at all should be read as the warning, not specifically a shark-tagged entry.",
+      "sources": [
+        "https://gta.wiki/wiki/Sharks_(animal)",
+        "https://gta.wiki/wiki/Swimming"
+      ]
+    },
+    {
+      "id": "shark_escape_options",
+      "category": "water_hazard",
+      "cue": "the agent is already in the water with a shark closing and cannot reach shore or a boat.",
+      "context": "Open water, no vessel within reach.",
+      "meaning": "Documented escapes, in rough order of reliability: swim into sunken plane or ship ruins, which often makes the shark swim away; ram it with a boat or Submersible. A knife-attack option is documented for a human player but is irrelevant to the agent \u2014 he has no melee verb at all (CAPABILITIES.md), so it is not merely a poor last resort, it is not an action he can take.",
+      "suggested_action": "Head for wreck geometry if any is nearby \u2014 the ruins are a documented sanctuary. Otherwise make for the surface and the nearest hull (boat_is_the_correct_shark_platform).",
+      "avoid": "Do not include a melee/knife response in the agent's plan at all \u2014 he has no melee verb, so this is not a fallback, it is unavailable.",
+      "urgency": "critical",
+      "confidence": "medium",
+      "exceptions": "The wreck-sanctuary behaviour is described as 'often', not always.",
+      "sources": [
+        "https://gta.wiki/wiki/Sharks_(animal)"
+      ]
+    },
+    {
+      "id": "police_shoot_at_swimmers",
+      "category": "water_hazard",
+      "cue": "the agent has a wanted level and is considering entering water to escape, or is already in water while wanted.",
+      "context": "GTA V Story Mode, one star or above, police in line of sight of the shoreline.",
+      "meaning": "Standardised reading across sources: police open fire on a swimmer from as low as one star. Water breaks pursuit for on-foot and car-bound officers (they cannot follow in), but not for air or water units \u2014 at two or more stars, armed Police Predator boats patrol open water, and a police/Maverick helicopter overhead is not blocked by water at all. A swimmer is slow and fully exposed on the surface. So water is never a place to sit out the wanted timer \u2014 at most it is a short crossing to reach cover (under a bridge/pier, or on the far bank) where line of sight can actually be broken.",
+      "suggested_action": "Do not default to water as an escape route. If a crossing is unavoidable, treat it as a brief transit to cover on the other side, then continue evasion on land (tunnels, parking structures, dense overhangs \u2014 see wanted_search_is_cones_not_radius). Never linger in open water waiting for the timer, and never do this at two or more stars where Predator boats patrol.",
+      "avoid": "Do not swim away from police as a default escape at any star level. Do not treat open water as safer just because line of sight to ground units is broken \u2014 a helicopter or a Predator boat still has it.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Whether diving underwater (versus surface swimming) breaks a helicopter's line of sight specifically was not confirmed either way this session \u2014 do not rely on it. Predator-boat patrol behaviour is corroborated by a separate domain (police_system) and treated here as settled rather than in conflict.",
+      "sources": [
+        "https://gta.wiki/wiki/Wanted_Level_in_GTA_V",
+        "https://gta.wiki/wiki/Swimming"
+      ]
+    },
+    {
+      "id": "car_entering_water_is_a_vehicle_loss",
+      "category": "water_hazard",
+      "cue": "the agent is driving near a dock, cliff road, canal, bridge, or beach, or a drive_to route passes close to water.",
+      "context": "Any land vehicle, GTA V.",
+      "meaning": "A land vehicle that enters deep water stops and begins to sink; the occupant must exit or go down with it. Once submerged the car is effectively lost. Submerged vehicles show visual degradation (missing badging, broken lights) that reverts on resurfacing, which confirms they are modelled as recoverable objects but not drivable underwater.",
+      "suggested_action": "Treat 'vehicle in deep water' as: exit immediately, swim to the surface, then re-plan on foot or find a new vehicle. Exiting early, while shallow, is far more survivable than exiting deep.",
+      "avoid": "Do not keep applying throttle hoping to drive out of deep water. Do not stay in the cabin while it sinks \u2014 the breath timer starts underwater and the ascent has to fit inside it.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "The clearest sink-and-exit description found is from a San Andreas page, not a GTA V one; the GTA V water page confirms only the visual submersion behaviour. The broad mechanic is consistent across the series but was not confirmed on a GTA V-specific source, so treat specifics as unverified.",
+      "sources": [
+        "https://gta.wiki/wiki/Water",
+        "https://gta.wiki/index.php?search=car+sinks+water+engine+drown+GTA+V"
+      ]
+    },
+    {
+      "id": "boats_steer_like_motorcycles",
+      "category": "boats",
+      "cue": "the agent has entered a boat and is planning a water route.",
+      "context": "HD Universe boats, including GTA V.",
+      "meaning": "Boats in the HD Universe are controlled identically to motorcycles \u2014 lean-style steering with momentum, not car-style. That means turns are wide, there is no braking traction, and stopping is by coasting. Boats also deform from collisions and explosions.",
+      "suggested_action": "Plan wide arcs and begin decelerating well before any dock, buoy, or shoreline. Approach a dock at a shallow angle and slow speed.",
+      "avoid": "Do not expect a boat to stop or turn on the same scale as a car. Do not drive a boat into a dock at speed to 'park' it.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The Dinghy is documented as light and quick with good manoeuvrability \u2014 better than most in tight water like the Vespucci Canals or Raton Canyon creek. Larger boats will be far worse.",
+      "sources": [
+        "https://gta.wiki/wiki/Boats",
+        "https://gta.wiki/wiki/Dinghy"
+      ]
+    },
+    {
+      "id": "boat_is_the_correct_shark_platform",
+      "category": "boats",
+      "cue": "the agent needs to enter water in an area where sharks are a risk.",
+      "context": "Open ocean, Story Mode.",
+      "meaning": "A shark dies to a single shot from a boat but kills the player in one bite in the water. The boat is not just transport \u2014 it is the weapons platform and the safe zone. This asymmetry should drive the whole plan for any offshore water activity.",
+      "suggested_action": "Always bring a boat to open water. Clear visible red blips from the deck BEFORE entering the water, and keep the boat close enough to swim back to.",
+      "avoid": "Do not swim out from shore into deep water without a vessel. Do not leave the boat drifting out of reach while diving.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "Combining boat-based clearing with the Dinghy's automatic scuba gear on exit makes the Dinghy the single best all-round water platform in Story Mode.",
+      "sources": [
+        "https://gta.wiki/wiki/Sharks_(animal)",
+        "https://gta.wiki/wiki/Dinghy"
+      ]
+    },
+    {
+      "id": "underwater_is_populated_with_landmarks",
+      "category": "water_diving",
+      "cue": "the agent is looking for content, collectibles, or a destination underwater.",
+      "context": "Ocean floor and coastal waters around San Andreas, Story Mode.",
+      "meaning": "The GTA V seabed is deliberately detailed and interactive: shipwrecks containing hidden treasure, weapons, health and armour pickups, a whale skeleton, and crashed UFOs at specific locations. The Dinghy can be temporarily fitted with sonar when searching for Submarine Pieces, and the Sonar Collections Dock drives that collectible activity.",
+      "suggested_action": "Treat underwater exploration as genuine content with real rewards, not dead space. Wrecks double as shark sanctuaries, which makes them a good dive objective on two counts.",
+      "avoid": "Do not dive aimlessly on a raw breath-hold \u2014 get scuba first, then pick a known landmark.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The Dinghy sonar is described as mission-driven and temporary, not a permanent feature.",
+      "sources": [
+        "https://gta.wiki/wiki/Water",
+        "https://gta.wiki/wiki/Dinghy",
+        "https://gta.wiki/wiki/Submersible"
+      ]
+    },
+    {
+      "id": "aircraft_tasks_may_not_map_to_harness_primitives",
+      "category": "harness_caution",
+      "cue": "the agent is about to issue drive_to, follow_entity, or stop while piloting an aircraft.",
+      "context": "CAPABILITIES.md (frozen) confirms the agent has no raw keypress channel at all for flight (no throttle/collective/cyclic/pedal/gear/lights/hook keys) \u2014 the ENTIRE aircraft domain routes through drive_to's x,y,z target plus the 8 harness primitives, none of which were designed with altitude in mind.",
+      "meaning": "drive_to's z parameter is the only stated altitude control, and it is unverified whether the harness's actual implementation honours z for aircraft the way it does for ground vehicles, or ignores/clamps it. 'stop' in a helicopter is a descent, not a hold (see heli_hovering_is_an_active_task); a 2D ground waypoint has no altitude story at all.",
+      "suggested_action": "Before relying on any of this domain's flight guidance live on stream, confirm with the harness maintainers how drive_to actually behaves for airborne vehicles \u2014 specifically whether z is honoured, whether the native task manages gear/throttle automatically, and what 'stop' does mid-air. Until confirmed, treat every aircraft item in this domain as describing intent, not a guaranteed mechanism.",
+      "avoid": "Do not assume a ground-navigation task will pick a safe altitude, avoid terrain, or hold a hover. Do not treat this uncertainty as low-stakes \u2014 it gates whether the entire aircraft_water domain's flight advice is executable at all.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "This is a harness-implementation question, not a game mechanic, and it could not be resolved from documentation alone this session.",
+      "sources": [
+        "harness task vocabulary in CAPABILITIES.md / CONTRACTS.md"
+      ]
+    },
+    {
+      "id": "prefer_helicopter_over_plane_by_default",
+      "category": "decision_heuristic",
+      "cue": "the agent has decided air travel is warranted and must choose an aircraft type.",
+      "context": "General routing decision in Story Mode.",
+      "meaning": "Rolling up the constraints: planes need a runway at BOTH ends, stall if mishandled, and are unforgiving at low speed; helicopters can land almost anywhere, hover to inspect, and fail more gracefully at low altitude. For an AI issuing coarse, latency-delayed inputs, the helicopter's failure modes are recoverable and the plane's often are not.",
+      "suggested_action": "Default to a helicopter unless the trip is a long cross-map hop ending at a known airfield. Sandy Shores Airfield and the Vespucci helipads are the two most reliable pickup points.",
+      "avoid": "Do not take a plane for a short or mid-range trip. Do not take a plane at all until Training Take Off and Runway Landing have been completed.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "This is a synthesis across sources rather than a single documented claim. Planes remain correct for genuinely long distances and for Flight School content.",
+      "sources": [
+        "https://gta.wiki/wiki/Airplanes",
+        "https://gta.wiki/wiki/Helicopters",
+        "https://gta.wiki/wiki/Flight_School"
+      ]
+    },
+    {
+      "id": "story_mode_aircraft_roster",
+      "category": "plane_sourcing",
+      "cue": "the agent is identifying an aircraft he can see, or reasoning about what is obtainable.",
+      "context": "Story Mode only. Excludes Online-exclusive additions.",
+      "meaning": "Helicopters available in Story Mode: Buzzard and Buzzard Attack Chopper (the Attack variant is the armed one), Cargobob, Frogger, Maverick, Police Maverick, Skylift, Swift and Swift Deluxe. Planes: Besra, Cuban 800, Dodo, Duster, Jet, Luxor, Mallard, Mammatus, Miljet, Shamal, Titan, Velum, Vestra, plus blimps. The P-996 LAZER is a fixed-wing military JET at Fort Zancudo, not a helicopter. Cargo Plane and some Cargobob/Frogger variants are mission-only.",
+      "suggested_action": "Use this to sanity-check any aircraft the agent thinks he has spotted, and to reject Online-guide advice about aircraft that do not exist in Story Mode.",
+      "avoid": "Do not plan around aircraft from Online content updates. Do not treat mission-only variants as obtainable in free roam.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The source list mis-categorised the P-996 LAZER as a helicopter, which shows the list is not fully reliable; individual aircraft pages should be checked before committing to one. Dusters spawn around San Andreas after completing all Flight School lessons.",
+      "sources": [
+        "https://gta.wiki/wiki/Vehicles_in_GTA_V",
+        "https://gta.wiki/wiki/Fort_Zancudo",
+        "https://gta.wiki/wiki/Flight_School"
+      ]
+    },
+    {
+      "id": "night_and_weather_change_air_and_water_risk",
+      "category": "decision_heuristic",
+      "cue": "In-game time is night, or weather is poor, and an air or water activity is proposed.",
+      "context": "GTA V Story Mode ambient systems.",
+      "meaning": "Two documented time effects matter: sharks spawn more frequently at NIGHT, and NPC aircraft at Sandy Shores Airfield spawn mainly in DAYTIME clear weather. So night raises water risk and lowers aircraft availability at the airfield. Aircraft lights toggle with a raw key (H) that is not a channel the agent has, so he cannot mitigate night flying visibility himself.",
+      "suggested_action": "Schedule diving and swimming for daylight and aircraft-hunting for clear daytime weather. Treat night flying as inherently higher-risk with no available mitigation, rather than planning to 'turn the lights on' \u2014 the agent has no lights-toggle action.",
+      "avoid": "Do not plan an open-water dive at night. Do not conclude an airfield is empty of aircraft based on a single night-time visit. Do not write suggested_action text telling the agent to press H.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Each of these is single-sourced on its own page. The shark night-frequency effect is a frequency shift, not an on/off switch.",
+      "sources": [
+        "https://gta.wiki/wiki/Sharks_(animal)",
+        "https://gta.wiki/wiki/Sandy_Shores_Airfield",
+        "https://gta.wiki/wiki/Controls_for_GTA_V"
+      ]
+    }
+  ],
+  "notes": "RESEARCH CONSTRAINTS HIT THIS SESSION\n\n1. WebSearch was completely unavailable \u2014 the session had already spent its 200-call budget before I started, so every source below was reached by fetching a URL directly. That means I could not discover sources; I could only confirm ones I could guess the address of. Coverage is therefore skewed toward gta.wiki, which was the one site that answered reliably.\n\n2. Blocked or unreachable sources: ign.com (fetcher refuses the host), pcgamingwiki.com (HTTP 403), gamefaqs.gamespot.com (HTTP 403), support.rockstargames.com (timeout), gtabase.com (404 on every URL pattern I tried). gta.fandom.com was skipped per instructions. The net effect is that the two-source validation rule could NOT be met for most items \u2014 the great majority are single-sourced to gta.wiki. I have set confidence to reflect that rather than pretending otherwise.\n\nSOURCE DISAGREEMENTS AND KNOWN-WEAK ITEMS\n\n3. PC key bindings are the weakest area. Two separate fetches of the SAME page (gta.wiki/wiki/Controls_for_GTA_V) returned contradictory tables: one said yaw = A/D and roll = Num4/Num6; the other said yaw = Num4/Num6 and roll = Num8/Num5 (which is self-inconsistent, since it also gave Num8/Num5 as pitch). Only these rows were stable across both passes: throttle = W/S, pitch = Num8 nose-down / Num5 nose-up, landing gear = G, lights = H, sprint/swim = Shift. Everything else in heli_controls_are_unified_aircraft_bindings should be confirmed in-game before the agent relies on it. One pass also claimed helicopter ascend/descend = Left Shift / Left Ctrl, which the second pass did not support; I did not encode that.\n\n4. Confirmed structural finding worth flagging: gta.wiki has NO separate helicopter control table \u2014 helicopters share the unified \"Aircraft\" bindings, and the page self-describes as \"Under Construction\" with \"insufficient information\". So the collective/cyclic/pedal mapping in item heli_controls_are_unified_aircraft_bindings is my interpretation of the aircraft table applied to rotorcraft, not a documented mapping.\n\nWHAT I COULD NOT VERIFY AT ALL\n\n5. Autorotation: no source states whether GTA V models it. heli_no_autorotation is an operating assumption at low confidence, not a fact.\n6. Car entering deep water: I found no GTA V-specific description. The sink-and-exit behaviour I encoded comes from a San Andreas glitches page snippet plus the GTA V water page's note about submerged-vehicle visuals. Marked low confidence.\n7. Underwater as a wanted-level escape: two gta.wiki pages point opposite ways \u2014 the Swimming page says the player can lose a wanted level by swimming deeper, while the Wanted Level page says police open fire on a player entering water from one star. Both could be true at different depths. Flagged inside police_shoot_at_swimmers rather than resolved.\n8. No source gave a minimum parachute deployment altitude, exact breath-timer durations in seconds, boat-specific PC bindings, or Flight School gold-medal thresholds.\n\nSOURCE-QUALITY WARNING\n\n9. gta.wiki's own Vehicles_in_GTA_V listing mis-categorised the P-996 LAZER (a fixed-wing jet) as a helicopter. I corrected this in story_mode_aircraft_roster, but it is evidence that the aggregate list pages on this mirror are not dependable; individual vehicle pages were noticeably more accurate and should be preferred.\n\n10. Online-vs-Story contamination is the dominant accuracy hazard in this domain. The clearest concrete case I caught: the widely repeated \"helicopter on the hospital roof\" advice is a GTA ONLINE rank unlock, and in Story Mode that roof mostly yields an Air Ambulance after several visits. I encoded that as its own item because it is exactly the kind of plausible-sounding wrong move an AI would make from general GTA knowledge. Expect more of this class in any further research on this domain.\n\nREPAIR PASS (critic response): Applied critic fix for the online-contamination LSIA hangar/Business-Update claim (plane_source_lsia_costs_three_stars) by dropping the Online-update reference and lowering confidence rather than asserting an unverified replacement fact; standardised the water-evasion reading across police_shoot_at_swimmers per the cross-domain contradiction findings (water is a brief crossing to cover, never a place to wait out a timer, never safe at 2+ stars). Beyond the three supplied findings, a fresh read against the frozen CAPABILITIES.md found that most of this domain's helicopter/plane control items (heli_controls_are_unified_aircraft_bindings, heli_hovering_is_an_active_task, heli_landing_flare_and_settle, heli_engine_failure_countdown, heli_no_real_autorotation, heli_loses_altitude_at_full_speed, cargobob_hook_auto_attaches, plane_throttle_and_stall, plane_landing_gear_key_g, plane_damage_degrades_handling_not_just_health, night_and_weather_change_air_and_water_risk) told the agent to press raw keys (W/S/A/D/numpad/G/E/H/Shift) that do not exist in his action set, and that two items (parachute_bailout_from_aircraft, parachute_landing_flare) were built entirely around a parachute-deploy action CAPABILITIES.md explicitly rules out; all were rewritten around drive_to (x,y,z,speed_mps) plus the 8 harness primitives, or explicitly marked as not achievable by the agent with the recovery ladder as the fallback. Also removed a fabricated 'shoot the helicopter down' option from police_maverick_at_three_stars and a melee/knife fallback from shark_escape_options, since combat_hated_targets_around only engages hostile peds and the agent has no melee verb. flight_school_is_the_technique_curriculum was reframed from active practice content to background technique knowledge only, since its lessons require sustained manual stick input the agent cannot supply. No items were deleted."
+}

@@ -1,0 +1,955 @@
+{
+  "domain": "activities_freeroam",
+  "items": [
+    {
+      "id": "freeroam_content_is_story_gated",
+      "category": "meta",
+      "cue": "Idle with no mission active, no objective blip, and a self-directed goal needs picking; or the agent drives to an activity marker and nothing triggers.",
+      "context": "Early-campaign save files. Applies to almost every free-roam activity in GTA V Story Mode.",
+      "meaning": "Nearly all free-roam activities are locked behind specific story missions and only appear on the map afterwards. Verified examples: off-road races and stock car races unlock after 'Mr. Philips'; sea races after 'Hood Safari'; triathlons after \"Daddy's Little Girl\"; tennis after 'Complications'; darts after 'Crystal Maze'; yoga after 'Did Somebody Say Yoga?'; Flight School after 'Friends Reunited'; hunting after Cletus's 'Fair Game'; the 13 parachute jumps after Dom's 'Risk Assessment'; Hao's street races after 'Shift Work'. A marker that isn't there yet is a locked activity, not a bug.",
+      "suggested_action": "Keep a per-save table of which activities have been confirmed reachable. Before committing to a long drive to an activity, check the table; if unconfirmed, treat the trip as exploratory and have a fallback goal (wander_drive, landmark visit) ready so the stream doesn't stall on an empty field.",
+      "avoid": "Repeatedly driving 3km to the same locked marker and narrating confusion. Also avoid assuming a wiki's activity list matches the current save — it describes a fully-unlocked game.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Unlock missions above are individually sourced and reliable; the *complete* gating table for every activity is not. Some activities also have their own time windows on top of story gating.",
+      "sources": [
+        "https://gta.wiki/wiki/Offroad_Races",
+        "https://gta.wiki/wiki/Sea_Races",
+        "https://gta.wiki/wiki/Triathlon",
+        "https://gta.wiki/wiki/Tennis",
+        "https://gta.wiki/wiki/Darts",
+        "https://gta.wiki/wiki/Yoga",
+        "https://gta.wiki/wiki/Flight_School",
+        "https://gta.wiki/wiki/Hunting",
+        "https://gta.wiki/wiki/Parachute_Jumps",
+        "https://gta.wiki/wiki/Hao_Street_Races"
+      ]
+    },
+    {
+      "id": "activity_markers_are_walk_in_coronas",
+      "category": "meta",
+      "cue": "the agent is standing on or driving over an activity location but no activity starts.",
+      "context": "All hobbies/pastimes: races, golf, tennis, darts, shooting range, yoga, triathlon, parachute jumps.",
+      "meaning": "GTA V activities start by the player *on foot or in a valid vehicle* entering a coloured ground marker (corona), then confirming a prompt. Races additionally require a vehicle of the correct class — off-road races want bikes/ATVs or SUVs/pickups, Hao's races want a Sports car (the Vespucci Canals one is Motorcycle class), sea races want a Seashark. If you arrive in the wrong class the game will usually supply a stock vehicle on the grid, but only if you enter the marker on foot.",
+      "suggested_action": "Approach with drive_to a point ~20m short, exit_vehicle, then walk_to the marker centre, then send the confirm keypress. If a race won't accept the current car, leave it and re-enter the marker on foot.",
+      "avoid": "Driving a truck into a Sports-class race marker and concluding the activity is broken. Avoid parking directly on top of the marker — the vehicle can block the on-foot trigger.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Exact prompt keys and corona radii must be measured on the real machine; race class rules are sourced, marker mechanics are inferred from consistent descriptions rather than a single explicit source.",
+      "sources": [
+        "https://gta.wiki/wiki/Offroad_Races",
+        "https://gta.wiki/wiki/Hao_Street_Races",
+        "https://gta.wiki/wiki/Sea_Races"
+      ]
+    },
+    {
+      "id": "strangers_and_freaks_question_mark_blips",
+      "category": "strangers_freaks",
+      "cue": "A '?' blip appears on the minimap/map, colour-coded: green = Franklin, blue = Michael, orange = Trevor.",
+      "context": "Free roam, no mission active. The blip only appears for the matching protagonist and often only within a time-of-day window.",
+      "meaning": "Strangers and Freaks are the game's named side-story missions. The '?' hides the character's identity until the agent walks into the marker. These are the richest free-roam content in the game — they have real dialogue, real characters and real payoffs, and 20 of them are needed for 100%.",
+      "suggested_action": "Treat a same-colour '?' blip within a few hundred metres as a high-priority self-directed goal: drive_to it, exit, walk into the marker. Announce it as 'someone wants something and I have no idea who' — the reveal is good television.",
+      "avoid": "Chasing a '?' blip of the wrong colour (it will not trigger for the current character). Avoid switching characters mid-approach and losing the blip.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Blip colour convention is well documented; the harness must actually expose map blips in game state for the agent to use this — if it only exposes the single objective blip, this cue is unusable as written.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/strangers/",
+        "https://gta.wiki/wiki/Strangers_and_Freaks"
+      ]
+    },
+    {
+      "id": "stranger_roster_michael",
+      "category": "strangers_freaks",
+      "cue": "Playing as Michael, idle in Los Santos or at the Sonar Collections Dock in Paleto Cove.",
+      "context": "Michael-specific strangers, post-unlock.",
+      "meaning": "Michael's strangers: Abigail Mathers at the Sonar Collections Dock (Paleto Cove) — 'Death at Sea' / 'What Lies Beneath', which open the submarine-based nuclear-waste collection hunt; and the Epsilon Program (via The Truth), an eight-part cult questline spread over Blaine County and Los Santos. Mary-Ann Quinn (fitness challenges) and Barry (cannabis) also have Michael-facing encounters.",
+      "suggested_action": "For a long, low-combat stream block, take Michael to the Sonar dock and run the submarine content. For comedy, run Epsilon — it is written as a scam and the agent being fleeced by a cult is inherently entertaining.",
+      "avoid": "Starting Epsilon when the agent is broke: the questline demands escalating cash donations and will dead-end. Avoid taking the submarine out during a storm without checking oxygen.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Exact Epsilon donation amounts and step order were not verified from a second source; the Epsilon Program article on gta.wiki resolved only to a disambiguation page.",
+      "sources": [
+        "https://gta.wiki/wiki/Strangers_and_Freaks",
+        "https://www.gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "stranger_roster_franklin",
+      "category": "strangers_freaks",
+      "cue": "Playing as Franklin, idle in Strawberry, Vinewood, or the Senora Desert trailer park.",
+      "context": "Franklin-specific strangers, post-unlock.",
+      "meaning": "Franklin's strangers: Hao at Vinewood Self Storage in Strawberry ('Shift Work' → the five street races); Tonya Wiggins in Strawberry (five 'Pulling Favors' tow-truck missions); Beverly Felton in West/Downtown Vinewood (six paparazzo missions, which also open the Wildlife Photography Challenge); Dom Beasley in Vinewood Hills and at LSIA (four extreme-sports missions that unlock all 13 parachute jumps); Omega at the Senora Desert trailer park ('Far Out' → the 50 spaceship parts); Peter Dreyfuss in Vinewood Hills ('A Starlet in Vinewood' → the 50 letter scraps); and the Sasquatch hunter at Raton Canyon ('The Last One'), which only appears after 100% completion.",
+      "suggested_action": "Dom is the single highest-value stranger for an entertainment stream — his missions unlock the parachute jump library. Prioritise him. Hao is second (unlocks night street racing).",
+      "avoid": "Treating Omega's and Dreyfuss's 50-item collectible hunts as a stream activity — 50 scattered pickups is hours of dead air. Sample a few, don't grind them.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "'The Last One' availability is tied to 100% completion, which this save will almost certainly never reach.",
+      "sources": [
+        "https://gta.wiki/wiki/Strangers_and_Freaks",
+        "https://gta.wiki/wiki/Parachute_Jumps",
+        "https://gta.wiki/wiki/Hao_Street_Races",
+        "https://www.gta.wiki/w/Wildlife_Photography_Challenge"
+      ]
+    },
+    {
+      "id": "stranger_roster_trevor",
+      "category": "strangers_freaks",
+      "cue": "Playing as Trevor, idle in Sandy Shores, Grand Senora Desert, or Paleto Bay.",
+      "context": "Trevor-specific strangers, post-unlock.",
+      "meaning": "Trevor's strangers: Maude Eccles (four bail-bond bounty hunts across Blaine County); Cletus Ewing at Sandy Shores / Paleto Forest ('Target Practice', 'Fair Game' → unlocks the hunting minigame); Nigel and Mrs. Thornhill in Vinewood Hills (seven celebrity-stalking missions); Joe & Josef, the Minutemen border patrol (three missions, Grand Senora Desert and Paleto Bay); Josh Bernstein (real-estate arson); Mrs. Philips in Sandy Shores; and five Rampages.",
+      "suggested_action": "Cletus first if you want hunting unlocked. Maude's bail bonds are excellent stream content: each is a manhunt with a choice to bring the target in alive or dead, which gives the agent a genuine on-air decision.",
+      "avoid": "Rampages are pure massacre with no arc and will draw a maximum wanted response — schedule them deliberately, never as a default idle activity, and never near a story mission you care about.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Rampage count of five is from a single source (gta.wiki Strangers list); the dedicated Rampage article did not resolve.",
+      "sources": [
+        "https://gta.wiki/wiki/Strangers_and_Freaks",
+        "https://gta.wiki/wiki/Hunting"
+      ]
+    },
+    {
+      "id": "hao_street_races_night_only",
+      "category": "races",
+      "cue": "Playing as Franklin; in-game clock reads between 20:00 and 05:00; the agent is in or near a Sports-class car in south/central Los Santos.",
+      "context": "After completing Hao's 'Shift Work'. Each race unlocks the next by text message after a win.",
+      "meaning": "Five street races, Franklin-exclusive, available only 20:00–05:00. In order: South Los Santos (Davis, 2 laps, free first time then $100 buy-in, $200–450); City Circuit (Vinewood, 1 lap, $500, $2,250); Airport (LSIA/Grove Street, 2 laps, $1,000, $4,500); Freeway (La Mesa, 2 laps, $1,250, $5,625); Vespucci Canals (2 laps, Motorcycle class, $1,500, $6,750).",
+      "suggested_action": "Schedule street racing as the night block of the stream. Bring a fast Sports car you already modified at Los Santos Customs — the buy-in rises each time, so a win streak is self-funding. Vespucci Canals needs a bike, not a car.",
+      "avoid": "Turning up before 20:00 and reporting the race 'missing'. Avoid entering the later races with insufficient cash for the buy-in. Avoid the Vespucci Canals race in a car — wrong class.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Payout figures come from one source; treat exact dollar values as approximate. Whether replays keep paying full price was not verified.",
+      "sources": [
+        "https://gta.wiki/wiki/Hao_Street_Races",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/"
+      ]
+    },
+    {
+      "id": "offroad_races_blaine_county",
+      "category": "races",
+      "cue": "Any protagonist, positioned in Blaine County (Sandy Shores, Grapeseed, Raton Canyon, Route 68) with no mission active.",
+      "context": "Unlocked after 'Mr. Philips' via a text from Ron. Open to all three protagonists.",
+      "meaning": "Six off-road races. Four are bike/ATV class — Canyon Cliffs (Raton Canyon to the Alamo Sea), Mineward Spiral (Davis Quartz, a NIGHT race, roughly 20:00–03:00), Valley Trail (Cassidy Creek), Lakeside Splash (Marina Drive, Sandy Shores to Grapeseed). Two are SUV/pickup class — Ridge Run (Galileo Road to Route 68) and Eco Friendly (RON Alternates wind farm). Each win pays $500; a first win per character grants the Moto X outfit.",
+      "suggested_action": "Best daytime Blaine County filler. The wind-farm and canyon routes are visually strong for stream. Bring a Sanchez or similar dirt bike for the four bike races; anything without off-road suspension will lose.",
+      "avoid": "Mineward Spiral before 20:00 — it will not be there. Avoid taking a low-clearance sports car to any of these; you will beach it on the first rise and the run becomes a slow-motion failure.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Mineward Spiral's exact time window (20:00–03:00) is from one source.",
+      "sources": [
+        "https://gta.wiki/wiki/Offroad_Races"
+      ]
+    },
+    {
+      "id": "sea_races_seashark",
+      "category": "races",
+      "cue": "Any protagonist near water at Cypress Flats (mouth of the LS river), the Palmer-Taylor Power Station coast, El Gordo Lighthouse, or the head of the Zancudo River opposite Stab City.",
+      "context": "Unlocked after 'Hood Safari'. All three protagonists.",
+      "meaning": "Four Seashark (jet ski) races. Three have seven AI opponents, the Lago Zancudo one has three. There is NO cash reward — medals only, which count toward completion. An aggressive catch-up/rubber-band AI keeps the field close. Weather materially changes difficulty, especially at El Gordo where swell is worst.",
+      "suggested_action": "Use these as visual variety, not income. Rubber-banding means the race stays close to the end, which is good for a stream. Check weather first: a storm at El Gordo turns it into a genuine struggle, which is entertaining but likely to be lost.",
+      "avoid": "Framing this as a money-making activity — the agent will look foolish when nothing pays out. Avoid falling off the Seashark near rocks; remounting in swell wastes a lot of airtime.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Whether an owned Seashark can be substituted at every one of the four start points was not separately verified.",
+      "sources": [
+        "https://gta.wiki/wiki/Sea_Races"
+      ]
+    },
+    {
+      "id": "triathlons_are_bad_television",
+      "category": "races",
+      "cue": "Marker at Vespucci Beach, Seaview Road in Grapeseed, or Marina Drive in Sandy Shores; any protagonist.",
+      "context": "Unlocked after \"Daddy's Little Girl\"; each triathlon unlocks the next.",
+      "meaning": "Three swim/cycle/run triathlons. The Coyote Cross Country event at Sandy Shores runs roughly 30 minutes of real time and effectively requires 100% stamina; the Alamo Sea one is about 4 minutes. Completing them permanently raises stamina, strength and lung capacity. There is an AI catch-up system.",
+      "suggested_action": "Only run the short Vespucci and Alamo Sea events, and only as a deliberate 'the agent gets fit' bit. The stat gains genuinely help later swimming and running.",
+      "avoid": "Starting the 30-minute Coyote Cross Country event on stream — it is half an hour of button mashing with no incident. Avoid starting any triathlon at low stamina; the agent will visibly fail and the run is unrecoverable.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "The ~30 minute figure is from a single source and depends on stamina; treat as an order-of-magnitude warning rather than an exact duration.",
+      "sources": [
+        "https://gta.wiki/wiki/Triathlon"
+      ]
+    },
+    {
+      "id": "stock_car_races_monster_truck",
+      "category": "races",
+      "cue": "Any protagonist near the Yellow Jack Inn / Panorama Drive in the Grand Senora Desert.",
+      "context": "Unlocked after 'Mr. Philips'. Enhanced/PC versions.",
+      "meaning": "Five stock car races, all on the same short dirt oval near the Yellow Jack Inn (north up Panorama to Smoke Tree Road, back down Cat Claw Avenue past Thomson Scrapyard), 5 laps, 9 competitors. Each win awards a themed car: Burger Shot Stallion, Redwood Gauntlet, Pißwasser Dominator, Sprunk Buffalo, and finally the Cheval Marshall monster truck.",
+      "suggested_action": "Worth running the full set purely to earn the Marshall — a monster truck unlocks a lot of ridiculous free-roam goals (crushing traffic, climbing terrain, stunt jumps). Announce the reward ladder so viewers have a reason to stay through five laps.",
+      "avoid": "Don't expect this to be available on a bare vanilla legacy save — one source describes it as available in enhanced versions for players who previously owned PS3/360 copies.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The 'returning players only' restriction is from a single source and may not apply to the current PC/Enhanced build. Verify on the real machine before promising the Marshall on stream.",
+      "sources": [
+        "https://www.gta.wiki/w/Stock_Car_Racing"
+      ]
+    },
+    {
+      "id": "parachute_jump_library",
+      "category": "parachuting",
+      "cue": "Franklin has completed Dom Beasley's 'Risk Assessment'; a parachute-icon blip is visible; the agent is idle with no mission.",
+      "context": "13 parachute jumps total. Any protagonist can do them once Dom unlocks them.",
+      "meaning": "Eight are helicopter jumps where a green Maverick and a pilot wait at the marker and fly you up: Pacific Tour (land on a moving Squalo boat off Vespucci), Photo Finish (Vinewood Racetrack infield), Turbine Terror (through checkpoints between wind turbine blades), Runaway Train (land on a moving freight train), Carving the Mountain (Mount Chiliad down to Raton Canyon), The Fall of the Alamo (across the Alamo Sea to Grapeseed), Dammed If You Don't (over Land Act Dam), The Decline (a Frogger from Procopio Promenade). Five are base jumps started on foot from height: Bank Bailout (Maze Bank Tower, motorcycle launch, land in Burton), What Goes Up... (climb the Mile High Club crane, land on a moving Hauler), Falling Mouse and Razor Rock Dive (Raton Canyon outcrops), Aim for the Fairway (Eclipse Towers to the golf course).",
+      "suggested_action": "CAPABILITY BLOCKER — do not schedule any of these as a goal to complete. Once airborne there is no vehicle for `drive_to` to control and no parachute-deploy action anywhere in the agent's vocabulary (see CAPABILITIES.md: 'no parachute deploy' is listed explicitly). That means he cannot open the canopy, cannot steer a descent, and cannot land on a checkpoint or a moving target — every one of these 13 jumps ends in an uncontrolled fall. Keep this item as background knowledge (what the jumps are, where they are, in case a future harness version adds flight/freefall control) but do not send the agent off a height expecting a jump sequence to play out.",
+      "avoid": "Do not have the agent walk into a parachute-jump marker and start the jump — without a deploy action he will fall to his death every time, and narrating 'he threaded the turbine blades' or 'he landed on the train' when no such control input exists is exactly the hallucinated-action failure CAPABILITIES.md warns about. If he is at the marker for another reason (sightseeing, chased there), do not confirm the jump prompt.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Runaway Train is described as unavailable between certain story missions. 'The Decline' is classified inconsistently between heli-jump and base-jump lists. None of that matters until the capability blocker above is resolved.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute_Jumps",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V"
+      ]
+    },
+    {
+      "id": "parachute_acquisition",
+      "category": "parachuting",
+      "cue": "the agent plans a jump from height (tower, cliff, aircraft) and inventory shows no parachute.",
+      "context": "Any free-roam jump not started from an official parachute-jump marker.",
+      "meaning": "Ad-hoc base jumping requires a parachute in inventory. Parachutes are sold at Ammu-Nation, and the scripted jump markers hand you one. Official heli jumps supply the aircraft, pilot and chute; freelance jumps supply nothing. CAPABILITY NOTE: carrying a parachute is moot for the agent either way — deploying one mid-fall is not an action his vocabulary supports at all (see `parachute_jump_library`), so buying a chute does not turn a fatal fall into a survivable jump for him.",
+      "suggested_action": "Do not build a 'today we jump off things' block around this — the missing piece is not the parachute in inventory, it's that there is no deploy action to pull it. Skip planning around ad-hoc base jumps until the harness gains a freefall/parachute control primitive.",
+      "avoid": "Do not send the agent off a height 'because he bought a chute' — a purchased-but-undeployable chute still ends in a fatal fall. Avoid the failure loop of dying, respawning at a hospital far away, and repeating a jump that was never survivable to begin with.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Ammu-Nation parachute availability is widely reported but not confirmed in the two sources fetched here. Moot until the capability blocker above is resolved.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute_Jumps",
+        "https://www.gta.wiki/w/Ammu-Nation_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "flight_school_lsia",
+      "category": "aviation",
+      "cue": "Michael or Franklin at Los Santos International Airport, Exceptionalists Way, after 'Friends Reunited'.",
+      "context": "Twelve lessons, bronze/silver/gold medals.",
+      "meaning": "Flight School has twelve lessons: Training Take Off, Runway Landing, Inverted Flight, Knife Flight, Flat Hatting, Touch Down, Loop the Loop, Helicopter Course, Helicopter Speed Run, Skydiving, Drop Zone, Earn Your Wings. Michael and Franklin need it to raise flying skill; Trevor already flies well but can still cap out. Completing it unlocks additional aircraft spawns around San Andreas, including red Dusters.",
+      "suggested_action": "Run flight school early with Michael or Franklin. Low flying skill makes every later helicopter and plane goal wobbly and crash-prone; a competent pilot unlocks knife flights, under-the-bridge runs and heli parachute jumps as reliable content.",
+      "avoid": "Attempting knife flights or bridge runs before flying skill is trained — the agent will clip a building repeatedly and the segment becomes a loop of crashes. Avoid doing flight school with Trevor to 'train' him; he does not need it.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Which aircraft spawns unlock, and where, was described only generally by the source.",
+      "sources": [
+        "https://gta.wiki/wiki/Flight_School",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V"
+      ]
+    },
+    {
+      "id": "knife_flights",
+      "category": "aviation",
+      "cue": "the agent is flying a FIXED-WING aircraft over central Los Santos with flying skill trained and no wanted level.",
+      "context": "15 knife flights exist; 8 count toward 100%.",
+      "meaning": "A knife flight is threading a fixed-wing aircraft through a narrow gap between buildings with the wings rolled vertical. Helicopters cannot register one. Concentrations: Pillbox Hill (5), West Vinewood (2), Rockford Hills (2), Del Perro (2), plus single gaps in Downtown Vinewood, Little Seoul, Pacific Bluffs and Hawick.",
+      "suggested_action": "Pillbox Hill is the efficient hunting ground — five gaps in one downtown district, so one flight can chain several. Excellent stream content: high skill, instant visible success or a spectacular fireball.",
+      "avoid": "Trying knife flights in a helicopter (never counts). Avoid attempting them over downtown with a wanted level — police helicopters in the same airspace will end the run.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "The listed per-district counts sum to 14 of 15 in the source; one location is unaccounted for.",
+      "sources": [
+        "https://gta.wiki/wiki/Knife_Flights"
+      ]
+    },
+    {
+      "id": "under_the_bridge_runs",
+      "category": "aviation",
+      "cue": "the agent is flying low over the Los Santos drainage canals / river, particularly around La Puerta and Banning.",
+      "context": "50 bridges total; 25 count toward 100%.",
+      "meaning": "Flying an aircraft or helicopter under a bridge registers it. The bridges cluster heavily in the Los Santos drainage canals and river system, with the rest spread across Blaine County. Stunt planes work better under the very low overpasses; a helicopter may have to skim the water.",
+      "suggested_action": "Chain them: one continuous low run along the LS river/aqueduct picks up many in a single flight, which is a strong uninterrupted stream segment. Pair it with a knife-flight pass downtown afterwards.",
+      "avoid": "Do not attempt these during a mission replay — one source states flights during replays show the completion graphic but do not actually count. Avoid a helicopter under the lowest canal bridges; rotor contact with the wall is instant destruction.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The source's regional split ('Los Santos: 10') is inconsistent with the canal-heavy description and with common community counts; treat the distribution as unverified while the total of 50 and the 25-for-100% threshold are solid.",
+      "sources": [
+        "https://gta.wiki/wiki/Under_the_Bridge",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V"
+      ]
+    },
+    {
+      "id": "stunt_jumps_50",
+      "category": "stunts",
+      "cue": "the agent is in a motorcycle or fast car and passing a distinctive ramp — a broken bridge, construction ramp, jetty, or canyon lip.",
+      "context": "50 unique stunt jumps: 40 in Los Santos, 10 in Blaine County. Any 25 count toward 100%; all 50 give the 'Show Off' achievement.",
+      "meaning": "Hit the ramp at high speed and land the vehicle without wrecking. Named examples: Paleto Bay construction ramp into a parking lot; the broken wooden bridge at Parachute Pier on the western map edge; Raton Canyon trail; Mount Gordo barrier toward the lighthouse; Sandy Shores bike ramp north of the hotel; the Bolingbroke Penitentiary cliff jump that lands inside the prison; Los Santos Golf Course broken bridge; Del Perro Beach jetty; and the Maze Bank Arena aqueduct jump — reportedly the biggest, clearing three buildings onto a helipad.",
+      "suggested_action": "Use a motorcycle for most — it clears ramps more predictably than a car and gives a cleaner mid-air read. Bank the aqueduct/Maze Bank Arena jump as a headline attempt. Note: Franklin's driving-focus special ability is not available to the agent (no special-ability action exists), so do not plan on mid-air steering assistance from any protagonist — the approach angle and speed on the ramp are the only levers that matter.",
+      "avoid": "The Bolingbroke Penitentiary jump lands inside a prison — expect an immediate wanted level; only attempt it when a police chase is the intended content. Avoid attempting stunt jumps in a heavy or low-clearance car; it will bottom out on the ramp.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Individual ramp descriptions come from one guide; approach speeds and exact ramp geometry must be learned by trial on the real machine.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/gta-5-stunt-jumps-locations-all-50-stunt-jumps-map-guide",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V"
+      ]
+    },
+    {
+      "id": "hunting_trevor_daylight",
+      "category": "leisure",
+      "cue": "Playing as Trevor, in-game clock between 05:00 and 19:00, near the elk-head icon in the northwest of the map (Chiliad Mountain State Wilderness).",
+      "context": "Unlocked after Cletus's 'Fair Game'.",
+      "meaning": "Trevor-only hunting. Entering the marker auto-equips a hunting outfit, a sniper rifle with unlimited ammo, and an animal call; a Blazer quad waits outside the trailer. The HUD shows score, medal, earnings, wind direction and wind speed. Targets include elk, coyotes, boars, cougars and birds. Precise manual shots — head, neck, heart — pay bonus points and money; each kill must be photographed with the phone and sent to Cletus to get paid. Explosive or heavy weapons slash the payout. IMPORTANT CAPABILITY NOTE: scoring bonus shots requires the player to manually aim at a specific body part and fire. The agent has no aim action and no fire action at all (`combat_hated_targets_around` only hands the engine a radius and targets hostile PEDS, not wildlife, and picks its own target) — he cannot select a body part, cannot choose to shoot, and animals likely are not even hostile-flagged peds the harness can point him at. He also cannot use the phone to send the trophy photo (no phone action).",
+      "suggested_action": "Do not schedule this as a scored hunting challenge — there is no action in the agent's vocabulary that lets him aim, fire, or photograph a kill, so the score/medal/payout loop is not something he can execute. If a random event or story beat puts him at the hunting ground anyway, treat it as an atmosphere/location beat (narrate the wind, the wilderness, Cletus's trailer) rather than a hunt to complete, and move on to a goal built from real actions (a drive, a race, a jump).",
+      "avoid": "Do not tell the agent to 'take the heart shot' or otherwise aim at a body part — that is an action he cannot perform, and claiming he did it when no such input was ever sent is exactly the kind of hallucinated commentary that damages the stream. Avoid scheduling this activity at all until the harness exposes an aim/fire primitive.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Payout tables per animal were not enumerated by the source. This item's game facts are solid; what changed is the capability note above — see CAPABILITIES.md.",
+      "sources": [
+        "https://gta.wiki/wiki/Hunting"
+      ]
+    },
+    {
+      "id": "wildlife_photography_kraken",
+      "category": "leisure",
+      "cue": "Playing as Franklin after the first Beverly Felton paparazzo mission; an animal is visible in the world (dog, cat, deer, cougar, cow, pig, seagull).",
+      "context": "Enhanced versions of GTA V only. 20 species.",
+      "meaning": "Photograph 20 different animal species with Snapmatic, no filters or borders, subject centred and alive. Animals span the whole map: cats in Los Santos alleys, cows and pigs near Grapeseed, deer and mountain lions in Blaine County forest, seagulls on the coast, dogs in parks. Completing all 20 awards the Kraken submersible, which then spawns at the Cape Catfish pier in the San Chianski Mountain Range.",
+      "suggested_action": "Perfect opportunistic background goal — whenever an unphotographed species wanders into view during any other activity, take the shot. The Kraken payoff then unlocks underwater exploration as a whole new content category.",
+      "avoid": "Using the stun gun on small animals like hens — it kills them and dead subjects do not count. Avoid chasing a mountain lion on foot for a centred photo.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Enhanced-version exclusivity and the exact 20-species list come from a single source. Confirm the challenge exists on the installed build before promising the Kraken.",
+      "sources": [
+        "https://www.gta.wiki/w/Wildlife_Photography_Challenge"
+      ]
+    },
+    {
+      "id": "ammunation_shooting_ranges",
+      "category": "shops",
+      "cue": "the agent is at the Ammu-Nation in Cypress Flats or Pillbox Hill (Downtown) with at least $14.",
+      "context": "Two of the eleven Ammu-Nations have ranges.",
+      "meaning": "Entry costs $14. Challenges cover six weapon categories — Handguns, SMGs, Assault Rifles, Shotguns, Light Machine Guns, Heavy Weapons — scored on manual accuracy against range targets. Medals are earned per protagonist, separately. Store-wide discounts: all bronze = 10% off, all silver = 15%, all gold = 25%. (One source notes Michael's bullet-time is usable here in normal play; irrelevant to the agent either way since he has no special-ability action.) Railgun challenges are not required for the discount. CAPABILITY NOTE: earning any medal requires manually aiming at and firing on the range targets. The agent has no aim action and no fire action, and `combat_hated_targets_around` does not apply here — there are no hostile peds, just static/moving practice targets the engine doesn't expose to that primitive. He cannot earn medals or the discount.",
+      "suggested_action": "Do not schedule this as a way to earn medals or the weapon discount — there is no action that lets the agent shoot at the range targets. If he ends up here (e.g. following a marker on foot), treat it only as a brief indoor location beat, not a challenge to complete.",
+      "avoid": "Do not narrate the agent earning a medal or a store discount here — no shots were actually fired. Assuming medals carry across characters is also wrong (they do not, on the rare chance this becomes achievable later).",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "One source names Downtown Los Santos rather than 'Pillbox Hill' as a range location; these are the same district under different naming, but confirm on the map. Confidence lowered from the original pass because the activity is currently non-functional for the agent regardless of location accuracy.",
+      "sources": [
+        "https://gta.wiki/wiki/Ammu-Nation_Shooting_Ranges",
+        "https://www.gta.wiki/w/Ammu-Nation_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "ammunation_store_map",
+      "category": "shops",
+      "cue": "the agent is low on ammo, has no armour, or needs a parachute, and is anywhere on the map.",
+      "context": "Free roam, no wanted level (shops refuse service or the clerk panics under a wanted level).",
+      "meaning": "Eleven Ammu-Nation stores: Downtown LS (Adam's Apple Blvd & Elgin Ave), Little Seoul, Cypress Flats (Popular St), Tataviam Truckstop, Paleto Bay, Great Chaparral, Sandy Shores (Algonquin Blvd), Morningwood (Blvd Del Perro), Hawick (Vinewood Plaza), La Mesa (Vespucci Blvd), and Chumash. That spread means there is almost always one within a short drive, including two in northern Blaine County.",
+      "suggested_action": "Before any planned combat, jump, or hunting block, route through the nearest Ammu-Nation for ammo, body armour and a parachute. Paleto Bay and Sandy Shores cover the whole north.",
+      "avoid": "Driving all the way back to Los Santos for supplies while in Blaine County. Avoid entering a store with police in pursuit.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Store list is from one source; a couple of stores are named by intersection rather than exact coordinate.",
+      "sources": [
+        "https://www.gta.wiki/w/Ammu-Nation_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "los_santos_customs_four_branches",
+      "category": "shops",
+      "cue": "the agent is driving a car he intends to keep, or wants to shed a wanted level, near Carcer Way (Burton), Popular Street (La Mesa), Greenwich Parkway (LSIA), or Route 68 (Harmony).",
+      "context": "In a vehicle. Wanted-level shedding requires police to have lost visual contact before entry.",
+      "meaning": "Four Los Santos Customs branches. They do cosmetic work (wheels, paint, bumpers, exhausts, hoods, neon, tint, body kits) and performance work (engine levels 1–4, transmission, brakes, suspension, armour, turbo). LSC replaced Pay 'n' Spray: entering resprays and clears a wanted level, provided police did not see you go in. Franklin can buy the Harmony (Route 68) branch for $349,000 after 'Nervous Ron'; it yields $1,600/week and makes ALL modifications free — but only for Franklin and only at that location.",
+      "suggested_action": "If Franklin owns Harmony, drive any car worth keeping out to Route 68 and build it for free, then switch characters to use it. Otherwise, use the nearest branch as an escape valve mid-chase.",
+      "avoid": "Driving into LSC with a helicopter directly overhead — the wanted level survives and police wait outside. Avoid paying for mods in Los Santos when the free Harmony branch is owned.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The wanted-level-clearing behaviour is described by one source and depends on line of sight; the exact detection rule should be tested live.",
+      "sources": [
+        "https://gta.wiki/wiki/Los_Santos_Customs",
+        "https://www.gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "makeover_shops_clothing_barber_tattoo",
+      "category": "shops",
+      "cue": "the agent has cash, no wanted level, and needs a low-stakes segment — or has just been through something that would visibly change a character.",
+      "context": "Los Santos and Blaine County shops. Each protagonist has separate wardrobes and hairstyles.",
+      "meaning": "Clothing (Binco, Suburban, Ponsonbys, Discount Store), barbers (Herr Kutz, Bob Mulét, Beach Combover, Hair on Hemlock) and tattoo parlours are purely cosmetic — no stat effect — but they permanently change how the character looks on stream. Some activities force a costume regardless (hunting and yoga override the outfit; triathlons and off-road race wins grant outfits).",
+      "suggested_action": "Use makeover shops as a persistent visual gag: let a chat-facing or self-chosen theme drive the agent's look for a stream block. Character appearance is one of the few things a viewer notices immediately.",
+      "avoid": "Spending a long segment cycling a clothing menu — the browsing UI is not interesting to watch. Pick fast, wear it, leave. Do not expect a tattoo or haircut to change any gameplay stat.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Specific store brand names and their exact locations were not verified against two sources here; outfit overrides for hunting/yoga/triathlon are sourced.",
+      "sources": [
+        "https://gta.wiki/wiki/Hunting",
+        "https://gta.wiki/wiki/Yoga",
+        "https://gta.wiki/wiki/Triathlon",
+        "https://gta.wiki/wiki/Offroad_Races"
+      ]
+    },
+    {
+      "id": "golf_los_santos_country_club",
+      "category": "leisure",
+      "cue": "the agent is near the Los Santos Golf Club in Richman with at least $100 and no wanted level.",
+      "context": "Any protagonist. Also playable as a friend activity.",
+      "meaning": "$100 entry, a 9-hole round. Club selection, stroke type, aim, power preset, spin (fade/draw), and slope indicators on the greens. Wind and rain affect play; hazards carry proper penalties. A golf cart is available between shots. Even par or better over 9 holes is the 100% requirement. Owning the club (a $150,000,000 property) makes golf free. CAPABILITY NOTE: every shot needs manual aim, a power meter and a spin choice — none of that is in the agent's action vocabulary (only the generic contextual-prompt press is), so he cannot actually play a hole to completion.",
+      "suggested_action": "Do not schedule a round of golf as a challenge to complete — there is no action that lets the agent aim or swing. If the course is visited (e.g. as the 'Aim for the Fairway' stunt/base-jump landing site — note that jump itself is also parachute-based and currently blocked, see `parachute_jump_library`), treat it as a brief scenic beat, not a match.",
+      "avoid": "Do not narrate the agent hitting a par or a specific shot shape — no swing input was ever sent. Avoid committing airtime to a full 9 holes.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The $150,000,000 golf club price appears in the property list from one source and is far above normal story-mode income; treat club ownership as unreachable.",
+      "sources": [
+        "https://gta.wiki/wiki/Golf",
+        "https://www.gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "tennis_courts",
+      "category": "leisure",
+      "cue": "the agent is at a tennis court — Michael's mansion, the Richman Hotel, the university campus, Vespucci Beach and several others around Los Santos.",
+      "context": "Unlocked after 'Complications'.",
+      "meaning": "Tennis is free. You choose sets and difficulty first; payouts are trivial ($14 easy / $25 medium / $36 hard). Shot types include lobs, topspin and backspin, and the character's strength stat affects performance — playing tennis raises strength. The game clock pauses during a match, so a long match costs no in-game time. CAPABILITY NOTE: hitting a specific shot type requires timed directional aim, which is not in the agent's action vocabulary (only the generic contextual-prompt press is) — he cannot actually play a rally.",
+      "suggested_action": "Do not schedule a tennis match expecting the agent to play it — there is no aim/shot-type action available. If a friend-activity beat is wanted for the banter, the paused clock still makes visiting cheap, but do not narrate him winning or losing points he never actually contested.",
+      "avoid": "Do not narrate a specific shot (lob, topspin) as something the agent chose to hit. Playing tennis for money is also pointless regardless.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Sources disagree on court count (8 vs 9) and one source claims only Michael and Trevor can play as primary characters, which conflicts with the general 'any protagonist' framing elsewhere. Verify on the machine.",
+      "sources": [
+        "https://gta.wiki/wiki/Tennis",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/"
+      ]
+    },
+    {
+      "id": "darts_yellow_jack_inn",
+      "category": "leisure",
+      "cue": "the agent is at the Yellow Jack Inn in the Grand Senora Desert next to Sandy Shores.",
+      "context": "Playable after 'Crystal Maze'. Single-opponent only.",
+      "meaning": "Standard 301 down to exactly zero, finishing on a double or the bullseye; overshooting is a bust and the score resets for that turn. Only one friend at a time can play. Winning one game is a 100% item. CAPABILITY NOTE: each throw needs a timed power-and-aim input, not in the agent's action vocabulary (only the generic contextual-prompt press is) — he cannot actually win or lose a game of darts.",
+      "suggested_action": "Bundle a visit with the other Yellow Jack Inn content — the stock car oval on Panorama Drive right there is achievable via drive_to/racing and is the real content of the trip. Do not schedule darts itself as something to win; there is no throw action available.",
+      "avoid": "Do not narrate the agent winning or busting a leg of 301 — no throw was ever made. Treating darts as a headline activity was already wrong for pacing reasons and is now also wrong for capability reasons.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The source did not confirm which protagonists can play darts, nor state the 100% requirement directly; the 100% requirement is confirmed by the separate completion checklist.",
+      "sources": [
+        "https://gta.wiki/wiki/Darts",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V",
+        "https://www.gta.wiki/w/Stock_Car_Racing"
+      ]
+    },
+    {
+      "id": "yoga_michael_only",
+      "category": "leisure",
+      "cue": "Playing as Michael, at his Rockford Hills house or at the peak of Mount Gordo, after 'Did Somebody Say Yoga?'.",
+      "context": "Michael-exclusive.",
+      "meaning": "Yoga is a quick-time-event minigame with three poses — Warrior (3 QTEs), Triangle (4), Praise the Sun (7). Since each QTE is a single contextual on-screen prompt, this is one of the few minigames `press_prompt_key` can plausibly drive. Michael always wears a faded blue polo and tan shorts regardless of his outfit. It reduces stress and improves conditioning. The Mount Gordo location is exposed and cougars attack there.",
+      "suggested_action": "Mount Gordo yoga at sunrise is a genuinely funny and visually striking bit — a mountaintop sun salutation that a cougar may interrupt. Use it as a cold open or a palate cleanser after violence.",
+      "avoid": "Doing yoga at Mount Gordo at all carries real risk the agent cannot mitigate: he has no manual aim/fire to fight off a cougar and animals are unlikely to be exposed as hostile peds `combat_hated_targets_around` can target, so a mid-QTE cougar attack is not a threat he can defend against — treat any cougar interruption as a likely death, not a survivable scare, and weigh that before picking Mount Gordo over the Rockford Hills house version. Yoga becomes permanently unavailable after one branch of 'The Time's Come'.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Whether yoga counts toward 100% is contested: one source lists it as optional, another as required. The QTE pose counts are from a single source.",
+      "sources": [
+        "https://gta.wiki/wiki/Yoga",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/"
+      ]
+    },
+    {
+      "id": "vanilla_unicorn_strip_club",
+      "category": "leisure",
+      "cue": "the agent is at the Vanilla Unicorn in Strawberry, no wanted level.",
+      "context": "The only player-accessible club in the game. Becomes Trevor's property later in the story.",
+      "meaning": "Private dances have an approval meter driven by flirting and touching while the bouncer is not looking; getting caught gets you thrown out. Enough approval lets you take the dancer home or get a double dance. Once Trevor owns the club, dances are free and the no-touching rule stops applying for all three protagonists. One private dance is a 100% item.",
+      "suggested_action": "Handle with care on a Twitch stream — this content risks the channel more than it entertains. If visited at all, treat it as a location (Trevor's post-story safehouse and a property with weekly income), not as an activity, and keep the camera moving.",
+      "avoid": "Streaming the private-dance minigame. Twitch's sexual-content rules make this a plausible strike; the reward is a single completion tick and no gameplay benefit.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "This is a platform/policy judgement layered on top of the game facts; the game mechanics themselves are well sourced.",
+      "sources": [
+        "https://gta.wiki/wiki/Strip_Club",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V",
+        "https://www.gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "cinemas_three_locations",
+      "category": "leisure",
+      "cue": "the agent is near the Ten Cent Theater, the Doppler Cinema, or the Tivoli Cinema, and a genuinely low-stakes segment is wanted.",
+      "context": "Visiting a cinema once is a 100% miscellaneous item.",
+      "meaning": "Three cinemas exist and all three are purchasable by Michael as properties: Doppler ($10,000,000, $132,200/week), Ten Cent Theater ($20,000,000, $264,000/week), Tivoli ($30,000,000, $142,300/week). Watching a film plays an in-game short.",
+      "suggested_action": "Visit once for the novelty and the completion tick. Note that cinema films are pre-rendered in-game video.",
+      "avoid": "Broadcasting a full in-game film — it is several minutes of a fixed camera on licensed-adjacent content and may raise DMCA/VOD-muting questions. Keep the visit brief and cut away.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Property prices/income are from a single source. The DMCA concern is a judgement call, not a sourced fact.",
+      "sources": [
+        "https://www.gta.wiki/w/Properties_in_GTA_V",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V"
+      ]
+    },
+    {
+      "id": "altruist_camp_trevor",
+      "category": "landmarks",
+      "cue": "Playing as Trevor; a random-event victim is in the passenger seat (snatched girl, drunk couple, drunk driver, runaway bride, hitchhiker); a delivery blip appears in the Chiliad Mountain State Wilderness.",
+      "context": "Trevor only. Cash rewards per delivery: roughly $1,000–$2,000.",
+      "meaning": "The Altruist Cult camp is a fortified village in the Chiliad Mountain State Wilderness. Trevor can deliver certain random-event NPCs there for cash. After the FOURTH delivery, the cult takes Trevor at gunpoint and a shootout starts: kill everyone to escape. The camp holds four briefcases at $25,000 each ($100,000 total), plus respawning RPG, assault shotgun and body armour on the watchtower.",
+      "suggested_action": "This is a strong multi-session narrative arc: three deliveries build dread, the fourth pays off with a $100,000 firefight. Explicitly count the deliveries out loud on stream so viewers anticipate the trap. Bring armour.",
+      "avoid": "Delivering Antonia Bottino (her father pays $60,000 to return her) or Packie McReary (a top heist crew member) to the cult — both are worth far more elsewhere. Avoid walking in unarmoured; the ambush is immediate.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Whether cult members respawn afterwards is described inconsistently by the source (sightings by helicopter or during taxi missions).",
+      "sources": [
+        "https://gta.wiki/wiki/Altruist_Cult",
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "fort_zancudo_four_stars",
+      "category": "landmarks",
+      "cue": "the agent's position approaches Fort Zancudo (Blaine County, near the Lago Zancudo swamps and Mount Josiah, Zancudo River to the south), on the ground or in the air.",
+      "context": "Any protagonist, any time. No hangar owned.",
+      "meaning": "Entering the base airspace gives a warning then a FOUR-star wanted level; ground trespass gives four stars on detection. Defences: perimeter fence, guarded checkpoints, patrolling Rhino tanks, armed soldiers, and P-996 LAZER jets that engage with heat-seeking missiles and cannon. The base is where LAZER jets and Cargobobs are parked. Players get in by using natural terrain to jump the perimeter fence — the Mount Josiah dirt-road approach is the gentlest.",
+      "suggested_action": "Only go here as a deliberate, announced heist-style goal: 'steal a fighter jet'. Plan the exit before the entry — a stolen LAZER at four stars with other LAZERs scrambling is a short flight unless there is a plan (fly low, head for water, or land and switch vehicles).",
+      "avoid": "Wandering into Zancudo airspace during a casual flight. A four-star military response is the fastest way to end a stream block in a fireball. Avoid ground infiltration on foot without armour and an escape vehicle.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "The 'buy a hangar for free access' mechanic described by the source is a GTA Online feature (2017 hangars) and does not apply to Story Mode — treat Zancudo as permanently hostile in single player.",
+      "sources": [
+        "https://gta.wiki/wiki/Fort_Zancudo"
+      ]
+    },
+    {
+      "id": "lsia_three_stars",
+      "category": "landmarks",
+      "cue": "the agent approaches the airside/runway area of Los Santos International Airport.",
+      "context": "Story mode, varies by protagonist.",
+      "meaning": "Trespassing on LSIA runways triggers a THREE-star wanted level in the default case; that is the safe assumption for ALL THREE protagonists, Michael and Franklin included. One source (gta.wiki) claims Michael and Franklin get an exemption near their hangar area tied to a game patch, but the same article also frames hangar ownership as primarily a GTA Online concept, and no second source confirms a Story Mode per-protagonist exemption exists on the currently installed build. Treat the exemption as unconfirmed folklore, not a fact to plan around. Aircraft on site (confirmed, not tied to the disputed exemption): several parked Jets around the terminals plus occasional moving Jets, Luxors and Shamals taxiing and parked, a Velum near the southern hangar area associated with Franklin, a Mammatus and a Cuban 800 near the area associated with Michael. There are multiple helipads — three north of the airport, one at the end of Runway 12-R, two beside the southern hangar area — but helicopters cannot be stored and despawn after landing.",
+      "suggested_action": "Default to assuming a walk onto the runway/tarmac gives 3 stars regardless of who is playing. If a specific approach to the Velum/Mammatus/Cuban 800 has been empirically confirmed clean on the real machine, use that; until then, plan every LSIA aircraft pickup as a 'grab and go under a rising wanted level' job, not a guaranteed-clean one, and have flee_police / a nearby Los Santos Customs branch ready as the follow-up. Flight School also lives here (Exceptionalists Way) and is unaffected by this question.",
+      "avoid": "Do not tell the agent he can walk Michael or Franklin onto the LSIA tarmac and stay clean — that claim is single-sourced and internally inconsistent about whether it is even a Story Mode mechanic. Avoid trying to store a helicopter at an LSIA helipad — it will despawn.",
+      "urgency": "high",
+      "confidence": "low",
+      "exceptions": "Critic-flagged and re-verified: the 'free tarmac access' claim is not solid enough to act on. gta.wiki's own HD-Universe LSIA article asserts Michael/Franklin get tarmac access 'after the Business Update' while separately describing hangar purchase there as a GTA Online feature — the source contradicts itself on whether this is a Story Mode mechanic at all. No second source (gtabase 404'd on this page) confirmed it. Verify empirically on the real machine before ever treating this as safe; until then the 3-star baseline applies to everyone.",
+      "sources": [
+        "https://www.gta.wiki/w/Los_Santos_International_Airport_(HD_Universe)",
+        "https://gta.wiki/wiki/Flight_School"
+      ]
+    },
+    {
+      "id": "mount_chiliad_summit",
+      "category": "landmarks",
+      "cue": "the agent is in northern Blaine County and wants altitude, a view, a downhill run, or a base jump start point.",
+      "context": "Chiliad Mountain State Wilderness, between Grapeseed (southeast) and Paleto Bay (northwest).",
+      "meaning": "Mount Chiliad is the tallest peak in San Andreas at roughly 797m in-game. An aerial tramway (cable car) runs from base to summit. The eastern (Grapeseed) side has a gentle gradient most vehicles can climb — and police can follow you up it; the western (Paleto) side is steep. A marked hiking trail runs down the east side and two Sanchez dirt bikes spawn near the observation deck. There is a derelict wooden ramp near the gondola station (jumps off it do not register as official stunt jumps). The observation deck carries the famous mural with a jetpack and an egg and the text 'COME BACK WHEN YOUR STORY IS COMPLETE'; a UFO appears above the peak at 3AM in stormy weather only after 100% completion.",
+      "suggested_action": "One of the best composed set-pieces in the game: ride the cable car up, take a Sanchez from the deck, and ride the hiking trail down at speed. Do NOT substitute 'or base jump instead' — 'Carving the Mountain' is a parachute jump and the agent has no parachute-deploy action (see `parachute_jump_library`); the Sanchez trail descent is the only executable option here.",
+      "avoid": "Promising viewers the UFO — it requires 100% completion, which this save will not have. Avoid driving up the western face; it is too steep and the vehicle will roll back down.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Two different heights are given (797m in-game vs a claimed 2,744m in-universe); use the in-game figure. Cable car availability in the current build should be confirmed.",
+      "sources": [
+        "https://www.gta.wiki/w/Mount_Chiliad_(HD_Universe)",
+        "https://gta.wiki/wiki/Parachute_Jumps"
+      ]
+    },
+    {
+      "id": "del_perro_pier",
+      "category": "landmarks",
+      "cue": "the agent is on the west Los Santos coast near Del Perro, off Red Desert Avenue, with no wanted level.",
+      "context": "Free roam, any protagonist. Very high pedestrian density.",
+      "meaning": "Del Perro Pier hosts the Pleasure Pier amusement park — the Leviathan roller coaster and the Ferris Whale ferris wheel — plus shops, restaurants and telescopes. It is brightly lit at night and heavily populated, modelled on Santa Monica Pier.",
+      "suggested_action": "Best visited at dusk/night for the lights and the crowd. Good backdrop for character moments, and the Ferris wheel and roller coaster are rideable set-dressing that reads well on camera. The nearby 'Parachute Pier' broken bridge is a stunt jump.",
+      "avoid": "Starting a firefight on the pier — dense crowds mean high collateral and a fast wanted escalation with nowhere to drive. Avoid driving a car onto the pier deck; it gets wedged.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Whether the roller coaster and ferris wheel are actually rideable by the player in Story Mode was not confirmed by the source, which describes them as attractions and mission set-pieces.",
+      "sources": [
+        "https://www.gta.wiki/w/Del_Perro_Pier",
+        "https://www.gtabase.com/grand-theft-auto-v/guides/gta-5-stunt-jumps-locations-all-50-stunt-jumps-map-guide"
+      ]
+    },
+    {
+      "id": "freight_train_behaviour",
+      "category": "transport",
+      "cue": "the agent is near railway tracks and a freight train is approaching; or the agent has a wanted level and tracks are nearby.",
+      "context": "Free roam. Applies to the freight train, cable car and tram.",
+      "meaning": "The freight train cannot be driven or stopped in free roam (only briefly, in the scripted 'Derailed' mission). It follows a fixed loop of track around San Andreas, is effectively indestructible, and pushes or phases through obstacles. Contact instantly kills a character — except Trevor while his special ability is active, which is NOT an exception the agent can use (no special-ability action exists in his vocabulary), so for him contact with the train is always fatal regardless of protagonist. The player CAN jump onto and stand on a moving train, and this is a reliable way to shed a wanted level because police lose you in the tunnels.",
+      "suggested_action": "Two good goals: (a) train surfing — ride the loop and narrate the map going past; (b) as an escape route, jump on a train mid-chase and let the tunnels clear the stars. The 'Runaway Train' parachute jump also targets a moving train.",
+      "avoid": "Trying to block a train with a car or 'derail' it — it will simply push through and the car and the agent will be destroyed. Avoid crossing tracks on foot at a level crossing while a train is coming; contact is an instant kill.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "The wanted-level-shedding behaviour depends on tunnel sections of the route and is not guaranteed on open track.",
+      "sources": [
+        "https://gta.wiki/wiki/Freight_Train",
+        "https://gta.wiki/wiki/Parachute_Jumps"
+      ]
+    },
+    {
+      "id": "helicopter_acquisition_singleplayer",
+      "category": "transport",
+      "cue": "A goal requires a helicopter and the agent is on foot with no aircraft nearby.",
+      "context": "Story mode. Helicopters do not spawn as freely in single player as in Online.",
+      "meaning": "Reliable single-player helicopter sources are narrower than commonly assumed. The green Mavericks parked at parachute-jump markers can reportedly be hijacked rather than boarded as a jump passenger, by holding the enter-vehicle input rather than tapping it. CAPABILITY NOTE: the agent's only vehicle-entry action is `enter_nearest_vehicle` (params: prefer, search_radius_m) — there is no hold-vs-tap parameter exposed to him, so whether approaching that Maverick results in a hijack or in boarding as a jump passenger is decided by the bridge's own implementation of `enter_nearest_vehicle`, not by anything the agent can select. Mavericks are also purchasable via Elitás Travel for $1,100,000. Hospital and building helipads, the Sandy Shores airfield and Vespucci helipad are commonly used but the sourced article documents Online spawn ranks rather than confirmed single-player spawns. Fort Zancudo has Cargobobs but at four stars.",
+      "suggested_action": "The cheapest candidate helicopter source is the parachute-jump Maverick: drive_to the jump marker and call `enter_nearest_vehicle`. Do not phrase this as 'hold the input to hijack' in any commentary or plan — that control does not exist for him. Whichever way `enter_nearest_vehicle` resolves it (hijack or passenger) is what happened; confirm the actual behaviour empirically on the real machine and record it here.",
+      "avoid": "Assuming a helicopter is waiting on any given rooftop helipad — in single player many are empty. Avoid planning a heli-dependent goal without first confirming an aircraft exists. Avoid narrating a deliberate 'hold to hijack' action the agent did not have available to take.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "Single-player helicopter spawn points are the weakest-sourced item here; the wiki article explicitly noted it does not list story-mode free-roam helipad spawns. This must be verified in-game and the findings written back into the knowledge base.",
+      "sources": [
+        "https://www.gta.wiki/w/Maverick",
+        "https://gta.wiki/wiki/Parachute_Jumps",
+        "https://gta.wiki/wiki/Fort_Zancudo"
+      ]
+    },
+    {
+      "id": "fixed_wing_acquisition",
+      "category": "transport",
+      "cue": "A goal requires a plane (knife flights, under-the-bridge runs, arms trafficking, flying to Blaine County fast).",
+      "context": "Story mode.",
+      "meaning": "Confirmed single-player plane sources: LSIA has parked Jets, Luxors and Shamals around the terminals, a Velum near the southern hangar area associated with Franklin, and a Mammatus and Cuban 800 near the area associated with Michael. McKenzie Field (Trevor's purchasable hangar, $150,000 after 'Nervous Ron') supplies a Cuban 800 for arms trafficking. Completing Flight School unlocks additional aircraft spawns around San Andreas, including red Dusters. Fort Zancudo has P-996 LAZER jets at four stars.",
+      "suggested_action": "For a plane, McKenzie Field (buy it as Trevor) is the reliably low-risk source — it pays $7,000/air mission plus $5,000–7,000 weekly and gives a permanent aircraft base in the north with no trespass question attached. The LSIA aircraft near the Michael/Franklin hangar area are a candidate second source, but see `lsia_three_stars` — do not call that one 'low-risk' until the tarmac-access exemption is empirically confirmed; default to expecting 3 stars there.",
+      "avoid": "Taking a heavy jet or Luxor for knife flights or bridge runs — you want a small stunt plane or Duster for those. Avoid Zancudo unless the jet itself is the goal.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "Which specific aircraft Flight School unlocks, and where, was described only generally. Aircraft parked at LSIA may vary by story progress.",
+      "sources": [
+        "https://www.gta.wiki/w/Los_Santos_International_Airport_(HD_Universe)",
+        "https://gta.wiki/wiki/Flight_School",
+        "https://www.gta.wiki/w/Arms_Trafficking_Air",
+        "https://www.gta.wiki/w/Properties_in_GTA_V"
+      ]
+    },
+    {
+      "id": "boats_and_water_content",
+      "category": "transport",
+      "cue": "A water goal is chosen: sea races, a coastal cruise, or reaching an offshore point.",
+      "context": "Coastal Los Santos, the Alamo Sea, and the Zancudo River.",
+      "meaning": "Seasharks (jet skis) are provided at the four sea race start points and can be used freely. The Sonar Collections Dock at Paleto Cove is a purchasable property ($250,000, ~$23,000 per waste piece collected) that unlocks a submarine and the nuclear-waste hunt via Abigail Mathers. The Kraken submersible is the reward for the 20-photo Wildlife Photography Challenge and afterwards spawns at Cape Catfish pier. Marinas along the Los Santos coast and the Alamo Sea shore hold civilian boats.",
+      "suggested_action": "Water content is under-used and visually distinct. A submarine dive is genuinely novel on stream — dark, slow, tense, and the map floor has things on it. Pair the Sonar dock purchase with Abigail's missions.",
+      "avoid": "Swimming long distances at low stamina — the agent will drown. Avoid open-ocean trips without checking weather; swell makes small craft unmanageable.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Boat spawn points at marinas are inferred from general map knowledge rather than confirmed by the fetched sources; verify in game.",
+      "sources": [
+        "https://gta.wiki/wiki/Sea_Races",
+        "https://www.gta.wiki/w/Properties_in_GTA_V",
+        "https://www.gta.wiki/w/Wildlife_Photography_Challenge",
+        "https://gta.wiki/wiki/Strangers_and_Freaks"
+      ]
+    },
+    {
+      "id": "unique_vehicles_worth_taking",
+      "category": "vehicles",
+      "cue": "A rare vehicle appears: a matte-black armoured Dukes, a hippy-painted Space Docker, a monster truck, a submersible.",
+      "context": "Story mode, mostly tied to specific events or challenges.",
+      "meaning": "Genuinely distinctive story-mode vehicles worth the detour: the Duke O'Death — an armoured Dukes with bull-bar, roll cage and armour plating, obtained by completing the 'Duel' random event; the Cheval Marshall monster truck from winning all five stock car races; the Kraken submersible from the 20-animal photography challenge; the Space Docker (a modified Dune Buggy tied to the Omega spaceship-parts hunt). Each of these turns into its own free-roam goal generator once owned.",
+      "suggested_action": "Prioritise the Duke O'Death and the Marshall — both are durable enough to survive extended police chases and stunt attempts, which directly extends how long an entertaining segment can run before the agent dies.",
+      "avoid": "Losing a unique vehicle by leaving it in the street — store it in a character's garage immediately. Avoid assuming the Duke O'Death is purchasable in story mode; the Warstock purchase route is a GTA Online mechanic.",
+      "urgency": "normal",
+      "confidence": "low",
+      "exceptions": "The Duke O'Death source page conflates story mode and Online availability and describes an Online price. The Space Docker acquisition condition was not verified from a second source. Verify all four in game before building goals around them.",
+      "sources": [
+        "https://www.gta.wiki/w/Duke_O%27Death",
+        "https://www.gta.wiki/w/Stock_Car_Racing",
+        "https://www.gta.wiki/w/Wildlife_Photography_Challenge",
+        "https://gta.wiki/wiki/Strangers_and_Freaks"
+      ]
+    },
+    {
+      "id": "random_events_are_the_best_ambient_content",
+      "category": "random_events",
+      "cue": "While driving or walking in free roam, a blue dot / distress marker appears nearby, or hostile peds appear alongside a fleeing or shouting neutral ped.",
+      "context": "Free roam only, no mission active. 57 events exist (60 in the enhanced version); any 14 count toward 100%.",
+      "meaning": "Random events are short, self-contained scenes that spawn near the player: bike and sportbike thieves (reward: stamina or the bike), car thefts (unique vehicle or driving skill), security vans with $3,000–$8,000 in briefcases, ATM robberies ($500–$2,000 to steal or return), muggings, hitchhikers (driving skill and stock tips), drunk drivers, crash rescues that unlock heist crew members, border patrols and gang intimidations with dropped cash, Trevor-only drug shootouts worth $10,000–$70,000, and the Altruist cult ambush worth $100,000.",
+      "suggested_action": "Make random events the default interrupt: any time one appears within reach during a drive, take it. They are short, they have a moral choice (help or rob the victim), and they produce the unscripted moments that make an autonomous stream worth watching.",
+      "avoid": "Ignoring the choice — the interesting part is that the agent can help or exploit. Avoid killing hitchhikers and crash victims indiscriminately; some unlock heist crew members and stock tips that pay off far more later.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Payout ranges are from a single source and vary by event instance. The harness needs to expose nearby non-objective blips for the agent to notice these reliably.",
+      "sources": [
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V",
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V",
+        "https://gta.wiki/wiki/Altruist_Cult"
+      ]
+    },
+    {
+      "id": "property_income_as_a_long_game",
+      "category": "meta",
+      "cue": "the agent has accumulated significant cash and no immediate goal.",
+      "context": "Story mode property market.",
+      "meaning": "Properties generate passive weekly income and some unlock activities. Best value for an entertainment stream: McKenzie Field Hangar (Trevor, $150,000 after 'Nervous Ron') → arms trafficking air/ground missions, $7,000 per air mission, $5,000–7,000 weekly; Los Santos Customs Harmony (Franklin, $349,000 after 'Nervous Ron') → free mods forever; Sonar Collections Dock ($250,000) → submarine and nuclear waste hunt; Downtown Cab Co. ($200,000) → taxi fare missions; LSPD Auto Impound ($150,000) → a tow truck and towing missions; Car Scrapyard ($275,000) → pays per destroyed car. Vanilla Unicorn becomes Trevor's for free and acts as a safehouse.",
+      "suggested_action": "Buy McKenzie Field and Harmony LSC first — they convert money into new *activities*, not just income. The Car Scrapyard is the one that literally pays the agent to destroy vehicles, which aligns money with entertainment.",
+      "avoid": "Buying pure-income properties (bars, restaurants) before activity-unlocking ones. Avoid the $150,000,000 golf club and multi-million cinemas — unreachable on normal story income.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "All prices and weekly incomes come from one source table and should be sanity-checked against the in-game Dynasty 8 site before spending.",
+      "sources": [
+        "https://www.gta.wiki/w/Properties_in_GTA_V",
+        "https://www.gta.wiki/w/Arms_Trafficking_Air",
+        "https://gta.wiki/wiki/Los_Santos_Customs"
+      ]
+    },
+    {
+      "id": "goal_maze_bank_bike_jump",
+      "category": "fun_goal",
+      "cue": "the agent is in downtown Los Santos, has a parachute, has access to a motorcycle, and there is no wanted level or active mission.",
+      "context": "The 'Bank Bailout' base jump. Requires Dom's 'Risk Assessment' completed for the official version; the rooftop is otherwise still reachable.",
+      "meaning": "GOAL (as originally conceived): ride a motorcycle off the roof of Maze Bank Tower and parachute down into Burton. BLOCKED: the bike-to-the-edge part is achievable (drive_to gets him to the roof), but the fall itself needs a parachute deploy, which is not in the agent's action vocabulary at all — this is not a landing-accuracy problem, it is a 'no control exists during freefall' problem. As written this goal is a scripted suicide, not a stunt.",
+      "suggested_action": "Do not send the agent off the Maze Bank roof expecting a parachute landing — without a deploy action every attempt is a fatal fall, full stop. If the roof itself is wanted for the view/skyline shot, get him there and narrate it as a landmark visit; do not launch off the edge. Revisit this goal if the harness ever adds freefall/parachute control.",
+      "avoid": "Do not narrate 'he deployed the chute and steered to a clear landing' — that action was never available to send. Do not treat the police-helicopter and clipping-the-building risks as the main danger here; the real, unconditional outcome of leaving the edge is death.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The exact roof access route and whether a bike can be brought up outside the scripted jump was not confirmed by the sources — moot until the capability blocker above is resolved.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute_Jumps"
+      ]
+    },
+    {
+      "id": "goal_turbine_terror",
+      "category": "fun_goal",
+      "cue": "Parachute jumps are unlocked and the agent is in Blaine County near the RON Alternates wind farm.",
+      "context": "The 'Turbine Terror' helicopter parachute jump.",
+      "meaning": "GOAL (as originally conceived): parachute through checkpoints threaded between the moving blades of the wind farm turbines. BLOCKED: this is entirely a canopy-steering exercise, and the agent has no parachute-deploy or freefall-steering action at all (see `parachute_jump_library`) — there is no partial version of this he can attempt.",
+      "suggested_action": "Do not schedule Turbine Terror — every attempt is an uncontrolled fall through (or into) the turbine farm. Use the nearby 'Eco Friendly' off-road race, which is achievable with drive_to/wander_drive, if a wind-farm-set piece is wanted for the same trip.",
+      "avoid": "Do not narrate the agent threading the turbine blades or missing a gate — no canopy was ever under his control. Do not treat this as a 'hard but possible' goal; it is currently impossible.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None known about the underlying game facts; the goal itself is blocked by the capability gap above.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute_Jumps",
+        "https://gta.wiki/wiki/Offroad_Races"
+      ]
+    },
+    {
+      "id": "goal_moving_target_landings",
+      "category": "fun_goal",
+      "cue": "Parachute jumps unlocked; the 'Runaway Train', 'What Goes Up...' or 'Pacific Tour' markers are available.",
+      "context": "Three jumps in the library target a moving object.",
+      "meaning": "GOAL (as originally conceived): land a parachute on something that is moving — a freight train ('Runaway Train'), a Hauler truck ('What Goes Up...'), or a Squalo speedboat ('Pacific Tour'). BLOCKED: this is a canopy-steering intercept problem end to end, and the agent has no parachute-deploy or freefall-steering action (see `parachute_jump_library`) — there is no 'aim ahead of the target' available to him; that would require in-air control he does not have.",
+      "suggested_action": "Do not schedule any of these three jumps — none are executable. If a moving-target intercept beat is wanted for stream, use a ground equivalent instead: `follow_entity` on a moving vehicle handle, or timing a `drive_to` to meet a train at a level crossing (from the safe side of the tracks), which are both real actions the agent has.",
+      "avoid": "Do not narrate the agent 'leading the target' or 'closing the gap' with a parachute — no canopy was ever under his control. 'Runaway Train' being disabled between certain story missions is a moot caveat until the capability blocker is resolved.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None about the underlying game facts; the goal itself is blocked by the capability gap above.",
+      "sources": [
+        "https://gta.wiki/wiki/Parachute_Jumps"
+      ]
+    },
+    {
+      "id": "goal_chiliad_descent",
+      "category": "fun_goal",
+      "cue": "the agent is in northern Blaine County, daytime, no wanted level, no mission active.",
+      "context": "Mount Chiliad summit and the marked east-side hiking trail.",
+      "meaning": "GOAL: get to the summit of Mount Chiliad — by cable car for the scenic version, or by driving the gentle eastern slope — then descend the marked hiking trail at speed on one of the two Sanchez dirt bikes that spawn near the observation deck. WHY IT WATCHES WELL: the ascent has a payoff view over the whole map, the mural is a piece of GTA folklore worth narrating, and a fast trail descent is high-speed with real consequences. HOW IT GOES WRONG: leaving the trail on the west face (a cliff), losing the bike over an edge, and a long walk back up.",
+      "suggested_action": "Cable car up for the reveal, bike down for the action — the bike descent is a real, achievable drive_to/wander_drive goal. Narrate the 'COME BACK WHEN YOUR STORY IS COMPLETE' mural — it is a genuinely interesting piece of game lore and fills the ascent. Do NOT use 'Carving the Mountain' as an alternative descent: it is a parachute jump, and the agent has no parachute-deploy action (see `parachute_jump_library`) — that route is blocked, the bike trail is the only descent to plan on.",
+      "avoid": "Promising the 3AM UFO — it needs 100% completion. Avoid descending the western Paleto face; it is too steep to control.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "Confirm the cable car is operable in the installed build; the source notes it is absent from GTA Online.",
+      "sources": [
+        "https://www.gta.wiki/w/Mount_Chiliad_(HD_Universe)",
+        "https://gta.wiki/wiki/Parachute_Jumps"
+      ]
+    },
+    {
+      "id": "goal_zancudo_jet_heist",
+      "category": "fun_goal",
+      "cue": "the agent is fully healed, armoured, has flying skill trained, and a deliberate high-risk block is scheduled.",
+      "context": "Fort Zancudo. Four-star military response.",
+      "meaning": "GOAL: infiltrate Fort Zancudo and steal a P-996 LAZER fighter jet. WHY IT WATCHES WELL: it is the single highest-stakes thing available in free roam — tanks, soldiers, scrambled jets, and a four-star wanted level, with a genuine prize at the end. HOW IT GOES WRONG: almost always. Detection at the fence, being shot off the tarmac, or getting the jet airborne and immediately taking a heat-seeker.",
+      "suggested_action": "Approach via the Mount Josiah dirt road where the fence-jump is easiest. Have the exit planned before entering: once airborne, fly LOW and fast away from the base. Announce this as an attempt with an expected failure rate — the audience forgives failure they were warned about.",
+      "avoid": "Doing this casually or by accident during a routine flight. Avoid attempting it at low health or with no armour. Avoid a ground escape — you cannot outdrive a Rhino tank and jet cannon.",
+      "urgency": "critical",
+      "confidence": "high",
+      "exceptions": "Ignore any source guidance about buying a hangar for legitimate access — that is a GTA Online feature.",
+      "sources": [
+        "https://gta.wiki/wiki/Fort_Zancudo"
+      ]
+    },
+    {
+      "id": "goal_train_surf_escape",
+      "category": "fun_goal",
+      "cue": "the agent has a wanted level of 2 or more, police are in pursuit, and railway tracks with an approaching train are within reach.",
+      "context": "Free roam pursuit. Works because tunnels break police line of sight.",
+      "meaning": "GOAL: escape a police chase by jumping onto a moving freight train and riding it into the tunnels. WHY IT WATCHES WELL: it is an improvised, cinematic escape that looks like a decision rather than a mechanic. HOW IT GOES WRONG: mistimed contact with the train is an instant kill (the 'except Trevor with his special ability active' exception in the source does not apply to the agent — he has no special-ability action), and being on an open stretch of track with a police helicopter overhead does not shed the stars.",
+      "suggested_action": "Match the train's direction and jump onto a flat car, not into its path. Once aboard, stay low and wait for a tunnel. Works as pure entertainment even without a chase — 'ride the whole loop and describe the map' is a valid slow segment.",
+      "avoid": "Standing on the tracks to board head-on. Avoid trying to stop or derail the train — it is indestructible in free roam and will simply run through anything, including the agent.",
+      "urgency": "high",
+      "confidence": "high",
+      "exceptions": "Tunnel coverage varies along the loop, so wanted-level shedding is not guaranteed on every stretch.",
+      "sources": [
+        "https://gta.wiki/wiki/Freight_Train"
+      ]
+    },
+    {
+      "id": "goal_aqueduct_stunt_run",
+      "category": "fun_goal",
+      "cue": "the agent is in southern Los Santos near the drainage canals / LS river with a motorcycle or a fast car.",
+      "context": "The concrete aqueduct and canal system through La Puerta, Banning and toward the Maze Bank Arena.",
+      "meaning": "GOAL: run the aqueduct end to end, taking the ramps along the way — including the Maze Bank Arena aqueduct jump, described as one of the biggest in the game, which clears three buildings onto a helipad. WHY IT WATCHES WELL: a long, continuous, high-speed corridor with no traffic and repeated stunt opportunities, so the segment builds instead of resetting. HOW IT GOES WRONG: hitting a canal wall at speed, or attempting the arena jump under-speed and coming up short against a building.",
+      "suggested_action": "Use a motorcycle. Build speed on the straight before each ramp — approach speed is the only thing that determines the landing, since Franklin's driving-focus special ability is not available to the agent (no special-ability action exists in his vocabulary). Combine with a low aircraft pass afterwards for the under-the-bridge flights that cluster in the same canals.",
+      "avoid": "Attempting the big arena jump first — do the small ramps to calibrate approach speed. Avoid a heavy or low car; it will bottom out.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Exact ramp positions and required approach speeds come from one guide and must be learned live.",
+      "sources": [
+        "https://www.gtabase.com/grand-theft-auto-v/guides/gta-5-stunt-jumps-locations-all-50-stunt-jumps-map-guide",
+        "https://gta.wiki/wiki/Under_the_Bridge"
+      ]
+    },
+    {
+      "id": "goal_hunting_trip",
+      "category": "fun_goal",
+      "cue": "Playing as Trevor, in-game clock 05:00–19:00, hunting unlocked, and a calm daytime segment is wanted.",
+      "context": "Chiliad Mountain State Wilderness hunting ground.",
+      "meaning": "GOAL (as originally conceived): a full hunting trip — take the Blazer, use the animal call, read the wind, take clean heart or head shots, photograph each kill and send it to Cletus. BLOCKED: this requires manual aim, manual fire, and phone use, none of which are in the agent's action vocabulary (see `hunting_trevor_daylight` for the same capability note). `combat_hated_targets_around` cannot substitute — it targets hostile peds by radius, not a chosen animal or a chosen body part, and does not involve wildlife.",
+      "suggested_action": "Do not run this as a scored hunt — there is no way for the agent to aim, fire, or photograph a kill. If a quiet daytime change-of-pace segment is wanted, use the Mount Chiliad summit trip or a landmark drive instead; both are achievable with drive_to/walk_to and deliver the same 'slow down after a violent block' function without asking for an action that doesn't exist.",
+      "avoid": "Do not narrate 'shot placement' or a wind-read shot — no such action was sent to the game. Avoid presenting this as a live goal until the harness gains an aim/fire primitive.",
+      "urgency": "low",
+      "confidence": "high",
+      "exceptions": "None known about the underlying game facts; the goal itself is not currently executable — see the capability note above.",
+      "sources": [
+        "https://gta.wiki/wiki/Hunting"
+      ]
+    },
+    {
+      "id": "goal_bail_bond_manhunt",
+      "category": "fun_goal",
+      "cue": "Playing as Trevor, a Maude text/blip appears with a bounty target somewhere in Blaine County or Los Santos.",
+      "context": "Maude Eccles's four bail bond missions.",
+      "meaning": "GOAL: track down a bail-jumper. In principle the game lets a player bring them in alive or dead depending on how the capture is handled — a stun gun or a takedown for alive, gunfire for dead. CAPABILITY NOTE: the agent cannot choose either path. He has no weapon-selection action (no stun gun pick) and no melee/takedown verb; the only combat action available is `combat_hated_targets_around`, which hands the engine's own AI a radius and lets it fight with whatever is currently equipped. So the alive/dead outcome is not a decision the agent makes — it is whatever the engine's default combat resolves to. Four different targets still means four different chase scenes, which is the part that remains genuinely his to drive.",
+      "suggested_action": "Do not have the agent 'decide' alive-or-dead in advance and then narrate delivering on it — he has no mechanism to choose that outcome. Drive the manhunt (drive_to the bounty's last-known location, follow_entity once it has a handle) and let `combat_hated_targets_around` resolve the confrontation when it happens; narrate the outcome after the fact as what occurred, not as a plan that was executed on purpose.",
+      "avoid": "Do not claim the agent used a stun gun or a takedown — those actions do not exist for him. Avoid engaging in a crowded area where the target can be lost in the crowd or killed by stray fire from the engine's combat AI.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "The four targets' names, locations and exact payouts were not enumerated by the fetched sources.",
+      "sources": [
+        "https://gta.wiki/wiki/Strangers_and_Freaks",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/"
+      ]
+    },
+    {
+      "id": "goal_yellow_jack_double_bill",
+      "category": "fun_goal",
+      "cue": "Any protagonist in the Grand Senora Desert near the Yellow Jack Inn, after 'Crystal Maze' and 'Mr. Philips'.",
+      "context": "Darts and the stock car oval share the same location.",
+      "meaning": "GOAL: a single trip to the Yellow Jack Inn that covers the five-race stock car ladder on the dirt oval outside (Panorama Drive → Smoke Tree Road → Cat Claw Avenue past Thomson Scrapyard, 5 laps, 9 competitors, cars awarded per win up to the Marshall monster truck), with a stop at the bar's dartboard as atmosphere on the way. WHY IT WATCHES WELL: a bar, a rivalry, and an escalating prize ladder in one place — it gives a stream block structure with a clear finish line. HOW IT GOES WRONG: losing races repeatedly and stalling on the ladder, or the bar patrons turning hostile. Darts itself is not an executable challenge for the agent (see `darts_yellow_jack_inn` — no throw action exists), so the real content here is the race ladder.",
+      "suggested_action": "Open with a brief darts-room visit for atmosphere only — do not narrate him winning or losing a leg, since no throw was ever made — then move outside for the races and name the Marshall as the prize so viewers have a reason to stay through five laps each.",
+      "avoid": "Starting fights in the bar — it ends the segment and closes the darts option. Avoid entering the oval in a car with no off-road grip.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Stock car race availability may be restricted on some builds (see the stock_car_races item); confirm before promising the Marshall.",
+      "sources": [
+        "https://gta.wiki/wiki/Darts",
+        "https://www.gta.wiki/w/Stock_Car_Racing"
+      ]
+    },
+    {
+      "id": "goal_night_race_ladder",
+      "category": "fun_goal",
+      "cue": "Playing as Franklin, clock past 20:00, holding a modified Sports car and enough cash for the next buy-in.",
+      "context": "Hao's five street races, sequential.",
+      "meaning": "GOAL: run Hao's ladder in one night — South LA, City Circuit, Airport, Freeway, then Vespucci Canals on a bike — with each win funding the next escalating buy-in ($100 → $500 → $1,000 → $1,250 → $1,500, paying up to $6,750). WHY IT WATCHES WELL: an unbroken escalating streak with a rising stake, at night, in a car the audience watched the agent build. A single loss ends it. HOW IT GOES WRONG: crashing out, running out of buy-in money, or arriving at the last race in a car when it needs a motorcycle.",
+      "suggested_action": "Build the car at Los Santos Customs first (free at Harmony if Franklin owns it) so viewers have investment in the vehicle. Bring a motorcycle to the Vespucci Canals finale, or plan to use the supplied grid bike.",
+      "avoid": "Starting the ladder near 05:00 — the window closes. Avoid spending down the cash reserve between races; the buy-in for race five is $1,500.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Payouts and buy-ins are from one source; treat as approximate.",
+      "sources": [
+        "https://gta.wiki/wiki/Hao_Street_Races",
+        "https://gta.wiki/wiki/Los_Santos_Customs"
+      ]
+    },
+    {
+      "id": "goal_submarine_dive",
+      "category": "fun_goal",
+      "cue": "The Sonar Collections Dock is owned (or the Kraken is unlocked) and a slow, atmospheric segment is wanted.",
+      "context": "Paleto Cove / Cape Catfish. Abigail Mathers's questline.",
+      "meaning": "GOAL: take a submersible down and explore the sea floor — nuclear waste collection via the Sonar Collections Dock ($250,000, roughly $23,000 per piece) or free exploration in the Kraken. WHY IT WATCHES WELL: it is the only genuinely quiet, dark, tense environment in the game. There are wrecks and objects on the ocean floor, and the slow pace makes room for actual conversation. HOW IT GOES WRONG: leaving the sub and drowning, sharks, or getting lost with no landmarks.",
+      "suggested_action": "Use it as a deliberate late-night or low-energy block. Narrate what is found rather than racing between waypoints — the atmosphere is the product here.",
+      "avoid": "Exiting the submersible at depth. Avoid setting a target number of waste pieces per session; there are 30 and grinding them is dead air.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "The number of nuclear waste pieces was not confirmed by the fetched sources. Kraken availability depends on the Enhanced-version photography challenge.",
+      "sources": [
+        "https://www.gta.wiki/w/Properties_in_GTA_V",
+        "https://gta.wiki/wiki/Strangers_and_Freaks",
+        "https://www.gta.wiki/w/Wildlife_Photography_Challenge"
+      ]
+    },
+    {
+      "id": "goal_grand_tour_landmarks",
+      "category": "fun_goal",
+      "cue": "No activity is unlocked or reachable, weather is clear, and the agent needs a goal that cannot fail.",
+      "context": "Any protagonist, any time, no wanted level.",
+      "meaning": "GOAL: a landmark tour — Vinewood Sign, the Galileo Observatory, Maze Bank Tower, Del Perro Pier, the Los Santos coast highway, Sandy Shores, Paleto Bay, the Alamo Sea, Mount Chiliad. WHY IT WATCHES WELL: it is the reliable fallback. There is no fail state, the scenery carries the segment, and it gives the agent an excuse to talk about the world rather than fight it — which is the differentiator for an AI-played stream. HOW IT GOES WRONG: only through boredom, a crash, or picking up a wanted level en route.",
+      "suggested_action": "Always keep a landmark tour queued as the fallback when a chosen activity turns out to be locked, closed by time of day, or unreachable. Drive, don't fly — a tour at ground level shows the world, and traffic generates incident.",
+      "avoid": "Filling dead air with aimless wander_drive when a named destination would give the same footage plus a story. Avoid taking the tour at 4AM in fog.",
+      "urgency": "low",
+      "confidence": "medium",
+      "exceptions": "Landmark names are well-established but only Mount Chiliad and Del Perro Pier were verified in detail here; Vinewood Sign, the Galileo Observatory and Maze Bank Tower are asserted from general knowledge and the parachute-jump/stunt-jump lists that reference them.",
+      "sources": [
+        "https://www.gta.wiki/w/Mount_Chiliad_(HD_Universe)",
+        "https://www.gta.wiki/w/Del_Perro_Pier",
+        "https://gta.wiki/wiki/Parachute_Jumps"
+      ]
+    },
+    {
+      "id": "goal_selection_heuristic",
+      "category": "meta",
+      "cue": "the agent finishes an activity, or has been idle/wandering for more than a couple of minutes with no mission active.",
+      "context": "Every idle transition on a 24/7 stream.",
+      "meaning": "Free-roam goals differ along three axes that matter for a live stream: duration, failure visibility, and setup cost — and, critically, whether they are executable at all with the agent's action vocabulary. The best picks are short-to-medium, fail visibly and quickly, need little setup, AND only require actions he actually has — random events, stunt jumps (motorcycle/car, not the parachute-landing kind), street races, bail-bond chases (the drive/chase part, not a stun-gun capture). The worst picks are long, low-incident and hard to fail interestingly — triathlons, 50-item collectible hunts, full golf rounds, clothing menus — plus anything that needs manual aim, precision fire, weapon choice, a special ability, or a parachute deploy, none of which exist in his vocabulary (parachute jumps, hunting, shooting-range medals, chosen-alive-or-dead captures).",
+      "suggested_action": "Alternate register deliberately: after a violent or high-wanted segment, pick something quiet (yoga's QTEs are achievable via press_prompt_key, a landmark drive, a submarine dive); after a quiet segment, pick something with stakes (a stunt/motorcycle jump, a race, a Zancudo run). Never run two long low-incident activities back to back. Do not pick hunting as the 'quiet' option — it is currently blocked (see `hunting_trevor_daylight`).",
+      "avoid": "Defaulting to wander_drive whenever a goal ends — that is the failure mode that makes an autonomous stream boring. Avoid picking a goal whose unlock or time window has not been confirmed.",
+      "urgency": "normal",
+      "confidence": "medium",
+      "exceptions": "This is an editorial heuristic derived from the sourced activity properties (durations, unlock conditions, reward structures), not a documented game fact.",
+      "sources": [
+        "https://gta.wiki/wiki/100%25_Completion_in_GTA_V",
+        "https://www.gtabase.com/grand-theft-auto-v/side-missions/",
+        "https://gta.wiki/wiki/Triathlon",
+        "https://gta.wiki/wiki/Random_Events_in_GTA_V"
+      ]
+    },
+    {
+      "id": "time_of_day_windows",
+      "category": "meta",
+      "cue": "the agent checks the in-game clock before committing to a drive across the map.",
+      "context": "Several activities are time-locked.",
+      "meaning": "Confirmed windows: Hao's five street races 20:00–05:00 (Franklin only); the Mineward Spiral off-road race roughly 20:00–03:00; hunting 05:00–19:00 (Trevor only); the Mount Chiliad UFO at 3AM in stormy weather but only after 100% completion. Tennis pauses the game clock during a match, so it does not consume a window.",
+      "suggested_action": "Structure the day around the windows: hunting and daytime races in the morning/afternoon, street racing and Mineward Spiral at night. Check the clock BEFORE the drive, not on arrival.",
+      "avoid": "Driving to a night-only race at 15:00. Avoid burning the night window on a long non-time-locked activity that could have been done in daylight.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "The Mineward Spiral window is single-sourced. Other activities may have undocumented windows — record any discovered live.",
+      "sources": [
+        "https://gta.wiki/wiki/Hao_Street_Races",
+        "https://gta.wiki/wiki/Offroad_Races",
+        "https://gta.wiki/wiki/Hunting",
+        "https://gta.wiki/wiki/Tennis",
+        "https://www.gta.wiki/w/Mount_Chiliad_(HD_Universe)"
+      ]
+    },
+    {
+      "id": "protagonist_gating_of_activities",
+      "category": "meta",
+      "cue": "An activity marker is not appearing, or an activity refuses to start, and the agent has verified it is unlocked.",
+      "context": "Character switching in story mode.",
+      "meaning": "Several activities are hard-locked to one protagonist: hunting, rampages, arms trafficking and the Altruist deliveries are Trevor-only; Hao's street races and the Wildlife Photography Challenge are Franklin-only; yoga is Michael-only. Shooting range medals are tracked separately per character. Off-road races, sea races, triathlons and stock car races are open to all three.",
+      "suggested_action": "Before planning a session block, pick the character the block's activities belong to, and stay on them. Switching characters mid-block loses same-colour '?' blips and can invalidate the plan.",
+      "avoid": "Driving Michael to the hunting ground or Trevor to Hao's start line. Avoid earning shooting-range medals on one character and expecting the discount on another.",
+      "urgency": "normal",
+      "confidence": "high",
+      "exceptions": "Tennis protagonist restrictions are contested between sources (see the tennis item).",
+      "sources": [
+        "https://gta.wiki/wiki/Hunting",
+        "https://gta.wiki/wiki/Hao_Street_Races",
+        "https://gta.wiki/wiki/Yoga",
+        "https://gta.wiki/wiki/Offroad_Races",
+        "https://gta.wiki/wiki/Ammu-Nation_Shooting_Ranges",
+        "https://www.gta.wiki/w/Wildlife_Photography_Challenge"
+      ]
+    },
+    {
+      "id": "wanted_level_blocks_most_activities",
+      "category": "meta",
+      "cue": "the agent's state shows wanted level > 0 while heading to a shop, race marker, or activity.",
+      "context": "All shops and activity markers.",
+      "meaning": "A wanted level blocks entry to shops (Ammu-Nation, clothing, barbers) and prevents activity markers from triggering. Los Santos Customs is the exception and the tool: entering resprays the vehicle and clears the wanted level, provided police lost visual contact on the way in. Riding a freight train into a tunnel also sheds stars.",
+      "suggested_action": "Clear the wanted level FIRST — nearest Los Santos Customs (Burton, La Mesa, LSIA, Harmony) or a train tunnel — then resume the goal. Treat 'clear stars' as an explicit prerequisite step in any plan involving a shop or marker.",
+      "avoid": "Repeatedly driving into an activity marker with stars up and reporting that the activity is broken. Avoid entering LSC with a police helicopter directly overhead.",
+      "urgency": "high",
+      "confidence": "medium",
+      "exceptions": "The line-of-sight rule for LSC is described qualitatively by the source and its exact detection behaviour should be tested on the real machine.",
+      "sources": [
+        "https://gta.wiki/wiki/Los_Santos_Customs",
+        "https://gta.wiki/wiki/Freight_Train"
+      ]
+    }
+  ],
+  "notes": "SOURCES AND METHOD\nPrimary sources fetched: gta.wiki (a GTA Wiki mirror, both /wiki/ and /w/ path forms) for ~25 article-level facts, and gtabase.com for the side-mission overview and the stunt jump guide. gta.fandom.com was not used (402 to this fetcher, per the brief). The WebSearch budget for this session was exhausted mid-task (200/200), so later verification was done by fetching gta.wiki's Special:Search endpoint directly and by URL-guessing article titles; a few articles resolved only to disambiguation pages and had to be re-fetched at their (HD Universe) titles.\n\nWHAT I COULD NOT VERIFY\n1. Coordinates. I deliberately included NO map coordinates. None of the sources gave usable in-game world coordinates, and inventing them would give the agent's drive_to a plausible-looking wrong number. Every location here is named by district/street. The harness must resolve these to coordinates once on the real machine and write them back.\n2. Single-player helicopter spawn points. This is the weakest item in the set (confidence: low). The gta.wiki Maverick article explicitly declines to list story-mode free-roam helipad spawns and its spawn data is GTA Online rank-gated. The one confirmed SP route is hijacking the green Maverick at a parachute-jump marker. Must be established empirically.\n3. Unique vehicles. The Duke O'Death article conflates story mode and Online (it quotes a Warstock price, which is an Online mechanic). Space Docker acquisition unverified. All marked low confidence.\n4. Epsilon Program details. The gta.wiki article resolved only to a disambiguation page and the WebSearch budget was gone; I kept the item but at medium confidence with donation amounts and step order flagged as unverified.\n5. Rampage specifics. The dedicated Rampage article 404'd; the count of five comes only from the Strangers and Freaks index.\n6. Ad-hoc parachute purchase at Ammu-Nation is widely reported but was not confirmed in either fetched Ammu-Nation source; flagged medium.\n\nSOURCE DISAGREEMENTS (all flagged in the items' `exceptions`)\n- Tennis: gta.wiki says 8 courts and claims only Michael and Trevor play as primary characters; gtabase/sportskeeda say 9 courts and imply all three. Unresolved.\n- Yoga and 100%: gtabase lists yoga as OPTIONAL (in its 19 optional hobbies); other coverage treats it as required. gta.wiki's own 100% checklist does not list it. I recorded the disagreement rather than picking a side.\n- Under the Bridge distribution: gta.wiki says \"Los Santos: 10 bridges\" while describing the canals as the main cluster — internally inconsistent and inconsistent with community counts. The total (50) and the 100% threshold (25) are solid; the regional split is not.\n- Knife flights: gta.wiki's per-district list sums to 14, not the stated 15.\n- Mount Chiliad height: 797.1m in-game vs a claimed 2,744m in-universe, in the same article. I used the in-game figure.\n- Stock car racing: gta.wiki says it is exclusive to enhanced versions for players who previously owned PS3/360 copies. If true on the installed build, the Marshall monster truck goal is unavailable. gtabase lists it as a normal optional hobby with no such caveat.\n- LSIA access: the claim that Michael and Franklin have free tarmac access \"from the beginning of the game\" is tied to a post-launch update and comes from one source; the baseline 3-star trespass rule is the safer assumption.\n\nDELIBERATE OMISSIONS\nNothing GTA Online-only was included as if it were story mode. Two Online mechanics that appeared in otherwise-relevant articles are explicitly called out as NOT applying: buying a Fort Zancudo hangar for legitimate base access (2017 Online feature), and the Warstock purchase route for the Duke O'Death.\n\nONE HARNESS-SIDE NOTE\nSeveral of the highest-value cues here (\"a green '?' blip appears\", \"a random event marker appears nearby\", \"an activity marker is within 300m\") depend on the harness exposing NEARBY MAP BLIPS in game state, not just the single active objective blip. As specified in the brief, the agent only receives an objective blip when the game exposes one. Without a nearby-blip list, roughly a third of these items degrade from reactive cues to timed/scheduled goals, and the random-events item — which I rate as the single best source of unscripted watchable moments — becomes largely unusable. Worth raising with whoever owns the bridge's state payload.\n\nREPAIR PASS (against CAPABILITIES.md + 2 critic findings)\nApplied: (1) lsia_three_stars rewritten — the 'Michael/Franklin free tarmac access' claim is now framed as unconfirmed (re-verified against gta.wiki, which itself contradicts whether it's even a Story Mode mechanic), default assumption is 3 stars for all three protagonists; fixed_wing_acquisition's cross-reference updated to match. (2) The stuck-detection/no-displacement loop-risk finding does not apply to this file — grepped for 'construction_accident', 'ram', 'push', 'winch', 'trailer'-as-obstacle and stuck-detector config: none exist here: rejected as not applicable, not fixed. (3) Removed two explicit special-ability violations (Franklin's 'time-slowing driving ability' as a suggested_action) in stunt_jumps_50 and goal_aqueduct_stunt_run, and added a 'this ability isn't available to the agent' clarifier to the two freight-train items that mention Trevor's special ability as a factual game exception. (4) Identified and fixed a file-wide, previously-unflagged class of capability violation: 'no parachute deploy' is explicit in CAPABILITIES.md, which blocks EVERY item in the parachuting category and four fun_goal items (goal_maze_bank_bike_jump, goal_turbine_terror, goal_moving_target_landings, goal_chiliad_descent's parachute alt) — rewrote all six to state plainly that the agent cannot deploy a chute, so any height jump is a fatal fall, not a stunt; updated goal_selection_heuristic so it no longer recommends parachute jumps as a good pick. (5) Removed commanded manual-aim/fire/weapon-select/melee actions (all explicitly banned) from hunting_trevor_daylight, goal_hunting_trip (heart/head shots), goal_bail_bond_manhunt (stun gun/takedown), and ammunation_shooting_ranges (medal grinding requires aim); reframed each around what the agent can actually do or marked the activity as an atmosphere-only visit. (6) Softened golf/tennis/darts suggested_actions — these need analog aim/power/timing input the agent's vocabulary doesn't have — to 'visit, don't narrate completion'; kept yoga as-is since its QTEs are single contextual prompts press_prompt_key can plausibly drive, but added a note that the agent has no way to fight off a Mount Gordo cougar attack. (7) helicopter_acquisition_singleplayer's 'hold vs tap to hijack' instruction rewritten — enter_nearest_vehicle has no such parameter, so that behavior is the bridge's to decide, not the agent's to choose. No items deleted; all 58 ids preserved."
+}

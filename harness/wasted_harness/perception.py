@@ -20,6 +20,7 @@ from __future__ import annotations
 
 import io
 import sys
+import time
 from dataclasses import dataclass
 from typing import Any
 
@@ -59,7 +60,11 @@ class ScreenGrabber:
 
     ``grab()`` returns the last real frame when dxcam reports "unchanged"; it
     never fabricates one, and after a run of empty grabs it rebuilds the
-    capture device and then raises if that fails too.
+    capture device and then raises if that fails too. It always returns
+    ``(frame, captured_at)`` where ``captured_at`` is the monotonic time the
+    frame was actually taken off the wire — it is NOT refreshed when the cached
+    frame is handed back, so a caller can tell "this is what the screen looks
+    like now" from "the screen has not produced a new frame since".
     """
 
     def __init__(self) -> None:
@@ -78,6 +83,8 @@ class ScreenGrabber:
         self._dxcam = dxcam
         self._camera: Any = None
         self._last: Image.Image | None = None
+        #: Monotonic time `_last` was captured. Never refreshed by a cache hit.
+        self._last_at = 0.0
         self._empty_grabs = 0
         self._create_camera()
 
@@ -104,19 +111,31 @@ class ScreenGrabber:
         self._empty_grabs = 0
         log.info("dxcam camera re-created after capture loss")
 
-    def grab(self) -> Image.Image:
+    def grab(self) -> tuple[Image.Image, float]:
+        """Returns (frame, captured_at) — `captured_at` is monotonic seconds.
+
+        `captured_at` is stamped ONLY where a new frame really arrived. The
+        cached-frame branch returns the ORIGINAL stamp, because that is when the
+        picture was taken; stamping it "now" is what let a minutes-old frame be
+        filed as the screenshot of this death, which is exactly what
+        FRAME_MAX_AGE_S exists to prevent. On this box the display is known to
+        stop producing frames whenever the game loses focus, so "dxcam has
+        nothing new" is a routine state, not a rarity.
+        """
         frame = self._camera.grab() if self._camera is not None else None
         if frame is not None:
             self._empty_grabs = 0
             self._last = Image.fromarray(frame)
-            return self._last
+            self._last_at = time.monotonic()
+            return self._last, self._last_at
         self._empty_grabs += 1
         if self._empty_grabs >= GRAB_FAILURES_BEFORE_REINIT:
             self.reset()
             frame = self._camera.grab() if self._camera is not None else None
             if frame is not None:
                 self._last = Image.fromarray(frame)
-                return self._last
+                self._last_at = time.monotonic()
+                return self._last, self._last_at
             raise ScreenshotUnavailableError(
                 f"dxcam returned no frame {GRAB_FAILURES_BEFORE_REINIT}x and "
                 f"again after a device rebuild — Desktop Duplication is gone. "
@@ -124,9 +143,10 @@ class ScreenGrabber:
                 f"console session."
             )
         if self._last is not None:
-            # Unchanged frame: dxcam signals it with None. The last real frame
-            # is still an accurate picture of the screen.
-            return self._last
+            # Unchanged frame: dxcam signals it with None. The pixels are still
+            # what is on screen, but they are not a NEW observation, so the
+            # original capture time travels with them.
+            return self._last, self._last_at
         raise ScreenshotUnavailableError(
             "dxcam has not produced a first frame yet (screen unchanged since "
             "capture started, or duplication not ready)"

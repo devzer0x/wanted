@@ -50,7 +50,20 @@ const DIST_DIR = offlineMode ? ".next-offline" : ".next-e2e";
 const serverEnv: Record<string, string> = {
   NEXT_PUBLIC_SITE_URL: baseURL,
   NEXT_DIST_DIR: DIST_DIR,
-  ...(offlineMode ? { NEXT_PUBLIC_SUPABASE_URL: UNREACHABLE_SUPABASE_URL } : {}),
+  ...(offlineMode
+    ? {
+        NEXT_PUBLIC_SUPABASE_URL: UNREACHABLE_SUPABASE_URL,
+        // The offline suite asserts the stream panel's "NO SIGNAL" state, which means BOTH
+        // sources of a stream config are absent: the site_config row (unreachable here by
+        // construction) and the server-side env fallback. That fallback is
+        // STREAM_PROVIDER/STREAM_CHANNEL in .env.local — an operator file, gitignored, whose
+        // contents vary by machine. Left to inherit, the suite passes or fails on whether the
+        // operator happens to have configured a channel, which is not what it is testing.
+        // Blanking them here makes the premise the assertion states actually hold.
+        STREAM_PROVIDER: "",
+        STREAM_CHANNEL: "",
+      }
+    : {}),
 };
 
 const testMatch = offlineMode ? /offline\.spec\.ts/ : /site\.spec\.ts/;

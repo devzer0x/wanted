@@ -4,7 +4,7 @@ import { useEffect, useState } from "react";
 import type { StreamConfig } from "@/lib/types";
 
 // Twitch requires `parent` = the exact hostname the player is embedded in, and that hostname
-// differs per deployment (vercel.app preview, wasted-lemon.vercel.app, a future custom domain,
+// differs per deployment (a Vercel preview URL, the production domain,
 // localhost in dev). It is therefore read from window.location at runtime rather than baked into
 // the build (D8) — which is also why the iframe renders only after mount. Autoplay must be muted
 // or browsers block it.

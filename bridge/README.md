@@ -238,8 +238,13 @@ Implementation choices where the contract is silent (all in code comments too):
 - `enter_nearest_vehicle` prefers empty vehicles, and `"nicer"` is a *preference*: if nothing
   outranks the current/last vehicle's class (`VehicleRank` heuristic), it falls back to the
   nearest usable vehicle instead of failing.
-- `wander_drive` cruises at 13 m/s; `follow_entity` in-vehicle follows at 15 m/s, 20 m gap; flee
-  re-aims at the latest police-spotted position every 5 s.
+- `wander_drive` cruises at 13 m/s. `follow_entity` in-vehicle follows with a 20 m gap; CONTRACTS
+  v1.9 gives it caller-supplied `style`/`speed_mps` (defaulting to `ignore_lights`/30 m/s when
+  omitted — the old hard-coded `DrivingStyles.Normal` + 15 m/s cruise cap could not keep pace with
+  a mission NPC, who neither stops for lights nor caps its own speed, and lost the target outright).
+  An explicit `speed_mps` is clamped to 1–60 m/s (`TaskEngine.FollowVehicleMinSpeedMps`/
+  `MaxSpeedMps`) so a malformed value cannot produce an undrivable tail. Flee re-aims at the latest
+  police-spotted position every 5 s.
 - Bridge-side watchdog timeouts (→ `failed`/`"timeout"`): drive_to 600 s, walk_to 300 s,
   enter_nearest_vehicle 60 s, exit_vehicle 30 s. `seek_cover` completes (`done`) on cover **or**
   timeout per contract.

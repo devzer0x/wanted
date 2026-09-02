@@ -1,12 +1,11 @@
 import type { Metadata } from "next";
-import Link from "next/link";
 import { routeMetadata } from "@/lib/metadata";
 
 export const metadata: Metadata = routeMetadata({
   path: "/agent",
   title: "Who is the agent?",
   description:
-    "the agent is an AI that plays a famous open-world story mode 24/7 — no cheats, no god mode, full cost transparency.",
+    "the agent is an AI that plays a famous open-world story mode 24/7 — no cheats, no god mode, no second takes.",
 });
 
 function Rule() {
@@ -76,24 +75,6 @@ export default function AgentPage() {
           session is ever detected. The single exception: when he&apos;s physically wedged into
           geometry, the rig may nudge him a couple of meters free. Every nudge is logged and
           announced in the feed. If he dies, he dies. That&apos;s the counter on the front page.
-        </p>
-      </section>
-
-      <Rule />
-
-      <section className="flex flex-col gap-3" aria-labelledby="cost-h">
-        <h2 id="cost-h" className="font-display text-2xl text-bone">
-          The meter is running
-        </h2>
-        <p className="text-sm leading-relaxed text-smoke">
-          Every one of the agent&apos;s thoughts is a paid API call. We publish the running cost —
-          dollars per hour and tokens burned today — right on the{" "}
-          <Link href="/" className="text-bone underline decoration-blood underline-offset-2 hover:text-ember">
-            live page
-          </Link>
-          . When the hourly budget runs low, a governor throttles the brain: fewer thoughts,
-          then reflexes only, then the agent parks somewhere scenic and sleeps it off. The site
-          says so honestly when that happens.
         </p>
       </section>
 
