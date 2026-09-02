@@ -1,34 +1,54 @@
-# secrets — never in the repo
+# --- secrets: never in the repo ------------------------------------------------
 .env
 .env.*
+!.env.example
 *.key
+*.pem
 secrets/
+credentials*
+*token*.txt
 
-# python
+# --- python --------------------------------------------------------------------
 __pycache__/
 *.pyc
 .venv/
+venv/
 .pytest_cache/
+*.egg-info/
 
-# node / next / vercel
+# --- node / next / vercel --------------------------------------------------------
 node_modules/
 .next/
 .vercel/
 out/
 
-# dotnet
+# --- dotnet ----------------------------------------------------------------------
 bin/
 obj/
 *.user
 
-# logs & local junk
+# --- logs & local junk -----------------------------------------------------------
 logs/
 *.log
 .DS_Store
+*.swp
+*~
 
-# third-party binaries & runtime state (fetched by scripts, never committed)
+# --- editor / OS state -----------------------------------------------------------
+.idea/
+.vscode/
+Thumbs.db
+
+# --- third-party binaries & runtime state (fetched by scripts, never committed) ---
 bridge/lib/
 harness/state/
 web/test-results/
 web/playwright-report/
 infra/supabase/.temp/
+
+# --- local working notes: not part of the public project -------------------------
+prompt.txt
+dossier.txt
+tweet.md
+scratch/
+notes/
