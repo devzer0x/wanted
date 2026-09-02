@@ -1,7 +1,69 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-02 (evening).
+run log, or URL) noted next to it. Last updated: 2026-09-02 (night).
+
+## 2026-09-02 (night) — CONTRACTS v1.11 / bridge 1.4.0: built and verified locally, NOT live-verified
+
+The operator asked whether a GTA mod would make the agent a pro. Three sourced research passes say no:
+**the mod is Script Hook V + SHVDN, which we already run** — the gap was native API we were never
+calling. Trainers (Menyoo, ENT) are cheats and were refused. Research also found **no strong
+open-source prior art** for an AI playing GTA missions via native tasks; the whole self-driving-GTA
+cluster is abandoned CNN keypress bots, the approach this project already rejects. Briefs:
+`docs/research/brief-driving-natives.json`, `brief-combat-natives.json`,
+`brief-mission-comprehension.json`.
+
+**Three defects root-caused from the live run + operator screenshots:**
+
+1. **He could not fight back because the fight command never ran.**
+   `combat_hated_targets_around` requires a nearby ped whose relationship is Neutral/Dislike/Hate
+   or the engine task **exits immediately**. A civilian whose car he stole is plausibly still
+   Respect/Like — so his only retaliation action has been a silent no-op. Fixed with `fight_ped`
+   (target-explicit, no relationship setup); the melee path is the one R*'s own
+   `player_scene_t_bbfight` calls on `PLAYER_PED_ID`. He now also learns he is being attacked
+   **before the punch lands** (the game reports a ped's melee target while the swing animation
+   plays), instead of waiting to accumulate damage, and no longer leaves a working car to brawl.
+2. **He searched at random for a crewmate the game was drawing on the minimap.**
+   `nearby.peds` reaches ~50 m; once the crewmate drove off he was gone from `/state` entirely.
+   `mission.entity_blips[]` (blips pinned to a ped/vehicle, route or not, carrying the game's own
+   label) is now both a normal follow target and a recovery rung that outranks driving to a stale
+   last-seen position. He names who he is tailing.
+3. **He drove badly for a documented reason.** `avoid_traffic` was `786468` — the RECKLESS preset,
+   documented as *"doesn't use the brakes at ALL to help with steering"*. Retuned. In-vehicle
+   `follow_entity` now uses the engine's mission-follow task with a straight-line-to-target
+   distance (the fix for losing a target at junctions) and explicit `driveAgainstTraffic: false`.
+   Wedged cars recover with reverse / reverse-and-turn nudges and a task re-issue — never a
+   teleport.
+
+Also: `player.switch_in_progress` and `mission.retry_in_flight` now gate tasks and commentary (the
+real signal behind him narrating "wrong body / waiting for the switch"), and commentary grounding
+accepts names the game itself attached to a blip.
+
+**Declared assist, on the record:** the bridge sets the engine's own driver ability (0.8) and
+aggressiveness (0.5–0.8) for the player ped. Engine-clamped, and they change AI *competence*, not
+vehicle physics. **Refused as cheats and verified absent by grep:** perfect-accuracy and
+shoot-through-walls attributes, accuracy/shoot-rate above human range, giving weapons or ammo,
+the teleport-out vehicle-exit flag, wanted-level clearing, police-ignore, self-righting a car.
+
+**Evidence (local only):** bridge `dotnet build -c Release` 0 warnings / 0 errors;
+`bridge/tools/offline-checks/run.sh` **187 passed / 0 failed**; harness **674 passed**,
+`ruff` clean. An independent verifier re-ran all four, found **no cheat-list hits**, confirmed the
+declared assist values, and cross-checked every wire name between the C# DTOs and the Python models
+(a mismatch there would silently drop fields in production) — all agree, all backward-compatible
+defaults, so a pre-v1.11 bridge payload still parses.
+
+**NOT VERIFIED — this is the honest line.** None of this has run against the real game. The code
+itself flags the specific unknowns for the live smoke test: whether the mission-follow task really
+beats the old follow at junctions, whether `TASK_COMBAT_PED` does anything on a *player* ped (the
+melee path is the confirmed one; the ranged path has zero R* precedent), whether the
+combat-attribute and driver-competence setters take effect on a player ped, and whether the stuck
+ladder's timings feel right. Do not read "verified locally" as "he plays well".
+
+**Concurrent work, flagged:** `harness/wasted_harness/behavior/roam.py` + `tests/test_roam.py`
+(~1800 lines, a free-roam goal engine) were written by a DIFFERENT session, are wired into
+`main.py`, and rode along in commit `3362f73` to keep the tree consistent. They route through the
+same `_execute_action` choke point so the new gating applies to them, and they touch none of the
+v1.11 fields — but they are **not** covered by the verification above and want their own review.
 
 ## 2026-09-02 (evening) — CONTRACTS v1.10 deployed to the real machine; six real bugs found BY the live run
 
