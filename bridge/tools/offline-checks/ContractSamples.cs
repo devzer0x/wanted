@@ -129,8 +129,18 @@ namespace WastedBridge.OfflineChecks
             BridgeAssembly.SetField(np, "Relationship", "hostile");
             BridgeAssembly.SetField(np, "Pos", Vec3(-1039.8f, -2734.9f, 20.2f));
             // in_vehicle_handle left null (default): this cop is on foot in the sample.
+            // CONTRACTS v1.11: a hostile cop shooting at the player is exactly what attacking_me and
+            // weapon_class exist to describe.
+            BridgeAssembly.SetField(np, "AttackingMe", true);
+            BridgeAssembly.SetField(np, "WeaponClass", "gun");
             AddToList(nearby, "Peds", np);
             BridgeAssembly.SetField(snap, "Nearby", nearby);
+
+            // CONTRACTS v1.11: the attacking cop above is also the nearest threat.
+            object threat = BridgeAssembly.New("ThreatDto");
+            BridgeAssembly.SetField(threat, "AttackerHandle", 198657);
+            BridgeAssembly.SetField(snap, "Threat", threat);
+            // being_jacked_by left null (default): nobody is carjacking the player in this sample.
 
             // A running task: TaskEngine.Start() needs natives, so the DTO is built directly. The
             // fresh-load sample above covers the engine's own idle output.

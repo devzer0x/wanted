@@ -31,6 +31,7 @@ BRIDGE_TASKS: tuple[str, ...] = (
     "combat_hated_targets_around",
     "seek_cover",
     "follow_entity",
+    "fight_ped",
     "set_waypoint",
     "stop",
 )
@@ -56,6 +57,7 @@ ActionType = Literal[
     "combat_hated_targets_around",
     "seek_cover",
     "follow_entity",
+    "fight_ped",
     "set_waypoint",
     "stop",
     "look_around",
@@ -88,6 +90,7 @@ REQUIRED_NUMERIC_PARAMS: dict[str, tuple[str, ...]] = {
 }
 REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
     "follow_entity": ("handle",),
+    "fight_ped": ("handle",),
 }
 
 
@@ -242,7 +245,7 @@ class ActionParamsModel(BaseModel):
     )
     handle: int | None = Field(
         default=None,
-        description="follow_entity: handle from nearby.* in the CURRENT snapshot.",
+        description="follow_entity/fight_ped: handle from nearby.*/threat.* in the CURRENT snapshot.",
     )
     in_vehicle: bool | None = Field(
         default=None, description="follow_entity: true to tail in a vehicle, false on foot."
@@ -331,6 +334,9 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     # Omitted, the bridge applies its own `ignore_lights` default and the tail can keep up. Speed
     # stays settable because it is nullable, so it is absent unless someone means it.
     "follow_entity": ("handle", "in_vehicle", "speed_mps"),
+    # v1.11: fight ONE named ped, no relationship setup needed (unlike
+    # combat_hated_targets_around). Only `handle` — see CONTRACTS §1.
+    "fight_ped": ("handle",),
     "set_waypoint": ("x", "y"),
     "stop": (),
     "look_around": (),

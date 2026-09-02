@@ -18,10 +18,15 @@ is a live check on the server with the game running.
 
 from __future__ import annotations
 
+import itertools
 import random
 from typing import Any
 
-from wasted_harness.behavior.activities import CATALOG, ActivityPicker, ActivityRunner
+from support import throwaway_totals  # noqa: F401  (kept: shared real-store helper)
+from test_roam import make_state as roam_state
+from test_roam import veh
+
+from wasted_harness.behavior.activities import ActivityPicker, ActivityRunner
 from wasted_harness.behavior.humanizer import MoodModel
 from wasted_harness.behavior.navigation import (
     VEHICLE_SEARCH_RADIUS_M,
@@ -44,7 +49,14 @@ from wasted_harness.behavior.planner import (
     DayPlanner,
     compass_bearing,
 )
+from wasted_harness.behavior.roam import (
+    BOREDOM_S,
+    PICKABLE_GOAL_IDS,
+    RoamEngine,
+    as_activity,
+)
 from wasted_harness.behavior.vehicle import MovementWheel
+from wasted_harness.brain.schemas import ACTION_TYPES
 from wasted_harness.bridge_client import UNKNOWN_PROTAGONIST, GameState
 from wasted_harness.main import Harness
 
@@ -187,7 +199,7 @@ def test_a_running_activity_is_not_cut_short_before_the_block_length() -> None:
     bored tick. The hard block length still wins (bounded time is bounded)."""
     clock = FakeClock()
     p = planner(clock)
-    p.roam_activity_started("steal_nicer_car")
+    p.roam_activity_started("steal_nice_car")
     clock.tick(ROAM_MIN_BLOCK_S + 1.0)
     p.update(make_state(starts=NEARBY_JOB), "bored", False)
     assert p.block is Block.ROAM, "an activity in flight must not be cut short"
@@ -725,10 +737,18 @@ def test_a_roam_block_emits_nothing_of_its_own() -> None:
 # --- roam ideas are real behaviour, not narration ------------------------------
 
 
-def test_every_roam_idea_maps_onto_a_real_catalog_activity() -> None:
-    names = {a.name for a in CATALOG}
+def test_every_roam_idea_maps_onto_a_real_roam_goal() -> None:
+    """The plan may only announce ideas the roam engine can run AND VERIFY.
+
+    Retargeted when free-roam picking moved from `behavior.activities` (a
+    weighted draw that finished when its last bridge task returned `done`) to
+    `behavior.roam` (a `needs` gate and a `done_when` predicate). An idea naming
+    a goal the engine has never heard of is a plan the show cannot keep.
+    """
     for idea in ROAM_IDEAS:
-        assert idea.activity in names, f"{idea.activity} is not an activity the runner can run"
+        assert idea.activity in PICKABLE_GOAL_IDS, (
+            f"{idea.activity} is not a roam goal the engine can run"
+        )
 
 
 def test_every_roam_idea_goal_fits_the_decision_schema_goal_budget() -> None:
@@ -754,10 +774,10 @@ def test_a_preference_the_picker_cannot_honour_falls_through_quietly() -> None:
 def test_the_runner_reports_what_actually_started_not_what_was_asked_for() -> None:
     clock = FakeClock()
     p = planner(clock)
-    p.roam_activity_started("beach_pier")
-    assert "pier" in p.note()
+    p.roam_activity_started("bike_hills")
+    assert "up a hill" in p.note()
     p.roam_activity_ended()
-    assert "pier" not in p.note()
+    assert "up a hill" not in p.note()
 
 
 def test_the_planner_asks_for_nothing_while_it_is_on_a_job() -> None:
@@ -993,12 +1013,19 @@ class _ActivityStub:
             assert self.planner.in_mission_block
         self.activities = ActivityPicker(random.Random(1), clock)
         self.activity_runner = ActivityRunner(self.activities, random.Random(1), clock)
+        #: Free roam's single owner, on the stub's fake clock so a test can roll
+        #: cooldowns and the goal timeout deliberately. The REAL engine: which
+        #: goal is offered and whether it locks is the behaviour under test.
+        self.roam = RoamEngine(random.Random(1), clock)
         self.writer = _EventWriter()
         self.memory = _Recorder()
         self.posted: list[tuple[str, dict[str, Any]]] = []
         self._quiet_until = 0.0
         self._threat_has_the_wheel = False
         self.wheel = MovementWheel()
+        #: `_begin_roam_goal` reads the model's last goal line to see whether it
+        #: named an offered id. Nothing has been said yet on this stub.
+        self.current_goal = "see the city"
 
     def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
         self.posted.append((action_type, dict(params)))
@@ -1009,6 +1036,17 @@ class _ActivityStub:
 
     def _issue_activity_step(self, step: dict[str, Any]) -> None:
         Harness._issue_activity_step(self, step)
+
+    # The three halves of the free-roam slot are the real ones: whether a goal
+    # is picked, advanced or graded is exactly what these tests are about.
+    def _judge_roam_goal(self, state: GameState) -> bool:
+        return Harness._judge_roam_goal(self, state)
+
+    def _advance_roam_goal(self, state: GameState) -> None:
+        Harness._advance_roam_goal(self, state)
+
+    def _begin_roam_goal(self, state: GameState) -> None:
+        Harness._begin_roam_goal(self, state)
 
 
 def test_drive_activities_starts_nothing_during_a_mission_block() -> None:
@@ -1035,7 +1073,12 @@ def test_a_mission_block_ends_an_activity_that_was_already_running() -> None:
     clock.tick(500.0)
     Harness._drive_activities(stub, make_state(in_vehicle=True))
     assert stub.activity_runner.current is not None
-    clock.tick(ROAM_BLOCK_S[1] + 1.0)
+    # The block is ended by a REQUEST rather than by winding the clock past
+    # ROAM_BLOCK_S: every roam goal now carries its own `timeout_s` (the longest
+    # is 420 s), so a twelve-minute jump would fail the goal on the timeout and
+    # this test would stop testing the mission-block gate at all.
+    stub.planner.request_mission_block("three goals done")
+    clock.tick(1.0)
     stub.planner.update(make_state(in_vehicle=True, starts=NEARBY_JOB), "bored", False)
     Harness._drive_activities(stub, make_state(in_vehicle=True, starts=NEARBY_JOB))
     assert stub.activity_runner.current is None
@@ -1066,6 +1109,61 @@ def test_the_day_plan_stands_down_when_survival_has_the_tick() -> None:
     # ...but the state machine still advanced, exactly as for a brain `wait`.
     assert stub.planner.block is Block.MISSION
     assert [t for t, _ in stub.writer.events] == ["activity_start"]
+
+
+def test_free_roam_never_leaves_him_standing_still() -> None:
+    """The operator's one hard rule, through the REAL free-roam slot.
+
+    He is on foot, parked in one spot, with nothing to do and no goal running.
+    Every tick feeds the same position, so the boredom window closes and the
+    slot has to pick a goal and post a task for it — the jittered beat between
+    goals is not allowed to outlast that.
+    """
+    clock = FakeClock()
+    stub = _ActivityStub(clock, in_mission_block=False)
+    standing = make_state()
+    posted_at: list[float] = [clock.t]  # the tick he started standing there
+    for _ in range(240):  # four minutes at a 1 s tick
+        before = len(stub.posted)
+        Harness._drive_activities(stub, standing)
+        if len(stub.posted) > before:
+            posted_at.append(clock.t)
+        clock.tick(1.0)
+    assert len(posted_at) > 1, "he stood still for four minutes with nothing posted"
+    # He never goes quiet for longer than the boredom window plus one tick. The
+    # goals themselves keep FAILING here — a stub whose position never changes is
+    # genuinely pinned, so the in-goal stuck watchdog fires every time — and that
+    # is the point: failing a goal has to put him straight onto the next one.
+    gaps = [b - a for a, b in itertools.pairwise(posted_at)]
+    assert max(gaps) <= BOREDOM_S + 2.0, (
+        f"a silent stretch of {max(gaps):.0f}s; the operator's bar is 30s"
+    )
+    assert len(posted_at) > 5, "one post in four minutes is not a show"
+    starts = [p for t, p in stub.writer.events if t == "activity_start"]
+    assert len(starts) > 1 and all(s["why"] for s in starts), "every goal needs its why"
+    # And everything posted is a real action from the frozen vocabulary.
+    for action_type, _params in stub.posted:
+        assert action_type in ACTION_TYPES, action_type
+
+
+def test_a_goal_the_world_completed_is_recorded_as_verified() -> None:
+    """`done_when`, not "the last task returned done": the whole point of the
+    goal engine. The feed has to be able to tell a real completion from a
+    timeout, so the `activity_end` payload carries which one it was."""
+    clock = FakeClock()
+    stub = _ActivityStub(clock, in_mission_block=False)
+    on_foot = roam_state(nearby_vehicles=[veh(1, "adder", "Super", 12.0, pos=(12.0, 0.0, 0.0))])
+    stub.roam.observe(on_foot)
+    stub.roam.pick(on_foot, goal_id="steal_nice_car")
+    activity = as_activity(stub.roam.current.goal)
+    stub.activity_runner.start_plan(activity, stub.roam.current.plan)
+    # The world now says he is in a Super, which outranks the nothing he had.
+    in_super = roam_state(in_vehicle=True, vehicle={"class": "Super", "model": "adder"})
+    Harness._drive_activities(stub, in_super)
+    ends = [p for t, p in stub.writer.events if t == "activity_end"]
+    assert ends and ends[-1]["goal_id"] == "steal_nice_car"
+    assert ends[-1]["outcome"] == "completed" and ends[-1]["verified"] is True
+    assert stub.roam.current is None
 
 
 def test_activities_stand_down_when_survival_has_the_tick() -> None:

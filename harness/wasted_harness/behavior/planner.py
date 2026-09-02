@@ -85,9 +85,13 @@ ROAM_BLOCK_S = (6 * 60.0, 12 * 60.0)
 ROAM_MIN_BLOCK_S = 120.0
 
 #: Prefer a mission when the last one started longer ago than this. The show is
-#: story missions with free roam between them, not the other way round; ~20 min
-#: is roughly two roam blocks.
-MISSION_OVERDUE_S = 20 * 60.0
+#: story missions with free roam between them, not the other way round.
+#: LOWERED from 20 min to 15 to match behavior.roam.ROAM_BEFORE_MISSION_S, which
+#: is the hard deadline after which `start_nearest_mission` is the ONLY goal the
+#: roam engine will offer. Two numbers for the same idea meant the planner still
+#: thought there were five minutes of roam left at the moment the roam engine had
+#: already stopped offering anything else to do with them.
+MISSION_OVERDUE_S = 15 * 60.0
 
 #: Roam blocks owed after any mission ends: one. Win or lose, a person does not
 #: walk straight back into the next job — he drives off, and that beat is where
@@ -141,29 +145,37 @@ GO_START_A_JOB = "go_start_a_job"
 class RoamIdea:
     """One fun thing to do with a roam block.
 
-    `activity` is a real :data:`behavior.activities.CATALOG` name — the planner
-    does not invent behaviour, it chooses among what the runner can already do,
-    so the idea it announces is the idea the engine will actually execute
-    (when the runner's cooldowns/chaos budget allow it). `goal` is how the agent
-    would put it, ≤12 words, matching the decision schema's goal field.
+    `activity` is a real :data:`behavior.roam.CATALOG` goal id — the planner
+    does not invent behaviour, it chooses among what the roam engine can already
+    run AND VERIFY, so the idea it announces is the idea the engine will actually
+    execute (when that goal's `needs`, cooldown and chaos budget allow it).
+    `goal` is how the agent would put it, ≤12 words, matching the decision schema's
+    goal field.
+
+    Retargeted from the old `behavior.activities` catalog when free-roam picking
+    moved to `behavior.roam`: an idea naming an activity the roam engine has
+    never heard of is a plan the show cannot keep, which is exactly what the
+    accompanying test refuses to allow.
     """
 
     activity: str
     goal: str
 
 
-#: The curated day-plan menu. Every entry maps onto an existing activity, so
-#: nothing here is a promise the harness cannot keep.
+#: The curated day-plan menu. Every entry names a real roam goal id, so nothing
+#: here is a promise the harness cannot keep — and every one of those goals has a
+#: `done_when` the code can evaluate, so "the plan said he would do X" is now a
+#: checkable claim rather than narration.
 ROAM_IDEAS: tuple[RoamIdea, ...] = (
-    RoamIdea("steal_nicer_car", "upgrade the ride to something with a name"),
-    RoamIdea("cruise_to_landmark", "drive somewhere worth looking at"),
-    RoamIdea("beach_pier", "take the coast road down to the pier"),
-    RoamIdea("stunt_jump", "find a ramp and let physics have an opinion"),
-    RoamIdea("mount_chiliad_run", "take the dirt road up Chiliad"),
-    RoamIdea("park_and_watch", "park somewhere scenic and watch the city"),
-    RoamIdea("deliberate_chase", "drive badly downtown, then lose them"),
-    RoamIdea("go_home", "go home and reset the day"),
-    RoamIdea("visit_death_spot", "go back to where it went wrong"),
+    RoamIdea("steal_nice_car", "upgrade the ride to something with a name"),
+    RoamIdea("drive_to_landmark", "drive somewhere worth looking at"),
+    RoamIdea("bike_hills", "find a bike and take it up a hill"),
+    RoamIdea("freeway_run", "open it up and cover some real ground"),
+    RoamIdea("steal_cop_car", "borrow a police car nobody is using"),
+    RoamIdea("hijack_bus", "take the bus, and I mean the whole bus"),
+    RoamIdea("earn_two_stars", "get the police genuinely interested"),
+    RoamIdea("random_event", "see what this is before it stops happening"),
+    RoamIdea("start_nearest_mission", "go and start the nearest job"),
 )
 
 #: What a roam block is when the runner had nothing eligible to offer. Honest:
@@ -248,6 +260,13 @@ class DayPlanner:
         self._roam_blocks_owed = 0
         self._owed_reason = ""
 
+        #: Set by :meth:`request_mission_block` when the roam engine has run out
+        #: of patience (three verified goals, or fifteen minutes). None the rest
+        #: of the time. It ends the roam block early; it does NOT bypass
+        #: `_mission_block_allowed`, so a request made with stars up or at low
+        #: health still waits — a forced job he cannot start is not a plan.
+        self._mission_requested: str | None = None
+
         # MISSION block state.
         self._marker: tuple[float, float, float] | None = None
         self._marker_protagonist = UNKNOWN_PROTAGONIST
@@ -297,6 +316,21 @@ class DayPlanner:
     def roam_activity_ended(self) -> None:
         self._activity_running = False
         self._roam_actual = None
+
+    def request_mission_block(self, reason: str) -> None:
+        """The roam engine is asking to go and start a job now.
+
+        The forced-mission rule ("the ONLY option after 3 completed roam goals or
+        15 minutes") lives in :mod:`behavior.roam`, which is where the goal
+        counter is. Acting on it lives here, because the trip to a marker is
+        already built here end to end — the drive/walk/get-a-car ladder and the
+        25 m on-foot final approach the corona needs. Two implementations of that
+        trip would be two engines posting into the same slot.
+        """
+        if self._phase is not _Phase.ROAM or self._mission_requested == reason:
+            return
+        self._mission_requested = reason
+        log.info("day plan: mission block requested", extra={"kv": {"reason": reason}})
 
     def observe_mission_event(self, event_type: str) -> None:
         """Feed §4 mission events (`main._handle_mission_events` calls this)."""
@@ -468,10 +502,15 @@ class DayPlanner:
             return "wanted"
         if state.mission.cutscene_active:
             return "cutscene"
+        if state.player.switch_in_progress:
+            return "switch_in_progress"
+        if state.mission.retry_in_flight:
+            return "retry_in_flight"
         return None
 
     def _begin_trip(self, marker: MissionStart, now: float) -> None:
         self._phase = _Phase.TO_MISSION
+        self._mission_requested = None
         self._marker = (marker.pos.x, marker.pos.y, marker.pos.z)
         self._marker_protagonist = marker.protagonist
         self._block_started_at = now
@@ -573,6 +612,7 @@ class DayPlanner:
 
     def _start_roam_block(self, now: float) -> None:
         self._phase = _Phase.ROAM
+        self._mission_requested = None
         self._block_started_at = now
         self._block_length_s = self._rng.uniform(*ROAM_BLOCK_S)
         self._marker = None
@@ -597,6 +637,13 @@ class DayPlanner:
         )
 
     def _roam_block_over(self, now: float, mood: str) -> bool:
+        if self._mission_requested is not None:
+            # Deliberately ahead of the ROAM_MIN_BLOCK_S floor and the
+            # "do not cut an activity short" guard: by construction this is only
+            # ever set after three VERIFIED goals or fifteen minutes, both of
+            # which are far past the floor, and the roam engine has already
+            # closed whatever it was running before asking.
+            return True
         elapsed = now - self._block_started_at
         if elapsed < ROAM_MIN_BLOCK_S:
             return False
@@ -643,6 +690,12 @@ class DayPlanner:
             return False
         if state.mission.cutscene_active:
             self._blocked_reason = "a cutscene is playing"
+            return False
+        if p.switch_in_progress:
+            self._blocked_reason = "a protagonist switch is playing"
+            return False
+        if state.mission.retry_in_flight:
+            self._blocked_reason = "a mission retry is in progress"
             return False
         if p.wanted > 0:
             self._blocked_reason = "the cops are still interested"

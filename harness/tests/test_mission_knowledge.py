@@ -15,6 +15,7 @@ from support import throwaway_learned_scripts
 
 from wasted_harness.behavior.missions import MissionEvent
 from wasted_harness.behavior.planner import DayPlanner
+from wasted_harness.behavior.roam import RoamEngine
 from wasted_harness.brain import mission_knowledge as mk
 from wasted_harness.main import Harness
 
@@ -80,6 +81,11 @@ def _harness(events, title):
     # `_handle_mission_events` feeds the day planner the same events (attempt
     # counting / roam-block back-off), so the real planner is wired in.
     h.planner = DayPlanner()
+    # The real roam engine: free roam's single owner. `_handle_mission_events`
+    # resets its "the story has to move" clock and `_reflex` reads its
+    # standing-still measure, so stubbing it out would stop testing exactly the
+    # machinery that keeps him from standing there.
+    h.roam = RoamEngine()
     h.writer = _Writer()
     h._pending_screenshot_trigger = None
     h._pending_big_event = None

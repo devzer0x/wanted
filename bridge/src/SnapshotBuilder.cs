@@ -20,6 +20,21 @@ namespace WastedBridge
         // CONTRACTS v1.8: mission.route_blips is bounded so a map full of routed blips can never
         // grow the snapshot (and the harness's prompt) without limit.
         private const int MaxRouteBlips = 5;
+        // CONTRACTS v1.11: mission.entity_blips is bounded the same way, nearest first.
+        private const int MaxEntityBlips = 8;
+        // v1.11 THROTTLE (load-bearing, see FindEntityBlipsSafe): resolving an entity for a blip via
+        // Blip.Entity runs a native per candidate blip. The existing objective-blip pass sorts blips
+        // into "routed" vs not BEFORE running any per-blip native specifically to keep that native
+        // off every map blip at the ~47 Hz snapshot cadence; entity_blips has no such cheap
+        // pre-filter (a plain crew-member dot is not routed), so instead the whole pass is rate
+        // limited to ~4 Hz and the previous result is served on the ticks in between.
+        private const int EntityBlipThrottleMs = 250;
+        // v1.11: the combined mission-script-name + retry-in-flight scan is a full
+        // SCRIPT_THREAD_ITERATOR walk over every running script thread - the same cost class as
+        // the blip-pool scans above (unbounded thread count, unlike the tightly-radius-capped
+        // per-ped threat checks below) - so it gets the same ~4 Hz throttle rather than running
+        // unconditionally every tick just because "free" retry detection is tempting.
+        private const int MissionScriptThrottleMs = 250;
         // "speed ≈ 0" threshold for stopped_for_s and the /unstick precondition.
         private const float StoppedSpeedThresholdMps = 0.2f;
 
@@ -28,6 +43,11 @@ namespace WastedBridge
         private int _lastBlipErrorAt = int.MinValue;
         private int _lastStartsErrorAt = int.MinValue;
         private int _lastScriptErrorAt = int.MinValue;
+        private int _lastEntityBlipErrorAt = int.MinValue;
+        private List<EntityBlipDto> _lastEntityBlips;
+        private int _lastEntityBlipsAt = int.MinValue;
+        private MissionScriptScan _lastMissionScriptScan = new MissionScriptScan();
+        private int _lastMissionScriptScanAt = int.MinValue;
 
         /// <summary>stopped_for_s of the current vehicle as of the last Build call.</summary>
         public float CurrentStoppedForS { get; private set; }
@@ -62,6 +82,13 @@ namespace WastedBridge
             // Read once, reused for both mission.active and the mission.script gate below (v1.10
             // item 3 only ever emits a script name while the mission flag is set).
             bool missionActive = Game.IsMissionActive;
+            // v1.11: one script-thread walk for both mission.script and mission.retry_in_flight -
+            // the latter must NOT be gated on missionActive (a mission_repeat_controller thread can
+            // plausibly still be running in the window right after the mission flag drops), so the
+            // combined scan itself is unconditional; only the Script field is filtered by
+            // missionActive below, same rule as before.
+            MissionScriptScan scriptScan = FindMissionScriptScanSafe();
+            NearbyDto nearby = BuildNearby(ped, veh, out ThreatDto threat);
 
             var snapshot = new Snapshot
             {
@@ -80,7 +107,11 @@ namespace WastedBridge
                     Arrested = playerArrested,
                     InVehicle = inVehicle,
                     ControlEnabled = player.CanControlCharacter,
-                    Protagonist = ProtagonistName(ped)
+                    Protagonist = ProtagonistName(ped),
+                    // v1.11: IS_PLAYER_SWITCH_IN_PROGRESS(), no SHVDN wrapper (verified absent from
+                    // lib/Docs/ScriptHookVDotNet3.xml; hash confirmed present in GTA.Native.Hash via
+                    // MetadataLoadContext), no arguments - raw Function.Call.
+                    SwitchInProgress = Function.Call<bool>(Hash.IS_PLAYER_SWITCH_IN_PROGRESS)
                 },
                 Vehicle = BuildVehicle(veh),
                 Location = new LocationDto
@@ -104,9 +135,14 @@ namespace WastedBridge
                     ObjectiveBlip = objective.Objective,
                     Starts = FindMissionStartsSafe(ped),
                     RouteBlips = objective.RouteBlips,
-                    Script = FindMissionScriptSafe(missionActive)
+                    // v1.10 item 3: only ever non-null while active - filtered here rather than
+                    // inside the (now-unconditional) scan, see the comment above.
+                    Script = missionActive ? scriptScan.Script : null,
+                    EntityBlips = FindEntityBlipsSafe(pos, missionActive),
+                    RetryInFlight = scriptScan.RetryInFlight
                 },
-                Nearby = BuildNearby(ped, veh),
+                Nearby = nearby,
+                Threat = threat,
                 LastTask = engine.ToDto(),
                 Bridge = new BridgeInfoDto
                 {
@@ -297,52 +333,72 @@ namespace WastedBridge
             "thelastone"
         };
 
-        /// <summary>
-        /// CONTRACTS v1.10 item 3, guarded the same way FindMissionStartsSafe is: a scan failure
-        /// must leave mission.script null, never crash the tick. Only ever called (and only ever
-        /// non-null) while mission.active is true — the research brief could not confirm whether an
-        /// allowlisted thread can exist outside the actual mission window, so the bridge does not
-        /// take the risk of reporting one.
-        /// </summary>
-        private string FindMissionScriptSafe(bool missionActive)
+        /// <summary>Combined result of one script-thread walk: the mission-script name (subject
+        /// to the missionActive filter applied by the caller) and whether a retry/checkpoint-reload
+        /// is in flight.</summary>
+        private sealed class MissionScriptScan
         {
-            if (!missionActive)
+            public string Script;
+            public bool RetryInFlight;
+        }
+
+        // CONTRACTS v1.11: the game's own script-thread name for the checkpoint-reload/retry
+        // executor (docs/research/brief-mission-comprehension.json: "mission_repeat_controller ...
+        // is the retry/checkpoint-reload executor" - QUEUE_MISSION_REPEAT_LOAD, fade out/in,
+        // TERMINATE_THIS_THREAD; it renders no UI itself). Not gated by missionActive: the research
+        // could not confirm the thread never outlives the mission flag, and the whole point is to
+        // catch the window a human sees as "reloading" even if active has already dropped.
+        private const string MissionRepeatControllerThreadName = "mission_repeat_controller";
+
+        /// <summary>
+        /// CONTRACTS v1.10 item 3 / v1.11: throttled the same way FindEntityBlipsSafe is (see
+        /// MissionScriptThrottleMs) - a scan failure or a throttled tick serves the previous result
+        /// rather than flashing mission.script/retry_in_flight to their zero values.
+        /// </summary>
+        private MissionScriptScan FindMissionScriptScanSafe()
+        {
+            int now = Environment.TickCount;
+            if (unchecked(now - _lastMissionScriptScanAt) < MissionScriptThrottleMs)
             {
-                return null;
+                return _lastMissionScriptScan;
             }
             try
             {
-                return FindMissionScript();
+                _lastMissionScriptScan = FindMissionScriptScan();
+                _lastMissionScriptScanAt = now;
             }
             catch (Exception ex)
             {
-                int now = Environment.TickCount;
-                if (unchecked(now - _lastScriptErrorAt) > 5000)
+                int errNow = Environment.TickCount;
+                if (unchecked(errNow - _lastScriptErrorAt) > 5000)
                 {
-                    _lastScriptErrorAt = now;
+                    _lastScriptErrorAt = errNow;
                     BridgeLog.Error("mission-script thread scan failed (SCRIPT_THREAD_ITERATOR_*); "
-                                    + "mission.script stays null", ex);
+                                    + "mission.script/retry_in_flight serve the last good result", ex);
                 }
-                return null;
+                // Keep _lastMissionScriptScan as it was - do not overwrite with a fresh (empty) one.
             }
+            return _lastMissionScriptScan;
         }
 
         /// <summary>
         /// Enumerates every running script thread (SCRIPT_THREAD_ITERATOR_RESET +
         /// SCRIPT_THREAD_ITERATOR_GET_NEXT_THREAD_ID, 0 = end; GET_NAME_OF_SCRIPT_WITH_THIS_ID per
-        /// thread id) and returns the first name found in <see cref="MissionScriptNames"/>. All
-        /// three natives are present in the pinned SHVDN nightly's Hash enum (verified against
-        /// lib/ScriptHookVDotNet3.dll with MetadataLoadContext) but have no typed GTA.* wrapper, so
-        /// they are called raw via Function.Call - the same pattern TaskEngine.StartSeekCover uses
-        /// for TASK_SEEK_COVER_FROM_POS. If more than one allowlisted thread is running at once
-        /// (unconfirmed whether this happens; a mission and one of its prep/sub-scripts could both
-        /// match) the first one seen in iteration order wins and the collision is logged once - no
-        /// priority scheme is guessed.
+        /// thread id). Records the first name found in <see cref="MissionScriptNames"/> (mission
+        /// name) AND whether <see cref="MissionRepeatControllerThreadName"/> is present
+        /// (retry_in_flight) in the SAME pass - CONTRACTS v1.11: "free to detect... you are already
+        /// walking the thread list". All three natives are present in the pinned SHVDN nightly's
+        /// Hash enum (verified against lib/ScriptHookVDotNet3.dll with MetadataLoadContext) but have
+        /// no typed GTA.* wrapper, so they are called raw via Function.Call - the same pattern
+        /// TaskEngine.StartSeekCover uses for TASK_SEEK_COVER_FROM_POS. If more than one allowlisted
+        /// mission thread is running at once (unconfirmed whether this happens; a mission and one of
+        /// its prep/sub-scripts could both match) the first one seen in iteration order wins and the
+        /// collision is logged once - no priority scheme is guessed.
         /// </summary>
-        private static string FindMissionScript()
+        private static MissionScriptScan FindMissionScriptScan()
         {
+            var scan = new MissionScriptScan();
             Function.Call(Hash.SCRIPT_THREAD_ITERATOR_RESET);
-            string found = null;
             bool loggedCollision = false;
             while (true)
             {
@@ -352,23 +408,149 @@ namespace WastedBridge
                     break;
                 }
                 string name = Function.Call<string>(Hash.GET_NAME_OF_SCRIPT_WITH_THIS_ID, threadId);
-                if (string.IsNullOrEmpty(name) || !MissionScriptNames.Contains(name))
+                if (string.IsNullOrEmpty(name))
                 {
                     continue;
                 }
-                if (found == null)
+                if (string.Equals(name, MissionRepeatControllerThreadName,
+                    StringComparison.OrdinalIgnoreCase))
                 {
-                    found = name;
+                    scan.RetryInFlight = true;
+                }
+                if (!MissionScriptNames.Contains(name))
+                {
+                    continue;
+                }
+                if (scan.Script == null)
+                {
+                    scan.Script = name;
                 }
                 else if (!loggedCollision)
                 {
                     loggedCollision = true;
                     BridgeLog.Info("mission.script: multiple allowlisted script threads running at "
-                                   + "once (\"" + found + "\" and \"" + name + "\"); reporting the "
-                                   + "first seen (\"" + found + "\") - no priority scheme is defined");
+                                   + "once (\"" + scan.Script + "\" and \"" + name + "\"); reporting "
+                                   + "the first seen (\"" + scan.Script + "\") - no priority scheme "
+                                   + "is defined");
                 }
             }
-            return found;
+            return scan;
+        }
+
+        /// <summary>
+        /// CONTRACTS v1.11: blips pinned to an entity (ped/vehicle), whether or not the game has
+        /// plotted a route to them - the fix for a followed crewmate vanishing from /state the
+        /// moment he drives beyond nearby's ~50 m radius while the game keeps drawing his position
+        /// on the minimap. Guarded and throttled the same way FindObjectiveBlipSafe is (both walk
+        /// World.GetAllBlips, the fragile memory scan), PLUS the v1.11 rate limit below: only run
+        /// the real scan at most every <see cref="EntityBlipThrottleMs"/> ms, and only at all while
+        /// a mission is active (mission.entity_blips has no use outside a mission and this halves
+        /// the already-small per-frame cost). Serves the previous result in between, so a caller
+        /// polling every tick never sees the list go empty just because this tick was throttled.
+        /// </summary>
+        private List<EntityBlipDto> FindEntityBlipsSafe(Vector3 origin, bool missionActive)
+        {
+            if (!missionActive)
+            {
+                // Reset the cache too: a mission that just ended must not leak its last followed
+                // entity forward into whatever comes next (a new mission, free roam) before the
+                // throttle window would otherwise have refreshed it.
+                _lastEntityBlips = null;
+                _lastEntityBlipsAt = int.MinValue;
+                return new List<EntityBlipDto>();
+            }
+
+            int now = Environment.TickCount;
+            if (_lastEntityBlips != null && unchecked(now - _lastEntityBlipsAt) < EntityBlipThrottleMs)
+            {
+                return _lastEntityBlips;
+            }
+
+            try
+            {
+                List<EntityBlipDto> found = FindEntityBlips(origin);
+                _lastEntityBlips = found;
+                _lastEntityBlipsAt = now;
+                return found;
+            }
+            catch (Exception ex)
+            {
+                int errNow = Environment.TickCount;
+                if (unchecked(errNow - _lastEntityBlipErrorAt) > 5000)
+                {
+                    _lastEntityBlipErrorAt = errNow;
+                    BridgeLog.Error("entity-blip scan failed (World.GetAllBlips memory scan); "
+                                    + "mission.entity_blips serves the last good result", ex);
+                }
+                // Serve whatever we had rather than flashing to empty on a transient scan failure -
+                // a single bad tick must not make a followed target look lost.
+                return _lastEntityBlips ?? new List<EntityBlipDto>();
+            }
+        }
+
+        /// <summary>
+        /// The actual entity-blip scan (throttled caller above). Collects every blip that is
+        /// attached to a live ped/vehicle entity - <see cref="ResolveBlipKindAndHandle"/>'s
+        /// same "entity" classification and the same "never hand back a handle nothing can
+        /// resolve" rule, just without that method's coord fallback: an entity_blips entry IS an
+        /// entity blip or it is not emitted at all. ShowRoute is NOT required (that is exactly the
+        /// gap route_blips/objective_blip leave open - a plain blue crew dot usually has no route).
+        /// The player's own waypoint is excluded, same convention as the objective-blip pass.
+        /// Nearest first, capped at <see cref="MaxEntityBlips"/>.
+        /// </summary>
+        private static List<EntityBlipDto> FindEntityBlips(Vector3 origin)
+        {
+            var found = new List<KeyValuePair<float, EntityBlipDto>>();
+            Blip[] blips = World.GetAllBlips();
+            if (blips == null)
+            {
+                return new List<EntityBlipDto>();
+            }
+            for (int i = 0; i < blips.Length; i++)
+            {
+                Blip b = blips[i];
+                if (b == null || !b.Exists())
+                {
+                    continue;
+                }
+                if (b.Sprite == BlipSprite.Waypoint || b.Color == BlipColor.Waypoint)
+                {
+                    continue; // the agent's own map waypoint, never a followable entity.
+                }
+                if (!IsEntityBlip(b.BlipType))
+                {
+                    continue;
+                }
+                Entity ent = b.Entity; // GET_BLIP_INFO_ID_ENTITY_INDEX, re-resolved fresh here.
+                if (ent == null || !ent.Exists())
+                {
+                    continue; // stale/unresolved - never emit a handle nothing can use.
+                }
+                Vector3 blipPos = b.Position;
+                float distance = origin.DistanceTo(blipPos);
+                // v1.11: Blip.GetAppropriateName() - "the same string as Blip.Name if the custom
+                // string is set; otherwise the localized string ... with the same GXT key hash as
+                // DisplayNameHash" (SHVDN docs) - turns an anonymous dot into "Lamar" with one call.
+                // Returns null if the blip does not exist; an empty string is normalized to null too
+                // (both mean "no name to show").
+                string name = b.GetAppropriateName();
+                found.Add(new KeyValuePair<float, EntityBlipDto>(distance, new EntityBlipDto
+                {
+                    Pos = ToDto(blipPos),
+                    Handle = ent.Handle,
+                    Color = b.Color.ToString(),
+                    IsRoute = b.ShowRoute,
+                    Distance = distance,
+                    Name = string.IsNullOrEmpty(name) ? null : name
+                }));
+            }
+            found.Sort((a, c) => a.Key.CompareTo(c.Key));
+            var result = new List<EntityBlipDto>();
+            for (int i = 0; i < found.Count && i < MaxEntityBlips; i++)
+            {
+                result.Add(found[i].Value);
+            }
+            return result;
         }
 
         /// <summary>What one blip pass found: the chosen objective, plus the routed set behind it.</summary>
@@ -655,10 +837,22 @@ namespace WastedBridge
             }
         }
 
-        private static NearbyDto BuildNearby(Ped playerPed, Vehicle ownVehicle)
+        /// <summary>
+        /// CONTRACTS v1.11 combat-comprehension threat scan, folded into the SAME per-tick pass
+        /// that already walks nearby.peds[] - deliberately UNTHROTTLED (unlike the blip-pool scans
+        /// above), see the reasoning at the bottom of this method. Root-caused fix for the
+        /// 2026-09-02 live bug: a carjack victim punched the agent to death while he stood there,
+        /// because TASK_COMBAT_HATED_TARGETS_AROUND_PED silently no-ops without a
+        /// Neutral/Dislike/Hate relationship (a carjack victim is plausibly still Respect/Like) -
+        /// docs/research/brief-combat-natives.json. attacking_me/threat give the harness (and a
+        /// future reflex layer) a relationship-independent "am I being hit" signal.
+        /// </summary>
+        private static NearbyDto BuildNearby(Ped playerPed, Vehicle ownVehicle, out ThreatDto threat)
         {
             var nearby = new NearbyDto();
             Vector3 origin = playerPed.Position;
+            int bestAttackerHandle = 0;
+            float bestAttackerDist = float.MaxValue;
 
             var vehicles = new List<NearbyVehicleDto>();
             Vehicle[] rawVehicles = World.GetNearbyVehicles(playerPed, NearbyVehicleRadiusM)
@@ -712,20 +906,125 @@ namespace WastedBridge
                                 && (rel == Relationship.Companion
                                     || rel == Relationship.Like
                                     || rel == Relationship.Respect);
+                float pedDistance = origin.DistanceTo(p.Position);
+                // v1.11: cheap per-ped natives (bounded to whatever GetNearbyPeds already returned
+                // inside NearbyPedRadiusM, i.e. at most a handful) - run every tick, UNTHROTTLED.
+                // Unlike the blip-pool scans (unbounded map-wide memory scans, hence their ~4 Hz
+                // throttle), this is the same cost class as the hostile/friendly relationship checks
+                // immediately above, which have always run every tick. It also has to be fast: a
+                // melee swing animation is on screen for a fraction of a second, and even a "fast"
+                // 4 Hz throttle (250 ms) could miss the window entirely - the whole point of using
+                // MeleeTarget/IsInCombatAgainst is to see the attack BEFORE the first punch lands.
+                bool attackingMe = IsAttackingMe(p, playerPed);
+                string weaponClass = WeaponClassOf(p);
+                if (attackingMe && pedDistance < bestAttackerDist)
+                {
+                    bestAttackerDist = pedDistance;
+                    bestAttackerHandle = p.Handle;
+                }
                 peds.Add(new NearbyPedDto
                 {
                     Handle = p.Handle,
                     Model = PedModelName(model),
-                    Distance = origin.DistanceTo(p.Position),
+                    Distance = pedDistance,
                     Relationship = hostile ? "hostile" : (friendly ? "friendly" : "neutral"),
                     Pos = ToDto(p.Position),
-                    InVehicleHandle = InVehicleHandleOf(p)
+                    InVehicleHandle = InVehicleHandleOf(p),
+                    AttackingMe = attackingMe,
+                    WeaponClass = weaponClass
                 });
             }
             peds.Sort(ComparePedDistance);
             nearby.Peds = Truncate(peds);
 
+            // CRITICAL (docs/research/brief-combat-natives.json): HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY
+            // is STICKY until cleared - R*'s own re_cartheft clears it every cycle, exactly here,
+            // once per scan, AFTER every ped has been read against it above. Skipping this makes
+            // "who hit me" stale forever (a ped who tagged the player once would read attacking_me
+            // forever after).
+            Function.Call(Hash.CLEAR_ENTITY_LAST_DAMAGE_ENTITY, playerPed.Handle);
+
+            threat = new ThreatDto
+            {
+                AttackerHandle = bestAttackerHandle != 0 ? (int?)bestAttackerHandle : null,
+                BeingJackedBy = BeingJackedByOf(playerPed)
+            };
+
             return nearby;
+        }
+
+        /// <summary>
+        /// True if <paramref name="p"/> is attacking the player RIGHT NOW, by any of three signals
+        /// (docs/research/brief-combat-natives.json facts #3/#4/SHVDN-footguns):
+        ///   - Ped.MeleeTarget == the player: valid WHILE THE SWING ANIMATION PLAYS, i.e. before
+        ///     impact - the earliest possible signal for a melee attacker.
+        ///   - Ped.IsInCombatAgainst(player): true the frame the attacker's own CTaskCombat targets
+        ///     the player, also before any damage lands. Deliberately NOT Ped.IsInCombat (SHVDN bug:
+        ///     that property calls the two-argument IS_PED_IN_COMBAT native with only one argument -
+        ///     verified against the pinned SHVDN source description in the research brief).
+        ///   - HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY(player, p, bCheckDamagerVehicle: 0): the fallback
+        ///     for damage that already landed. Called RAW rather than through SHVDN's
+        ///     Entity.HasBeenDamagedBy(Entity), which hardcodes bCheckDamagerVehicle=1 and would
+        ///     therefore count a ped whose CAR merely clipped the player as a melee attacker.
+        /// </summary>
+        private static bool IsAttackingMe(Ped p, Ped playerPed)
+        {
+            Ped meleeTarget = p.MeleeTarget;
+            if (meleeTarget != null && meleeTarget.Exists() && meleeTarget.Handle == playerPed.Handle)
+            {
+                return true;
+            }
+            if (p.IsInCombatAgainst(playerPed))
+            {
+                return true;
+            }
+            return Function.Call<bool>(Hash.HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY,
+                playerPed.Handle, p.Handle, 0);
+        }
+
+        /// <summary>
+        /// "unarmed"|"melee"|"gun"|"projectile" classification of <paramref name="p"/>'s CURRENT
+        /// weapon via IS_PED_ARMED's bitmask (no SHVDN wrapper; verified present in GTA.Native.Hash;
+        /// signature/bits confirmed against citizenfx/natives WEAPON/IsPedArmed.md: bit 1 = melee
+        /// weapons, bit 2 = explosive/projectile weapons, bit 4 = any other (gun) weapon; passing 0
+        /// always returns false, which is why "unarmed" is a separate fall-through rather than a
+        /// fourth bit). Tested most-dangerous-first so a single native call per class is enough:
+        /// IS_PED_ARMED reports on the ped's CURRENTLY EQUIPPED weapon, so at most one of the three
+        /// bits can be true for a given ped at a given tick.
+        /// </summary>
+        private static string WeaponClassOf(Ped p)
+        {
+            if (Function.Call<bool>(Hash.IS_PED_ARMED, p.Handle, 4))
+            {
+                return "gun";
+            }
+            if (Function.Call<bool>(Hash.IS_PED_ARMED, p.Handle, 2))
+            {
+                return "projectile";
+            }
+            if (Function.Call<bool>(Hash.IS_PED_ARMED, p.Handle, 1))
+            {
+                return "melee";
+            }
+            return "unarmed";
+        }
+
+        /// <summary>
+        /// threat.being_jacked_by: GET_PEDS_JACKER(player) while IS_PED_BEING_JACKED(player) is
+        /// true, else null. Neither has an SHVDN wrapper (verified absent from
+        /// lib/Docs/ScriptHookVDotNet3.xml; both hashes confirmed present in GTA.Native.Hash) - raw
+        /// Function.Call, including Function.Call&lt;Ped&gt; for the entity-returning native (the
+        /// same generic-return pattern SHVDN uses throughout; not a footgun, just uncommon in this
+        /// file until now).
+        /// </summary>
+        private static int? BeingJackedByOf(Ped playerPed)
+        {
+            if (!Function.Call<bool>(Hash.IS_PED_BEING_JACKED, playerPed.Handle))
+            {
+                return null;
+            }
+            Ped jacker = Function.Call<Ped>(Hash.GET_PEDS_JACKER, playerPed.Handle);
+            return jacker != null && jacker.Exists() ? (int?)jacker.Handle : null;
         }
 
         /// <summary>

@@ -15,7 +15,6 @@ namespace WastedBridge
         private const float WanderCruiseSpeedMps = 13f;   // ~47 km/h city cruise
         private const float FleeSafeDistanceM = 200f;
         private const int FleeReissueMs = 5000;           // re-aim at updated police position
-        private const int FollowVehicleDistanceM = 20;    // trailing distance for VehicleFollow, unchanged by v1.9
         private const float WalkArriveRadiusM = 2f;       // contract: walk_to done within 2 m
 
         // CONTRACTS v1.9 defaults for follow_entity's in-vehicle tail, applied by BridgeRouter when
@@ -36,6 +35,76 @@ namespace WastedBridge
         // absurd caller value (the "500 m/s tail" case) from doing anything but nothing.
         private const float FollowVehicleMinSpeedMps = 1f;
         private const float FollowVehicleMaxSpeedMps = 60f;
+
+        // CONTRACTS v1.11 driving overhaul item 3 (docs/research/brief-driving-natives.json fact
+        // #4): StartVehicleMission's straightLineDist - "the distance in meters at which the AI
+        // switches to heading for the target directly instead of following the nodes" - clamped to
+        // 255 by the native. This is the actual fix for losing a mission NPC at a junction; plain
+        // VehicleFollow (the old call here) has no such parameter. targetReachedDist is irrelevant
+        // to VehicleMissionType.Follow (which never "arrives"); -1 selects the SHVDN default.
+        private const float FollowStraightLineDistM = 80f;
+        private const float FollowTargetReachedDistM = -1f;
+
+        // Item 4 — DISCLOSED driver-competence assist, not a cheat under CLAUDE.md rule 5: no god
+        // mode, teleport, invincibility or free money is granted here. SET_DRIVER_ABILITY and
+        // Ped.DrivingAggressiveness are ordinary AI-skill dials the engine already exposes for every
+        // NPC driver in the game, engine-clamped to <= 1.0 - "a skilled human driver", per
+        // docs/research/brief-driving-natives.json's own judgment-call section - not a change to
+        // vehicle physics or the rules of the road. 0.8 is a practical ceiling with headroom below
+        // the native's hard clamp at 1.0. Aggressiveness is lower for a leisurely tail (0.5) and
+        // raised only for the two styles this bridge treats as "keep pace with traffic / pursuit"
+        // (rushed, avoid_traffic - see DrivingStyles.cs) so a plain `normal` drive does not also
+        // start driving like a chase.
+        private const float DriverAbility = 0.8f;
+        private const float DriverAggressivenessNormal = 0.5f;
+        private const float DriverAggressivenessPursuit = 0.8f;
+
+        // Item 5 — anti-stuck recovery ladder (docs/research/brief-driving-natives.json fact #6).
+        // NOT a teleport/warp: TASK_VEHICLE_TEMP_ACTION drives the wheels like a human tapping
+        // reverse/steering would. StuckDetectMs matches the brief's own "~4500 ms" recommendation
+        // for Vehicle.IsStuckTimerUp(Jammed, ...). ReverseMs/TurnMs are the brief's own rung
+        // durations. MaxStuckAttemptsPerEpisode is a judgment call - the brief says only "cap the
+        // attempts per episode" without a number; 3 rungs of the full reverse->turn ladder per
+        // running task is generous enough to clear a normal jam without turning a genuinely stuck
+        // car (flipped, wedged under geometry) into an infinite retry loop the harness never hears
+        // about - CLAUDE.md rule 5 forbids the actual fix (warp) for that case, so past the cap the
+        // ladder deliberately stops and leaves it to the harness/human (or /unstick, which has its
+        // own independent 20 s-stopped precondition).
+        private const int StuckDetectMs = 4500;
+        private const int StuckReverseMs = 1500;
+        private const int StuckTurnMs = 2000;
+        private const int MaxStuckAttemptsPerEpisode = 3;
+
+        // eTempAction values used by the stuck ladder (TASK_VEHICLE_TEMP_ACTION 0xC429DCEEB339E129,
+        // no SHVDN wrapper; signature and values verified against
+        // https://github.com/citizenfx/natives/blob/master/TASK/TaskVehicleTempAction.md).
+        private const int TaGoInReverse = 22;
+        private const int TaTurnLeftGoReverse = 13;
+        private const int TaTurnRightGoReverse = 14;
+
+        // fight_ped (CONTRACTS v1.11 — root-caused from the 2026-09-02 live bug: a carjack victim,
+        // plausibly still Respect/Like toward the player, punched the agent to death because
+        // TASK_COMBAT_HATED_TARGETS_AROUND_PED silently no-ops without a Neutral/Dislike/Hate
+        // relationship — docs/research/brief-combat-natives.json). Branch chosen from the TARGET's
+        // weapon class (SnapshotBuilder.WeaponClassOf's IS_PED_ARMED classification), not the
+        // caller's intent, so the harness never needs to know it up front.
+        //   MELEE PATH (target unarmed or melee): TASK_PUT_PED_DIRECTLY_INTO_MELEE, called RAW
+        //   rather than through SHVDN's TaskInvoker.PutDirectlyIntoMelee wrapper — that wrapper's own
+        //   XML docs say "Not intended to use with a player Ped" (its aiCombatFlags overload "only
+        //   applies when the Ped being given the task is an AI/NPC one"), whereas R*'s own
+        //   player_scene_t_bbfight calls the native directly on PLAYER_PED_ID() with these exact
+        //   args, and SHVDN separately documents timeInTask as "Only applies when the Ped being
+        //   given the task IS a player one" — direct evidence of verified player-ped behaviour for
+        //   the RAW native, which the byte-for-byte R* argument list is chosen to match.
+        //   RANGED PATH (target has a gun/projectile): TASK_COMBAT_PED via the confirmed-present
+        //   SHVDN wrapper Ped.Task.Combat(target, TaskCombatFlags.None, CanFightArmedPedsWhenNotArmed)
+        //   — UNVERIFIED for a player ped (docs/research/brief-combat-natives.json: "R* only ever
+        //   sets [combat attributes] on the player in am_taxi; zero precedent for TASK_COMBAT_PED on
+        //   PLAYER_PED_ID() — must be A/B measured live"). Flagged again in Start/Update below and in
+        //   this package's report; needs the live smoke test before it can be trusted.
+        private const float MeleeBlendIn = 0f;          // R*'s own args, unchanged
+        private const float MeleeStrafePhaseSync = -1f;
+        private const float MeleeTimeInTask = 0f;
 
         // Watchdog timeouts (bridge-side judgement; contract names "timeout" as a failure detail).
         private const int DriveToTimeoutMs = 600000;
@@ -80,6 +149,13 @@ namespace WastedBridge
         private int _expectedHashSetAt;      // Game.GameTime ms, reset on every (re)issue
         private int _clearedStreak;          // consecutive Update() ticks the hash has mismatched
 
+        // Item 5: anti-stuck recovery ladder state, reset per task episode in Start().
+        private enum StuckStage { Idle, Reversing, Turning }
+        private StuckStage _stuckStage = StuckStage.Idle;
+        private int _stuckStageStartedAt;    // Game.GameTime ms
+        private int _stuckAttempts;          // full reverse->turn ladder cycles this episode
+        private bool _stuckTurnLeftNext = true; // alternates so a lopsided obstacle isn't retried identically
+
         public bool IsDriveTaskRunning
         {
             get
@@ -121,6 +197,9 @@ namespace WastedBridge
             _targetVehicleHandle = 0;
             _expectedTaskHash = null;    // v1.10: no liveness check until a case below sets one
             _clearedStreak = 0;
+            _stuckStage = StuckStage.Idle;   // item 5: fresh episode, fresh attempt budget
+            _stuckAttempts = 0;
+            _stuckTurnLeftNext = true;
 
             Ped ped = Game.Player.Character;
             if (ped == null || !ped.Exists())
@@ -140,13 +219,7 @@ namespace WastedBridge
                         Fail("not_in_vehicle");
                         return;
                     }
-                    // Nightly signature: DriveTo(vehicle, target, speed, VehicleDrivingFlags, radius)
-                    // — argument order differs from stable v3.6.0 (bridge/README).
-                    ped.Task.DriveTo(veh, new Vector3(req.X, req.Y, req.Z),
-                        req.SpeedMps, req.Style, req.ArriveRadiusM);
-                    // Wraps TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, which polls as this exact hash
-                    // (name match verified against the pinned ScriptTaskNameHash enum).
-                    SetExpectedHash(ScriptTaskNameHash.VehicleDriveToCoordLongrange);
+                    IssueDriveTo(ped, veh);
                     break;
                 }
 
@@ -176,13 +249,7 @@ namespace WastedBridge
                         Fail("not_in_vehicle");
                         return;
                     }
-                    ped.Task.CruiseWithVehicle(veh, WanderCruiseSpeedMps, req.Style);
-                    // Wraps TASK_VEHICLE_DRIVE_WANDER. The pinned ScriptTaskNameHash enum has a
-                    // dedicated VehicleDriveWander member (not just the generic VehicleMission
-                    // family) whose name matches the native 1:1, verified directly against
-                    // lib/ScriptHookVDotNet3.dll — used here in preference to the research brief's
-                    // more tentative "VehicleMission family" guess.
-                    SetExpectedHash(ScriptTaskNameHash.VehicleDriveWander);
+                    IssueWanderDrive(ped, veh);
                     break;
                 }
 
@@ -238,6 +305,10 @@ namespace WastedBridge
                     StartFollowEntity(ped, req);
                     break;
 
+                case "fight_ped":
+                    StartFightPed(ped, req);
+                    break;
+
                 case "set_waypoint":
                     World.WaypointPosition = new Vector3(req.X, req.Y, 0f);
                     Done("");
@@ -288,6 +359,15 @@ namespace WastedBridge
             {
                 // CheckLiveness just failed the task (cleared_by_game) - the per-task-type grading
                 // below has nothing left to grade this tick.
+                return;
+            }
+
+            // Item 5: run the anti-stuck ladder before grading arrival/timeout below. A recovery in
+            // progress can itself Fail the task (follow_entity's target going away during a
+            // reissue), so re-check status the same way CheckLiveness's caller does.
+            UpdateStuckRecovery(ped);
+            if (_status != "running")
+            {
                 return;
             }
 
@@ -378,6 +458,10 @@ namespace WastedBridge
                 case "follow_entity":
                     UpdateFollowEntity(ped);
                     break;
+
+                case "fight_ped":
+                    UpdateFightPed();
+                    break;
             }
         }
 
@@ -412,6 +496,17 @@ namespace WastedBridge
         {
             if (_expectedTaskHash == null)
             {
+                return;
+            }
+            if (_stuckStage != StuckStage.Idle)
+            {
+                // Item 5: a TASK_VEHICLE_TEMP_ACTION rung is deliberately running instead of the
+                // drive task right now (temp actions override it - the whole point of the ladder).
+                // Its own script-task hash is never going to match _expectedTaskHash, and that is
+                // expected, not the game clearing our task - do not let the debounce accumulate
+                // while a rung is in flight, or a stuck-recovery cycle would fail the very task it
+                // is trying to save.
+                _clearedStreak = 0;
                 return;
             }
             if (Game.GameTime - _expectedHashSetAt < LivenessSettleMs)
@@ -542,6 +637,277 @@ namespace WastedBridge
                 threat.X, threat.Y, threat.Z, (int)(req.DurationS * 1000f), false);
         }
 
+        // ---- driving-task issuance (Start() and the item-5 stuck-recovery ladder both call these,
+        //      so a re-issue after a temp-action recovery is byte-identical to the original issue)
+        // -----------------------------------------------------------------------------------------
+
+        /// <summary>drive_to's native call, factored out so item 5's stuck-recovery ladder can
+        /// re-issue exactly this after a temp-action rung, per the brief ("temp actions override
+        /// [the drive task]; re-issue it").</summary>
+        private void IssueDriveTo(Ped ped, Vehicle veh)
+        {
+            // Nightly signature: DriveTo(vehicle, target, speed, VehicleDrivingFlags, radius) —
+            // argument order differs from stable v3.6.0 (bridge/README). This wraps
+            // TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, whose native signature (docs/research/
+            // brief-natives.json: void(Ped, Vehicle, x, y, z, speed, driveMode, stopRange)) has NO
+            // driveAgainstTraffic parameter at all — item 1's audit of every vehicle-task call site
+            // found nothing to fix here; wrong-way driving is controlled purely by the style's
+            // AllowGoingWrongWay bit (none of the four contract styles set it — DrivingStyles.cs).
+            ped.Task.DriveTo(veh, new Vector3(_req.X, _req.Y, _req.Z),
+                _req.SpeedMps, _req.Style, _req.ArriveRadiusM);
+            // Polls as this exact hash (name match verified against the pinned ScriptTaskNameHash
+            // enum).
+            SetExpectedHash(ScriptTaskNameHash.VehicleDriveToCoordLongrange);
+            ApplyDriverCompetence(ped, _req.Style);
+        }
+
+        /// <summary>wander_drive's native call, factored out for the same reissue reason as
+        /// <see cref="IssueDriveTo"/>.</summary>
+        private void IssueWanderDrive(Ped ped, Vehicle veh)
+        {
+            ped.Task.CruiseWithVehicle(veh, WanderCruiseSpeedMps, _req.Style);
+            // Wraps TASK_VEHICLE_DRIVE_WANDER (docs/research/brief-natives.json: void(Ped, Vehicle,
+            // speed, drivingStyle) — likewise no driveAgainstTraffic parameter, same item-1 audit
+            // result as IssueDriveTo). The pinned ScriptTaskNameHash enum has a dedicated
+            // VehicleDriveWander member (not just the generic VehicleMission family) whose name
+            // matches the native 1:1, verified directly against lib/ScriptHookVDotNet3.dll — used
+            // here in preference to the research brief's more tentative "VehicleMission family"
+            // guess.
+            SetExpectedHash(ScriptTaskNameHash.VehicleDriveWander);
+            ApplyDriverCompetence(ped, _req.Style);
+        }
+
+        /// <summary>
+        /// follow_entity's in-vehicle native call (CONTRACTS v1.11 driving-overhaul item 3),
+        /// factored out for the same reissue reason as <see cref="IssueDriveTo"/>. Replaces the old
+        /// <c>Task.VehicleFollow</c> (TASK_VEHICLE_FOLLOW) with SHVDN's <c>StartVehicleMission</c>
+        /// (TASK_VEHICLE_MISSION_PED_TARGET / TASK_VEHICLE_MISSION, VehicleMissionType.Follow=7),
+        /// verified present via MetadataLoadContext against the pinned
+        /// bridge/lib/ScriptHookVDotNet3.dll: both the <c>(Vehicle,Ped,...)</c> and
+        /// <c>(Vehicle,Vehicle,...)</c> overloads exist, so no raw Function.Call fallback is needed.
+        /// Only the mission-family natives expose straightLineDist — "the distance at which the AI
+        /// heads straight for the target instead of following the nodes" — which is the actual fix
+        /// for losing a mission NPC at a junction; plain VehicleFollow has no such parameter
+        /// (docs/research/brief-driving-natives.json fact #4).
+        /// </summary>
+        private void IssueFollowVehicleMission(Ped ped, Vehicle veh, Entity target)
+        {
+            // req.Style/req.SpeedMps already carry either the caller's explicit value or the v1.9
+            // defaults (BridgeRouter's follow_entity parsing) - clamp the speed into the sane band
+            // regardless of which one it is. Unchanged from the old VehicleFollow call.
+            float speed = System.Math.Min(FollowVehicleMaxSpeedMps,
+                System.Math.Max(FollowVehicleMinSpeedMps, _req.SpeedMps));
+
+            // Item 1 — CRITICAL BUG FIX: StartVehicleMission's driveAgainstTraffic overloads default
+            // to true when not passed (docs/research/brief-driving-natives.json headline finding
+            // #1), a plausible direct cause of head-on crashes. Passed FALSE explicitly here.
+            if (target is Ped pedTarget)
+            {
+                ped.Task.StartVehicleMission(veh, pedTarget, VehicleMissionType.Follow, speed,
+                    _req.Style, FollowTargetReachedDistM, FollowStraightLineDistM,
+                    driveAgainstTraffic: false);
+            }
+            else if (target is Vehicle vehTarget)
+            {
+                ped.Task.StartVehicleMission(veh, vehTarget, VehicleMissionType.Follow, speed,
+                    _req.Style, FollowTargetReachedDistM, FollowStraightLineDistM,
+                    driveAgainstTraffic: false);
+            }
+            else
+            {
+                // The resolved entity is neither a Ped nor a Vehicle (e.g. an object/pickup handle
+                // handed to follow_entity) - StartVehicleMission has no overload that tails an
+                // arbitrary Entity, and there is no legitimate "drive at a prop" fallback.
+                Fail("target_lost");
+                return;
+            }
+            // Wraps TASK_VEHICLE_MISSION_PED_TARGET / TASK_VEHICLE_MISSION depending on target type;
+            // both poll under the shared VehicleMission script-task hash family. KNOWN AMBIGUITY
+            // (accepted, not fixable from here, unchanged by this swap from VehicleFollow): if
+            // something else issues another TASK_VEHICLE_*_MISSION-family task to this same ped
+            // while our follow is running, the hash still matches and liveness reads it as "still
+            // running" even though it is not our follow anymore - the existing UpdateFollowEntity
+            // target_lost / not_in_vehicle checks are what actually catch that case, not this
+            // liveness check.
+            SetExpectedHash(ScriptTaskNameHash.VehicleMission);
+            ApplyDriverCompetence(ped, _req.Style);
+        }
+
+        /// <summary>
+        /// Item 4 — DISCLOSED driver-competence assist (see the constants' doc comment for what
+        /// this is and is not). Applied to every vehicle-driving task issue: drive_to, wander_drive,
+        /// follow_entity's in-vehicle tail. Called IMMEDIATELY after the native that starts the
+        /// drive task, in the same method call — not deferred to the next Tick(). SHVDN's XML docs
+        /// for Ped.DrivingAggressiveness/DrivingSpeed/VehicleDrivingFlags all say the setter "must
+        /// be on a Vehicle as a driver and the drive task running on this Ped must be active before
+        /// setting the value can actually affect", and the same "already running" requirement is
+        /// documented for SET_DRIVER_ABILITY's sibling SET_DRIVER_AGGRESSIVENESS. The TASK_VEHICLE_*
+        /// natives create their CTaskVehicleMissionBase synchronously when called (per the same XML
+        /// remarks, these setters write directly onto fields of that C++ task object), so by the
+        /// time this method runs — immediately after — the task instance already exists.
+        ///
+        /// NOT VERIFIED against the live game (no server access from this dev-machine environment);
+        /// this timing choice is the "check which works and document what you chose" judgment call
+        /// the brief calls out explicitly. If bridge-smoke or stream telemetry shows the values are
+        /// not taking hold, move this call to the following Tick() instead.
+        /// </summary>
+        private static void ApplyDriverCompetence(Ped ped, VehicleDrivingFlags style)
+        {
+            // SET_DRIVER_ABILITY has no SHVDN wrapper (no P:/M: entry in
+            // lib/Docs/ScriptHookVDotNet3.xml; confirmed present in GTA.Native.Hash via
+            // MetadataLoadContext against the pinned DLL) - raw Function.Call, same pattern as
+            // StartSeekCover's TASK_SEEK_COVER_FROM_POS.
+            Function.Call(Hash.SET_DRIVER_ABILITY, ped.Handle, DriverAbility);
+            bool pursuit = style == DrivingStyles.Rushed || style == DrivingStyles.AvoidTraffic;
+            ped.DrivingAggressiveness = pursuit
+                ? DriverAggressivenessPursuit
+                : DriverAggressivenessNormal;
+        }
+
+        // ---- item 5: anti-stuck recovery ladder ------------------------------------------------
+
+        /// <summary>True while the running task is a vehicle-driving one the stuck ladder covers.
+        /// follow_entity only counts in its in-vehicle form (the on-foot tail has no vehicle to get
+        /// wedged).</summary>
+        private bool IsVehicleDrivingTask()
+        {
+            if (_status != "running" || _req == null)
+            {
+                return false;
+            }
+            return _req.Type == "drive_to" || _req.Type == "wander_drive"
+                   || (_req.Type == "follow_entity" && _req.InVehicle);
+        }
+
+        /// <summary>
+        /// Detects a wedged car (Vehicle.IsStuckTimerUp(Jammed, ~4500 ms)) and runs the bounded
+        /// ladder from docs/research/brief-driving-natives.json fact #6: reverse for ~1.5 s; if
+        /// still jammed, turn-and-reverse (alternating left/right across episodes) for ~2 s; then
+        /// always reset the stuck timer and re-issue the drive task, because a temp action overrides
+        /// whatever task was running. Deliberately does NOT call SET_VEHICLE_ON_GROUND_PROPERLY,
+        /// SET_ENTITY_COORDS, or any other positional write — CLAUDE.md rule 5: a human cannot right
+        /// a flipped car by magic, so neither does the agent; past <see cref="MaxStuckAttemptsPerEpisode"/>
+        /// the ladder stops trying and leaves recovery to the harness/human or the existing
+        /// (separately gated) /unstick nudge.
+        /// </summary>
+        private void UpdateStuckRecovery(Ped ped)
+        {
+            if (!IsVehicleDrivingTask())
+            {
+                return;
+            }
+            Vehicle veh = CurrentVehicle(ped);
+            if (veh == null)
+            {
+                return; // not_in_vehicle is caught by the task's own Update() grading, not here.
+            }
+
+            if (_stuckStage == StuckStage.Idle)
+            {
+                if (_stuckAttempts >= MaxStuckAttemptsPerEpisode)
+                {
+                    return; // cap reached this episode — see the constant's doc comment.
+                }
+                if (!veh.IsStuckTimerUp(VehicleStuckType.Jammed, StuckDetectMs))
+                {
+                    return;
+                }
+                BeginStuckRung(ped, veh, StuckStage.Reversing, TaGoInReverse, StuckReverseMs,
+                    "reverse");
+                return;
+            }
+
+            int elapsed = Game.GameTime - _stuckStageStartedAt;
+            if (_stuckStage == StuckStage.Reversing)
+            {
+                if (elapsed < StuckReverseMs)
+                {
+                    return; // rung still executing
+                }
+                if (!veh.IsStuckTimerUp(VehicleStuckType.Jammed, StuckDetectMs))
+                {
+                    FinishStuckRecovery(ped, veh, "freed after the reverse rung");
+                    return;
+                }
+                int turnAction = _stuckTurnLeftNext ? TaTurnLeftGoReverse : TaTurnRightGoReverse;
+                BeginStuckRung(ped, veh, StuckStage.Turning, turnAction, StuckTurnMs,
+                    _stuckTurnLeftNext ? "turn-left-and-reverse" : "turn-right-and-reverse");
+                return;
+            }
+
+            // StuckStage.Turning
+            if (elapsed < StuckTurnMs)
+            {
+                return; // rung still executing
+            }
+            // Ladder complete either way (freed or not) — the brief's recipe resets the timer and
+            // re-issues regardless, rather than adding a third rung.
+            FinishStuckRecovery(ped, veh, "ladder complete");
+        }
+
+        private void BeginStuckRung(Ped ped, Vehicle veh, StuckStage stage, int tempAction,
+                                    int durationMs, string label)
+        {
+            _stuckStage = stage;
+            _stuckStageStartedAt = Game.GameTime;
+            if (stage == StuckStage.Reversing)
+            {
+                _stuckAttempts++; // count once per full ladder cycle, not per rung
+            }
+            // TASK_VEHICLE_TEMP_ACTION 0xC429DCEEB339E129: void(Ped driver, Vehicle vehicle,
+            // int action, int time) — no SHVDN wrapper; signature and eTempAction values verified
+            // against https://github.com/citizenfx/natives/blob/master/TASK/TaskVehicleTempAction.md
+            // (matches docs/research/brief-driving-natives.json fact #6). This OVERRIDES whatever
+            // drive task is running (the brief's own note); CheckLiveness is paused for the duration
+            // via the _stuckStage guard below so the temp action is never mistaken for the game
+            // clearing our task.
+            Function.Call(Hash.TASK_VEHICLE_TEMP_ACTION, ped.Handle, veh.Handle, tempAction,
+                durationMs);
+            BridgeLog.Warn("STUCK RECOVERY rung " + _stuckAttempts + " (" + label + "): vehicle "
+                           + veh.Handle + " jammed >= " + StuckDetectMs + " ms during task "
+                           + Describe() + " - issuing TASK_VEHICLE_TEMP_ACTION action=" + tempAction
+                           + " for " + durationMs + " ms");
+        }
+
+        private void FinishStuckRecovery(Ped ped, Vehicle veh, string reason)
+        {
+            // RESET_VEHICLE_STUCK_TIMER(veh, ResetAll) via the SHVDN wrapper (verified present:
+            // GTA.Vehicle.ResetVehicleStuckTimer(VehicleStuckType) in the pinned DLL's metadata).
+            veh.ResetVehicleStuckTimer(VehicleStuckType.ResetAll);
+            _stuckTurnLeftNext = !_stuckTurnLeftNext;
+            _stuckStage = StuckStage.Idle;
+            BridgeLog.Warn("STUCK RECOVERY: " + reason + " - resetting the stuck timer and "
+                           + "re-issuing " + Describe());
+            // Item 6: this reissue is a rare, event-driven correction (a jam that held for the
+            // whole detect+ladder window), never a per-tick re-post - the task-churn hazard the
+            // brief warns about does not apply here.
+            ReissueVehicleTask(ped, veh);
+        }
+
+        /// <summary>Re-issues the exact native the running task started with — the brief's "temp
+        /// actions override [the drive task]; re-issue it" recipe.</summary>
+        private void ReissueVehicleTask(Ped ped, Vehicle veh)
+        {
+            switch (_req.Type)
+            {
+                case "drive_to":
+                    IssueDriveTo(ped, veh);
+                    break;
+                case "wander_drive":
+                    IssueWanderDrive(ped, veh);
+                    break;
+                case "follow_entity":
+                    Entity target = Entity.FromHandle(_req.Handle);
+                    if (target == null || !target.Exists())
+                    {
+                        Fail("target_lost");
+                        return;
+                    }
+                    IssueFollowVehicleMission(ped, veh, target);
+                    break;
+            }
+        }
+
         private void StartFollowEntity(Ped ped, TaskRequest req)
         {
             Entity target = Entity.FromHandle(req.Handle);
@@ -558,21 +924,7 @@ namespace WastedBridge
                     Fail("not_in_vehicle");
                     return;
                 }
-                // req.Style/req.SpeedMps already carry either the caller's explicit value or the
-                // v1.9 defaults (BridgeRouter's follow_entity parsing) - clamp the speed into the
-                // sane band regardless of which one it is.
-                float speed = System.Math.Min(FollowVehicleMaxSpeedMps,
-                    System.Math.Max(FollowVehicleMinSpeedMps, req.SpeedMps));
-                ped.Task.VehicleFollow(veh, target, speed, req.Style, FollowVehicleDistanceM);
-                // Wraps TASK_VEHICLE_FOLLOW, which - per research - polls under the shared
-                // "VehicleMission" hash along with TASK_VEHICLE_ESCORT/TASK_VEHICLE_MISSION/heli/
-                // plane/boat mission tasks. KNOWN AMBIGUITY (accepted, not fixable from here): if
-                // something else issues another TASK_VEHICLE_*_MISSION-family task to this same ped
-                // while our follow is running, the hash still matches and liveness reads it as
-                // "still running" even though it is not our follow anymore - the existing
-                // UpdateFollowEntity target_lost / not_in_vehicle checks are what actually catch
-                // that case, not this liveness check.
-                SetExpectedHash(ScriptTaskNameHash.VehicleMission);
+                IssueFollowVehicleMission(ped, veh, target);
             }
             else
             {
@@ -596,6 +948,75 @@ namespace WastedBridge
                 Fail("not_in_vehicle");
             }
             // Otherwise runs until preempted (contract).
+        }
+
+        /// <summary>
+        /// fight_ped's Start(): resolve the target, pick melee-vs-ranged from its CURRENT weapon
+        /// class, issue the matching native. Dead-on-arrival and missing-handle both fail
+        /// target_lost (same convention as follow_entity); a target that is already dead needs no
+        /// fight, so that is Done("") immediately rather than a failure.
+        /// </summary>
+        private void StartFightPed(Ped ped, TaskRequest req)
+        {
+            Ped target = Entity.FromHandle(req.Handle) as Ped;
+            if (target == null || !target.Exists())
+            {
+                Fail("target_lost");
+                return;
+            }
+            if (target.IsDead)
+            {
+                Done("");
+                return;
+            }
+
+            // SnapshotBuilder.WeaponClassOf's own IS_PED_ARMED classification, re-read here rather
+            // than trusted from a stale /state snapshot: the target's weapon can change between the
+            // harness reading /state and this task actually starting.
+            bool ranged = Function.Call<bool>(Hash.IS_PED_ARMED, target.Handle, 4)   // gun
+                          || Function.Call<bool>(Hash.IS_PED_ARMED, target.Handle, 2); // projectile
+
+            if (ranged)
+            {
+                // UNVERIFIED for a player ped — see the constants' doc comment above. Uses the
+                // confirmed-present SHVDN wrapper (already used elsewhere in this file for an AI
+                // target in the combat_hated_targets_around fallback) so the call itself is not in
+                // question, only whether the engine actually lets a PLAYER ped run CTaskCombat.
+                ped.Task.Combat(target, TaskCombatFlags.None,
+                    TaskThreatResponseFlags.CanFightArmedPedsWhenNotArmed);
+                // Wraps TASK_COMBAT_PED -> the "Combat" script-task hash.
+                SetExpectedHash(ScriptTaskNameHash.Combat);
+            }
+            else
+            {
+                // CONFIRMED player-ped usage (R*'s player_scene_t_bbfight) — see the constants' doc
+                // comment. Called RAW, matching R*'s exact 6 positional args, rather than through
+                // SHVDN's PutDirectlyIntoMelee wrapper (documented as NPC-oriented).
+                Function.Call(Hash.TASK_PUT_PED_DIRECTLY_INTO_MELEE, ped.Handle, target.Handle,
+                    MeleeBlendIn, MeleeStrafePhaseSync, MeleeTimeInTask, false);
+                // Wraps TASK_PUT_PED_DIRECTLY_INTO_MELEE -> the "PutPedDirectlyIntoMelee" script-task
+                // hash (confirmed present in the pinned ScriptTaskNameHash enum via
+                // MetadataLoadContext, independent of which call site issues the native).
+                SetExpectedHash(ScriptTaskNameHash.PutPedDirectlyIntoMelee);
+            }
+        }
+
+        /// <summary>
+        /// fight_ped's Update(): done once the target is dead or gone — either way there is nothing
+        /// left to fight, matching combat_hated_targets_around's "done when nothing left to fight"
+        /// philosophy rather than treating a target that despawned mid-fight as a failure. Only an
+        /// initially-bad handle (caught in Start) is target_lost.
+        /// </summary>
+        private void UpdateFightPed()
+        {
+            Entity target = Entity.FromHandle(_req.Handle);
+            if (target == null || !target.Exists() || (target is Ped p && p.IsDead))
+            {
+                Done("");
+            }
+            // Otherwise runs until preempted (contract) - no timeout: a real fight has no fixed
+            // duration and the game's own combat/melee task ends the encounter (flee, death, or the
+            // player wins), at which point the next Update() sees target.IsDead or gone.
         }
 
         private void IssueFlee(Ped ped)

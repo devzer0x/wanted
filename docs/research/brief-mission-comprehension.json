@@ -1,0 +1,49 @@
+{
+ "answer": "Mission-comprehension research for WANTED (2026-09-02). Sources: citizenfx/natives master (full 6,496-file tree grepped), SHVDN main source, YimMenu/GTA-V-Decompiled-Scripts (armenian1.c, mission_repeat_controller.c). HEADLINE FINDINGS: (1) Blip.GetAppropriateName() (SHVDN Blip.cs ~L594) returns the blip's map-legend NAME - the custom name string at blip+0x28 (length at +0x30) or Game.GetLocalizedString(ReadInt32(blip+0x38)). This turns an anonymous dot into 'Lamar' / 'Objective' with ONE property and no OCR. Highest value per unit of work in this brief. (2) OBJECTIVE TEXT IS READABLE WITHOUT OCR, by reverse lookup: there is NO getter for the current subtitle (no GET_CURRENT_SUBTITLE anywhere in the native DB; subtitle natives are write-side only), BUT BEGIN_TEXT_COMMAND_IS_MESSAGE_DISPLAYED(label) 0x853648FD1063A213 + END_TEXT_COMMAND_IS_MESSAGE_DISPLAYED 0x8A9BA1AB3E237613 answers 'is THIS GXT label the message currently on screen'. R*'s own armenian1.c uses exactly this idiom (L39266). Candidate label sets are small and statically extractable per mission from the decompiled scripts (armenian1 has ~80 ARM1_* labels plus shared fails CMN_FDIED/CMN_FARRE/CMN_MDIED/CMN_TDIED/CMN_GENGETBCK). Resolve a label to text with GET_FILENAME_FOR_AUDIO_CONVERSATION 0x7B5280EBA9840C72 (aka _GET_LABEL_TEXT) guarded by DOES_TEXT_LABEL_EXIST 0xAC09CA973C564252 - SHVDN wraps both as Game.GetLocalizedString. Help text is even better documented: IS_HELP_MESSAGE_BEING_DISPLAYED 0x4D79439A6B55AC67 (instant) / IS_HELP_MESSAGE_ON_SCREEN 0xDAD37F45428801AE (1-frame lag), plus BEGIN/END_TEXT_COMMAND_IS_THIS_HELP_MESSAGE_BEING_DISPLAYED 0x0A24DA3A41B718F5/0x10BDDBFC529428DD (hudIndex 0 HELP_TEXT, 1/2 floating). IS_HUD_COMPONENT_ACTIVE 0xBC4C9EA5391ECC0D with HUD_SUBTITLE_TEXT=15 / HUD_HELP_TEXT=10 is a cheap gate before spending probes. DOES_LATEST_BRIEF_STRING_EXIST 0x5E657EF1099EDD65 (briefValue 2 = Mission Objective) is a free boolean 'an objective has been set' but its text is only reachable by Scaleform, never as a char*. NET: the native path yields a STABLE LABEL KEY (ARM1_PARK) instead of a fragile OCR string; keep OCR as fallback for runtime-composed/DLC text. (3) PROTAGONIST SWITCH is detectable: IS_PLAYER_SWITCH_IN_PROGRESS 0xD9D2CFFF49FAB35F (+ GET_PLAYER_SWITCH_STATE 0x470555300D10B2A5, GET_PLAYER_SWITCH_TYPE, IS_SWITCH_READY_FOR_DESCENT). On a switch edge the cached player ped handle MUST be invalidated and PLAYER_PED_ID re-read. (4) MISSION-ENTITY ATTRIBUTION IS ONLY PARTIAL: IS_ENTITY_A_MISSION_ENTITY 0x0A7B270912999B3C = 'owned by ANY script' (good coarse filter - ambient traffic is false); DOES_ENTITY_BELONG_TO_THIS_SCRIPT 0xDDE6DF5AE89981D2 is relative to the CALLING script and is therefore false for mission entities when called from our plugin; there is NO GET_SCRIPT_THAT_OWNS_ENTITY in the native DB. NEVER call SET_ENTITY_AS_MISSION_ENTITY(..., bGrabFromOtherScript: true) to probe ownership - it STEALS the entity and breaks the mission. The crewmate is better identified via GET_PLAYER_GROUP 0x0D127585F77030AF + GET_PED_AS_GROUP_MEMBER 0x51455483CF23ED97 / IS_PED_GROUP_MEMBER, combined with GET_RELATIONSHIP_BETWEEN_PEDS (directional - call both ways) and the blip name. (5) RETRY IN FLIGHT is free to detect: watch the script-thread list for 'mission_repeat_controller' - its decompile shows it is the retry/checkpoint-reload executor (QUEUE_MISSION_REPEAT_LOAD, SET_FRONTEND_ACTIVE(false), DO_SCREEN_FADE_IN, then TERMINATE_THIS_THREAD). It renders no UI itself. (6) TRIP SKIP / skip-section after ~3 failures is presented to the human as a button prompt, so accepting it via simulated input is LEGITIMATE under rule 5; detect it as HELP TEXT via label probing, not OCR. Forcing QUEUE_MISSION_REPEAT_LOAD 0x72DE52178C291CB5 from the plugin would be forcing mission state - REFUSED.",
+ "facts": [
+  {
+   "claim": "Blip.GetAppropriateName() returns the custom name string (blip+0x28, length at +0x30) else Game.GetLocalizedString(ReadInt32(blip+0x38)) - the map-legend text ('Lamar', 'Objective', 'Destination')",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Blip/Blip.cs (~L594)"
+  },
+  {
+   "claim": "No GET_CURRENT_SUBTITLE / subtitle getter exists anywhere in the native DB (6,496 files grepped); subtitle natives are write-side only (BEGIN_TEXT_COMMAND_PRINT 0xB87A37EEB7FAA67D / END_TEXT_COMMAND_PRINT 0x9D77056A530643F6) plus a bare IS_MESSAGE_BEING_DISPLAYED 0x7984C03AA5CC2F41",
+   "source": "https://github.com/citizenfx/natives (HUD namespace, full-tree grep 2026-09-02)"
+  },
+  {
+   "claim": "BEGIN_TEXT_COMMAND_IS_MESSAGE_DISPLAYED 0x853648FD1063A213 + END_TEXT_COMMAND_IS_MESSAGE_DISPLAYED 0x8A9BA1AB3E237613 test whether a given GXT label is the message currently displayed; R*'s armenian1.c wraps exactly this at L39266 (with ADD_TEXT_COMPONENT_SUBSTRING_TEXT_LABEL for composed messages)",
+   "source": "https://github.com/citizenfx/natives/blob/master/HUD/BeginTextCommandIsMessageDisplayed.md + https://github.com/YimMenu/GTA-V-Decompiled-Scripts/blob/master/decompiled_scripts/armenian1.c"
+  },
+  {
+   "claim": "Help-text reads are first-class: IS_HELP_MESSAGE_BEING_DISPLAYED 0x4D79439A6B55AC67 (instant), IS_HELP_MESSAGE_ON_SCREEN 0xDAD37F45428801AE (1-frame lag), BEGIN/END_TEXT_COMMAND_IS_THIS_HELP_MESSAGE_BEING_DISPLAYED 0x0A24DA3A41B718F5 / 0x10BDDBFC529428DD (hudIndex 0/1/2); IS_HUD_COMPONENT_ACTIVE 0xBC4C9EA5391ECC0D HUD_SUBTITLE_TEXT=15 HUD_HELP_TEXT=10",
+   "source": "https://github.com/citizenfx/natives/tree/master/HUD"
+  },
+  {
+   "claim": "Protagonist switch: IS_PLAYER_SWITCH_IN_PROGRESS 0xD9D2CFFF49FAB35F ('true if the player is currently switching... camera in the sky moving from Trevor to Franklin'), GET_PLAYER_SWITCH_STATE 0x470555300D10B2A5 (5 = in the air mid-switch, 12 = not in air / completed), GET_PLAYER_SWITCH_TYPE 0xB3C94A90D9FC9E62",
+   "source": "https://github.com/citizenfx/natives/tree/master/STREAMING"
+  },
+  {
+   "claim": "IS_ENTITY_A_MISSION_ENTITY 0x0A7B270912999B3C = script-owned by ANY script; DOES_ENTITY_BELONG_TO_THIS_SCRIPT 0xDDE6DF5AE89981D2 is relative to the CALLING script (false for mission entities from our plugin); no GET_SCRIPT_THAT_OWNS_ENTITY exists. SET_ENTITY_AS_MISSION_ENTITY 0xAD738C3085FE7E11 with bGrabFromOtherScript=true STEALS the entity and breaks the mission - never use it to probe",
+   "source": "https://github.com/citizenfx/natives/tree/master/ENTITY"
+  },
+  {
+   "claim": "Player group natives for crew identification: GET_PLAYER_GROUP 0x0D127585F77030AF, GET_GROUP_SIZE 0x8DE69FE35CA09A45, GET_PED_AS_GROUP_MEMBER 0x51455483CF23ED97, GET_PED_AS_GROUP_LEADER 0x5CCE68DBD5FE93EC, IS_PED_GROUP_MEMBER 0x9BB01E3834671191. CAVEAT: GTA V story missions do not always put the buddy in the player's group - verify per mission live",
+   "source": "https://github.com/citizenfx/natives/tree/master/PED"
+  },
+  {
+   "claim": "'mission_repeat_controller' script thread == a retry/checkpoint reload is in flight: it calls QUEUE_MISSION_REPEAT_LOAD, SET_FRONTEND_ACTIVE(false), DO_SCREEN_FADE_IN(800), waits for references==0, then TERMINATE_THIS_THREAD. It renders no UI itself",
+   "source": "https://github.com/YimMenu/GTA-V-Decompiled-Scripts/blob/master/decompiled_scripts/mission_repeat_controller.c"
+  },
+  {
+   "claim": "Gating set (block if ANY true): IS_CUTSCENE_ACTIVE 0x991251AFC3981F84, IS_CUTSCENE_PLAYING 0xD3C2E180A40F031E, !IS_PLAYER_CONTROL_ON 0x49C32D60007AFA47 (broadest single signal - many scripted beats have no CUTSCENE-namespace cutscene), IS_SCREEN_FADED_OUT 0xB16FCE9DDC7BA182, IS_SCREEN_FADING_IN 0x5C544BC6C57AC575, IS_PAUSE_MENU_ACTIVE 0xB0034A223497FFCB, GET_PAUSE_MENU_STATE 0x272ACD84970869C5, IS_HUD_HIDDEN 0xA86478C6958735C5, IS_PLAYER_SWITCH_IN_PROGRESS, GET_IS_LOADING_SCREEN_ACTIVE",
+   "source": "https://github.com/citizenfx/natives (CUTSCENE/PLAYER/CAM/HUD/STREAMING namespaces)"
+  },
+  {
+   "claim": "Blip discrimination: World.GetAllBlips reads the radar-blip pool directly (GetNonCriticalRadarBlipHandles) rather than looping ~900 sprite ids; IS_BLIP_SHORT_RANGE 0xDA5F8727EB75B926 identifies map furniture (objective blips are long-range); BlipColor 39 = InactiveMission = furniture to ignore; 5/66 yellow = objective, 1/49/59 red = hostile, 2/69 green = friendly, 42/43/44 = Michael/Franklin/Trevor",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Blip/BlipColor.cs + .../GTA/World.cs"
+  },
+  {
+   "claim": "NOT CONFIRMED: no verified native predicate for 'the SP MISSION FAILED screen is up' - the fail path was traced from armenian1.c (writes fail-reason label into Global_78090, sets bit 25 of Global_99980.f_20) to mission_repeat_controller.c (reads states 9-13) but the RENDERER was never found and may be C++-side; OCR remains the honest detector for that screen. Also unconfirmed: whether IS_MESSAGE_DISPLAYED probing matches the rendered vs a queued subtitle, and its cost at ~100 probes/frame; whether Global_78090/Global_99980 indices are stable on our build (2023-era decompile); whether story missions reliably use GET_PLAYER_GROUP for the buddy",
+   "source": "research session 2026-09-02"
+  }
+ ]
+}

@@ -515,6 +515,50 @@ class ActivityRunner:
         self._step_expects_task = False
         return activity, plan[0]
 
+    def start_plan(self, activity: Activity, plan: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Run a plan somebody else chose and materialised. Returns its first step.
+
+        The free-roam PICKING layer now lives in :mod:`behavior.roam`, which
+        selects by live-state `needs` and grades by a `done_when` predicate
+        rather than by a weighted draw. The RUNNING layer stayed here, because
+        what it knows is expensive to re-earn: one step per completed bridge
+        task, bound to the id ``POST /task`` RETURNED rather than to whatever
+        `last_task.id` the next snapshot carries (see :meth:`bind_step_task`),
+        preemption detected as a foreign *running* task, and a per-step timeout.
+
+        So this is the same machine with the choice taken out of it. It books no
+        cooldown and spends no chaos budget — the caller that chose the plan owns
+        both, and having two places book them is how they end up disagreeing.
+        """
+        if self.current is not None or not plan:
+            return None
+        now = self._clock()
+        self.current = RunningActivity(
+            activity=activity, plan=list(plan), started_at=now, step_started_at=now
+        )
+        self._step_task_id = None
+        self._step_expects_task = False
+        return self.current.plan[0]
+
+    def replace_plan(self, plan: list[dict[str, Any]]) -> dict[str, Any] | None:
+        """Swap the running plan for a fresh one and return its first step.
+
+        The owner re-plans when its goal's completion test has not fired and the
+        old plan was built from a snapshot that has gone stale (the car drove
+        off). The activity is NOT restarted: `started_at` is untouched, so the
+        goal's own timeout keeps running and a re-plan can never buy more time
+        than the goal was allowed.
+        """
+        running = self.current
+        if running is None or not plan:
+            return None
+        running.plan = list(plan)
+        running.step = 0
+        running.step_started_at = self._clock()
+        self._step_task_id = None
+        self._step_expects_task = False
+        return running.plan[0]
+
     def bind_step_task(self, task_id: str | None) -> None:
         """Record the id ``POST /task`` returned for the step just issued.
 

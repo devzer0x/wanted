@@ -13,7 +13,20 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.2.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        public const string BridgeVersion = "1.4.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        // v1.3.0: CONTRACTS v1.11 (part 1) - mission.entity_blips[] (entity-attached blips,
+        // throttled ~4 Hz); driving overhaul: driveAgainstTraffic explicit false on the new
+        // StartVehicleMission call, avoid_traffic retuned off the brake-free
+        // DrivingModeAvoidVehiclesReckless, follow_entity's in-vehicle tail moved from
+        // TASK_VEHICLE_FOLLOW to TASK_VEHICLE_MISSION(_PED_TARGET) with straightLineDist, disclosed
+        // driver-ability/aggressiveness assist, anti-stuck temp-action recovery ladder.
+        // v1.4.0: CONTRACTS v1.11 (part 2) - combat/self-defence + perception fixes for the
+        // 2026-09-02 "carjack victim punched the agent to death" bug: nearby.peds[].attacking_me /
+        // .weapon_class, threat.attacker_handle / .being_jacked_by (relationship-independent "am I
+        // being hit" signal), new fight_ped task type (melee via TASK_PUT_PED_DIRECTLY_INTO_MELEE,
+        // ranged via TASK_COMBAT_PED - see TaskEngine.StartFightPed), CA_LEAVE_VEHICLES synced off
+        // in-vehicle state every tick (the "gets out to fistfight" fix), mission.entity_blips[].name
+        // (Blip.GetAppropriateName()), player.switch_in_progress, mission.retry_in_flight.
 
         private const float UnstickMinStoppedS = 20f;
         private const float UnstickNudgeBackM = 2.5f;   // total displacement stays ≤ 3 m (contract)
@@ -37,6 +50,10 @@ namespace WastedBridge
         private int _lastTickErrorAt = int.MinValue;
         private int _lastEngineErrorAt = int.MinValue;
         private long _tickErrorCount;
+        // CONTRACTS v1.11 item 3 ("stay in the car"): edge-detector so SET_PED_COMBAT_ATTRIBUTES is
+        // only called on a change, not every one of ~47 ticks/s.
+        private bool? _lastLeaveVehicleAttribute;
+        private int _lastCombatAttributeErrorAt = int.MinValue;
 
         public WastedBridgeScript()
         {
@@ -160,6 +177,11 @@ namespace WastedBridge
             int playerHandle = Game.Player.Handle;
             bool arrested = Function.Call<bool>(Hash.IS_PLAYER_BEING_ARRESTED, playerHandle, true)
                             || Function.Call<bool>(Hash.IS_PLAYER_BEING_ARRESTED, playerHandle, false);
+
+            if (!dead)
+            {
+                SyncLeaveVehicleAttribute(playerPed);
+            }
 
             try
             {
@@ -440,6 +462,48 @@ namespace WastedBridge
             {
                 _shared.TickHz = _tickWindowCount * 1000f / elapsed;
                 _tickWindowCount = 0;
+            }
+        }
+
+        /// <summary>
+        /// CONTRACTS v1.11 item 3, root-caused from the 2026-09-02 live bug (operator screenshots):
+        /// a civilian punched the agent to death while he stood beside a car he had just stolen, because
+        /// the engine's default lets a player-attribute-driven ped bail out of a good vehicle to
+        /// fistfight. CA_LEAVE_VEHICLES=false (attribute 3, GTA.CombatAttributes.CanLeaveVehicle) is
+        /// R*'s own in-vehicle answer (re_cartheft flees BY CAR rather than dismounting -
+        /// docs/research/brief-combat-natives.json fact "in-vehicle answer is drive away"). Synced
+        /// every tick off the ped's ACTUAL current in-vehicle state — not only at the points a drive
+        /// task happens to be issued (TaskEngine.ApplyDriverCompetence) — because the failure mode
+        /// this fixes can happen from a dead stop before any drive task has ever been posted (exactly
+        /// the observed bug: stationary, just carjacked, not yet given anywhere to drive to).
+        /// Edge-detected against <see cref="_lastLeaveVehicleAttribute"/> so the native is only
+        /// called on an actual state change, not on every one of ~47 ticks/s.
+        ///
+        /// Ped.SetCombatAttribute(CombatAttributes, bool) is a confirmed SHVDN wrapper for
+        /// SET_PED_COMBAT_ATTRIBUTES (verified present against the pinned DLL's metadata).
+        /// CombatAttributes.CanLeaveVehicle is attribute index 3, matching the research brief.
+        /// </summary>
+        private void SyncLeaveVehicleAttribute(Ped ped)
+        {
+            bool canLeaveVehicle = !ped.IsInVehicle();
+            if (_lastLeaveVehicleAttribute.HasValue && _lastLeaveVehicleAttribute.Value == canLeaveVehicle)
+            {
+                return;
+            }
+            try
+            {
+                ped.SetCombatAttribute(CombatAttributes.CanLeaveVehicle, canLeaveVehicle);
+                _lastLeaveVehicleAttribute = canLeaveVehicle;
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastCombatAttributeErrorAt) > ErrorLogIntervalMs)
+                {
+                    _lastCombatAttributeErrorAt = now;
+                    BridgeLog.Error("SET_PED_COMBAT_ATTRIBUTES(CanLeaveVehicle) failed; the "
+                                    + "\"stay in the car\" fix may not be in effect this tick", ex);
+                }
             }
         }
     }

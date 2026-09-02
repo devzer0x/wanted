@@ -186,7 +186,7 @@ namespace WastedBridge.OfflineChecks
                 "\"edition\":\"unknown\"", "queue_depth", "tick_hz", "game_fps",
                 "\"online_blocked\":false");
 
-            // --- /task validation: all 11 types accepted with valid params ---
+            // --- /task validation: all 12 types accepted with valid params ---
             await Check("task drive_to valid", () => Post("/task", "{\"type\":\"drive_to\",\"params\":{\"x\":1,\"y\":2,\"z\":3,\"speed_mps\":15,\"style\":\"rushed\"}}"), 202, "t-000001");
             await Check("task walk_to valid", () => Post("/task", "{\"type\":\"walk_to\",\"params\":{\"x\":1,\"y\":2,\"z\":3,\"run\":true}}"), 202, "t-000002");
             await Check("task enter_nearest_vehicle valid", () => Post("/task", "{\"type\":\"enter_nearest_vehicle\",\"params\":{\"prefer\":\"nicer\"}}"), 202, "t-000003");
@@ -198,6 +198,9 @@ namespace WastedBridge.OfflineChecks
             await Check("task follow_entity valid", () => Post("/task", "{\"type\":\"follow_entity\",\"params\":{\"handle\":1234,\"in_vehicle\":false}}"), 202, "t-000009");
             await Check("task set_waypoint valid", () => Post("/task", "{\"type\":\"set_waypoint\",\"params\":{\"x\":10,\"y\":20}}"), 202, "t-000010");
             await Check("task stop valid", () => Post("/task", "{\"type\":\"stop\"}"), 202, "t-000011");
+            // CONTRACTS v1.11: fight_ped, added last so every earlier hardcoded task_id above stays
+            // unchanged.
+            await Check("task fight_ped valid", () => Post("/task", "{\"type\":\"fight_ped\",\"params\":{\"handle\":1234}}"), 202, "t-000012");
 
             // --- /task validation failures ---
             await Check("task unknown type -> 400", () => Post("/task", "{\"type\":\"teleport\",\"params\":{}}"), 400, "unknown_task_type");
@@ -205,6 +208,7 @@ namespace WastedBridge.OfflineChecks
             await Check("task drive_to bad style -> 400", () => Post("/task", "{\"type\":\"drive_to\",\"params\":{\"x\":1,\"y\":2,\"z\":3,\"speed_mps\":10,\"style\":\"insane\"}}"), 400, "invalid_params", "normal|rushed|ignore_lights|avoid_traffic");
             await Check("task combat missing radius -> 400", () => Post("/task", "{\"type\":\"combat_hated_targets_around\"}"), 400, "invalid_params", "radius_m");
             await Check("task follow_entity missing handle -> 400", () => Post("/task", "{\"type\":\"follow_entity\"}"), 400, "invalid_params", "handle");
+            await Check("task fight_ped missing handle -> 400", () => Post("/task", "{\"type\":\"fight_ped\"}"), 400, "invalid_params", "handle");
             await Check("task enter prefer bogus -> 400", () => Post("/task", "{\"type\":\"enter_nearest_vehicle\",\"params\":{\"prefer\":\"fastest\"}}"), 400, "invalid_params");
             await Check("task no type -> 400", () => Post("/task", "{\"params\":{}}"), 400, "invalid_params");
             await Check("task garbage body -> 400", () => Post("/task", "not json"), 400, "invalid_json");
@@ -242,11 +246,11 @@ namespace WastedBridge.OfflineChecks
             await Check("unstick with idle snapshot -> 409", () => Post("/unstick", "{}"), 409,
                 "no drive task is running");
 
-            // --- queue depth reflects the 11 enqueued tasks + the stalled timescale command ---
-            await Check("health queue_depth = 12", () => Get("/health"), 200, "\"queue_depth\":12");
+            // --- queue depth reflects the 12 enqueued tasks + the stalled timescale command ---
+            await Check("health queue_depth = 13", () => Get("/health"), 200, "\"queue_depth\":13");
 
             // --- queue bound: fill to MaxQueueDepth (128) then reject ---
-            for (int i = 0; i < 116; i++)
+            for (int i = 0; i < 115; i++)
             {
                 await Post("/task", "{\"type\":\"stop\"}");
             }
@@ -454,12 +458,16 @@ namespace WastedBridge.OfflineChecks
         // =====================================================================================
         private static void DrivingStyleGuard()
         {
+            // avoid_traffic was retuned 2026-09-02 (786468/DrivingModeAvoidVehiclesReckless, a
+            // brake-free crash generator, -> 787237/DrivingModeAvoidVehicles + AllowGoingWrongWay +
+            // GoOffRoadWhenAvoiding); see bridge/src/DrivingStyles.cs. normal/rushed/ignore_lights
+            // are unchanged.
             var expected = new Dictionary<string, uint>
             {
                 { "normal", 786603 },
                 { "rushed", 1074528293 },
                 { "ignore_lights", 786475 },
-                { "avoid_traffic", 786468 }
+                { "avoid_traffic", 787237 }
             };
 
             if (File.Exists(Paths.RealShvdnDll))
@@ -480,7 +488,8 @@ namespace WastedBridge.OfflineChecks
                 CheckStyleMembers("ignore_lights", byName, expected["ignore_lights"],
                     "DrivingModeStopForVehiclesIgnoreLights");
                 CheckStyleMembers("avoid_traffic", byName, expected["avoid_traffic"],
-                    "DrivingModeAvoidVehiclesReckless");
+                    "DrivingModeAvoidVehicles", "ChangeLanesAroundObstructions", "UseShortCutLinks",
+                    "AllowGoingWrongWay", "GoOffRoadWhenAvoiding");
             }
             else
             {

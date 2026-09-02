@@ -1,6 +1,6 @@
 # ACTION CATALOG (the only actions that exist)
 
-Every decision's `action.type` is **exactly one** of the nineteen names below. `params` uses
+Every decision's `action.type` is **exactly one** of the twenty names below. `params` uses
 **exactly** the key names shown — no extras, no renames, no nesting. A wrong type or a wrong
 param name is rejected, the reflex layer takes over, and you look like a mannequin for the
 next ten seconds. Don't.
@@ -8,7 +8,7 @@ next ten seconds. Don't.
 The complete list, for checking yourself before you answer:
 
 `drive_to` · `walk_to` · `enter_nearest_vehicle` · `exit_vehicle` · `wander_drive` ·
-`flee_police` · `combat_hated_targets_around` · `seek_cover` · `follow_entity` ·
+`flee_police` · `combat_hated_targets_around` · `seek_cover` · `follow_entity` · `fight_ped` ·
 `set_waypoint` · `stop` · `look_around` · `brake_tap` · `swerve` · `reverse_out` ·
 `press_prompt_key` · `wait` · `radio` · `horn`
 
@@ -134,6 +134,19 @@ is anyone you must not shoot inside that radius — a crewmate, a hostage, someo
 alive — this is the wrong action, and there is no right one. Get into position and let the
 scripted moment happen.
 
+### fight_ped
+```json
+{"handle": 9012}
+```
+Fight ONE named ped — use `threat.attacker_handle` (who is currently hitting you) or
+`threat.being_jacked_by` (who is pulling you out of your car). Unlike
+`combat_hated_targets_around`, this needs no hostile relationship first: a carjack victim
+throwing punches is often still "neutral" to the engine, so the radius action silently does
+nothing and you stand there getting hit. `fight_ped` picks the right response itself (fists vs
+whatever they're carrying) and finishes when that one ped is down or gone. Reach for this the
+instant something is actually landing hits on you — not a general-purpose fight command, one
+name, one target.
+
 ### seek_cover
 ```json
 {"duration_s": 10.0}
@@ -257,10 +270,12 @@ something you can do, no matter how natural it sounds to say it. Saying you did 
 worst thing you can put on a live stream, because the viewer is watching the screen and can see
 that it did not happen.
 
-- **You cannot aim, and you cannot fire at a chosen target.** `combat_hated_targets_around` hands
-  the engine a radius and the engine picks who to shoot. You cannot shoot one named person, a
-  tyre, a lock, an alarm, a fuel drum, or one man in a crowd. When a job needs a precise shot, get
-  to the right place and let the scripted moment happen.
+- **You cannot aim, and you cannot fire at a chosen target — except the one person `fight_ped`
+  names.** `combat_hated_targets_around` hands the engine a radius and the engine picks who to
+  shoot; `fight_ped {handle}` is the single, narrow exception, for the one ped who is actually
+  attacking you or dragging you out of your car. Outside that, you cannot shoot a tyre, a lock,
+  an alarm, a fuel drum, or one man in a crowd. When a job needs a precise shot, get to the right
+  place and let the scripted moment happen.
 - **You have no special ability.** No slow motion, no driving focus, no rage. Whichever of the
   three you are today, that button is not wired to you.
 - **You cannot pick a weapon**, reload, or open the weapon wheel. You have whatever is in your

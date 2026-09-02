@@ -49,6 +49,7 @@ from wasted_harness.behavior.recovery import (
     TaskStallDetector,
     ThreatLatch,
 )
+from wasted_harness.behavior.roam import HouseEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.brain.schemas import BRIDGE_TASKS
 from wasted_harness.brain.vision import MissionOutcome
@@ -104,6 +105,18 @@ def make_state(**over: Any) -> GameState:
                 "color": "Yellow",
             }
             for r in over.pop("route_blips", [])
+        ],
+        # CONTRACTS v1.11 entity blips: [((x, y, z), handle, name), ...]
+        "entity_blips": [
+            {
+                "pos": {"x": e[0][0], "y": e[0][1], "z": e[0][2]},
+                "handle": e[1],
+                "color": "Blue",
+                "is_route": False,
+                "distance": ((e[0][0] - pos[0]) ** 2 + (e[0][1] - pos[1]) ** 2) ** 0.5,
+                "name": e[2] if len(e) > 2 else None,
+            }
+            for e in over.pop("entity_blips", [])
         ],
     }
     if blip is not None:
@@ -431,6 +444,8 @@ def _bare_harness(cutscene_active: bool, player_down: bool = False) -> Harness:
     h.bridge = _FakeBridge()
     h.primitives = None
     h._cutscene_active = cutscene_active
+    h._switch_in_progress = False
+    h._retry_in_flight = False
     h._player_down = player_down
     h._quiet_until = 0.0
     h._screen_blocked = False
@@ -591,6 +606,11 @@ class _ReflexStub:
         #: than race the wall clock.
         self.vehicle = VehicleController(clock=self.clock)
         self.wheel = MovementWheel(clock=self.clock)
+        #: Free roam's single owner. `_reflex` reads it for the "how long has he
+        #: been standing still" measure the house-escape ladder gates on, and
+        #: `_handle_mission_events` tells it when a job starts and ends.
+        self.roam = RoamEngine(random.Random(1), clock=self.clock)
+        self.house_escape = HouseEscape(clock=self.clock)
 
         class _Breaks:
             on_break = False
@@ -1004,6 +1024,10 @@ def _mission_end_harness(outcome: MissionOutcome) -> Harness:
     h = Harness.__new__(Harness)
     h.missions = MissionTracker()
     h.planner = DayPlanner(random.Random(1))
+    # The real roam engine: `_handle_mission_events` is where its "the story has
+    # to move" clock is reset, so stubbing it would stop testing the thing that
+    # makes a mission actually interrupt free roam.
+    h.roam = RoamEngine(random.Random(1))
     h.writer = _FakeWriter()
     h.bus = _FakeBus()
     h._pending_screenshot_trigger = None
@@ -1502,6 +1526,11 @@ def _event_harness(events):
     # The real planner: `_handle_mission_events` feeds it every mission event
     # (that is where its attempt counting and roam-block back-off come from).
     h.planner = DayPlanner(random.Random(1))
+    # The real roam engine: free roam's single owner. `_handle_mission_events`
+    # resets its "the story has to move" clock and `_reflex` reads its
+    # standing-still measure, so stubbing it out would stop testing exactly the
+    # machinery that keeps him from standing there.
+    h.roam = RoamEngine(random.Random(1))
     h.writer = _FakeWriter()
     h._pending_screenshot_trigger = None
     h._pending_big_event = None
@@ -2108,6 +2137,25 @@ def test_execute_action_suppresses_every_bridge_task_on_a_blocking_screen() -> N
     assert h.bridge.posted == []
 
 
+def test_execute_action_suppresses_every_bridge_task_during_a_protagonist_switch() -> None:
+    """v1.11 `player.switch_in_progress`, gated exactly like a cutscene at the
+    single choke point every bridge task goes through."""
+    h = _bare_harness(cutscene_active=False)
+    h._switch_in_progress = True
+    for task_type in BRIDGE_TASKS:
+        assert Harness._execute_action(h, task_type, {}) is None, task_type
+    assert h.bridge.posted == []
+
+
+def test_execute_action_suppresses_every_bridge_task_during_a_mission_retry() -> None:
+    """v1.11 `mission.retry_in_flight`."""
+    h = _bare_harness(cutscene_active=False)
+    h._retry_in_flight = True
+    for task_type in BRIDGE_TASKS:
+        assert Harness._execute_action(h, task_type, {}) is None, task_type
+    assert h.bridge.posted == []
+
+
 class _ContextStub:
     """Enough of the harness for the REAL `_dynamic_context`."""
 
@@ -2121,6 +2169,10 @@ class _ContextStub:
         self.activity_runner = ActivityRunner(
             ActivityPicker(random.Random(1)), random.Random(1)
         )
+        #: `_dynamic_context` renders the ROAM block (current goal + the menu the
+        #: model must pick from) out of this, and reads `goal_text` for the GOAL
+        #: line, so the real engine is wired in rather than stood in for.
+        self.roam = RoamEngine(random.Random(1))
         self.current_mission = None
         self.memory = SimpleNamespace(context_block=lambda: "")
         self.commentary = SimpleNamespace(
@@ -2130,6 +2182,12 @@ class _ContextStub:
         # Set once per tick by `_reflex`; `_dynamic_context` reads it to steer knowledge
         # retrieval toward combat when he is being hit by a ped /state calls `neutral`.
         self._under_attack = False
+
+    @property
+    def goal_text(self) -> str:
+        # The real one: "a locked roam goal outranks the director's goal line"
+        # is behaviour under test, not scaffolding.
+        return Harness.goal_text.fget(self)
 
 
 def test_a_blocking_screen_is_admitted_to_the_brain() -> None:
@@ -2146,6 +2204,43 @@ def test_a_blocking_screen_is_admitted_to_the_brain() -> None:
         _ContextStub(False), make_state(), Delta(wanted_from=0, wanted_to=0), "poll", "tactical"
     )
     assert "BLOCKED:" not in clear
+
+
+def test_the_threat_and_blip_line_is_short_and_names_the_handle() -> None:
+    """v1.11: `_dynamic_context` gives the brain a compact ATTACKER/BLIPS line
+    instead of leaving it to find `threat`/`entity_blips` inside the raw
+    `STATE:` json."""
+    body = make_state(
+        nearby_peds=[
+            {
+                "handle": 9012,
+                "model": "a_m_y_business_01",
+                "distance": 3.0,
+                "relationship": "neutral",
+                "pos": {"x": 1.0, "y": 0.0, "z": 0.0},
+                "in_vehicle_handle": None,
+                "attacking_me": True,
+                "weapon_class": "melee",
+            }
+        ]
+    ).model_dump(by_alias=True)
+    body["threat"] = {"attacker_handle": 9012, "being_jacked_by": None}
+    body["mission"]["entity_blips"] = [
+        {
+            "pos": {"x": 500.0, "y": 500.0, "z": 20.0},
+            "handle": 777,
+            "color": "Blue",
+            "is_route": False,
+            "distance": 220.0,
+            "name": "Lamar",
+        }
+    ]
+    state = GameState.model_validate(body)
+    ctx = Harness._dynamic_context(
+        _ContextStub(False), state, Delta(wanted_from=0, wanted_to=0), "poll", "tactical"
+    )
+    assert "ATTACKER: handle 9012, melee — use fight_ped" in ctx
+    assert "NAMED BLIPS: Lamar 220m" in ctx
 
 
 def test_the_mission_tail_stands_down_when_survival_has_the_tick() -> None:
@@ -2278,3 +2373,40 @@ def test_every_drive_to_the_follower_emits_carries_a_numeric_speed() -> None:
             "a drive_to task is built without speed_mps; the bridge rejects it with "
             f"400 invalid_params. Offending block starts: {head[:160]!r}"
         )
+
+
+def test_the_dot_on_the_map_beats_a_stale_last_seen_position() -> None:
+    """OBSERVED LIVE 2026-09-02 (operator screenshot): the crewmate drove off,
+    left the ~50 m `nearby.peds` radius, and the agent drove around at RANDOM
+    looking for him — "No sign of him anywhere. Widening the search, freeway's
+    as good a start as any." — while the game was drawing his dot on the
+    minimap the entire time.
+
+    CONTRACTS v1.11 `mission.entity_blips[]` is that dot: entity-attached blips
+    survive the ped-scan radius and carry the game's own label ("Lamar"). A LIVE
+    blip must therefore outrank the stale `reacquire` rung, which only knows
+    where he was when he disappeared.
+    """
+    clock = FakeClock()
+    f = MissionFollower(clock=clock)
+
+    # Tailing him normally at close range.
+    seen = _tail_state(nearby_peds=[_friendly_ped(6.0)])
+    f.plan(seen)
+    f.bind_task("t-tail-1")
+
+    # Now he is gone from nearby.peds entirely — but his blip is 220 m out.
+    gone = _tail_state(
+        nearby_peds=[],
+        entity_blips=[((220.0, 0.0, 0.0), 998877, "Lamar")],
+        task_id="t-tail-1",
+        task_status="done",
+    )
+    clock.tick(FOLLOW_RECOVERY_RUNG_GAP_S + 1.0)
+    step = f.plan(gone)
+
+    assert step is not None, "he must act on the dot, not stand there"
+    assert step["params"].get("handle") == 998877 or (
+        round(step["params"].get("x", 0)) == 220
+    ), f"must target the blip (handle or its position), got {step}"
+    assert "Lamar" in f.note(), f"the note should name him from the blip: {f.note()!r}"

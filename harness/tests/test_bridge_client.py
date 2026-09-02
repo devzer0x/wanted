@@ -66,6 +66,7 @@ def test_bridge_task_types_match_contract() -> None:
         "combat_hated_targets_around",
         "seek_cover",
         "follow_entity",
+        "fight_ped",
         "set_waypoint",
         "stop",
     )

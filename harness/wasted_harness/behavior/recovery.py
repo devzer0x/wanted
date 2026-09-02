@@ -314,6 +314,8 @@ class TaskStallDetector:
             or p.dead
             or p.arrested
             or state.mission.cutscene_active
+            or state.player.switch_in_progress
+            or state.mission.retry_in_flight
             or lt.status != "running"
             or lt.type is None
             or lt.type in STATIONARY_TASK_TYPES
@@ -691,11 +693,32 @@ def threat_action(
     `/state` has no engine-health, no `driveable` and no obstruction field —
     the observation that it did not move IS the evidence. Defaults to False so
     the function stays testable on its own; production always passes it.
+
+    **CONTRACTS v1.11 — `state.threat`.** `threat.attacker_handle` (the ped
+    currently attacking) and `threat.being_jacked_by` (the ped pulling him out
+    of a car) are target-explicit facts a pre-v1.11 bridge cannot send — both
+    are `None` on one, so every rung below degrades exactly to its pre-v1.11
+    behaviour. When either is set it is PREFERRED over :class:`DamageTracker`'s
+    damage-accumulation heuristic at rung 3: instead of handing the engine a
+    radius and hoping `combat_hated_targets_around` finds a target whose
+    relationship happens to be Neutral/Dislike/Hate (a carjack victim is
+    plausibly still Respect/Like, which is why that action silently no-oped
+    while he was beaten to death on stream), it posts `fight_ped` at the named
+    handle — no relationship lookup required. `DamageTracker` stays the
+    fallback for a pre-v1.11 bridge, unchanged. Rung 2 (the working-car
+    reversal) still outranks this: a threat handle in a car that can drive
+    away is answered by leaving, never by `fight_ped` — the bridge already
+    tells the engine not to let him get out to fight, and this module is the
+    other half of that rule.
     """
     player = state.player
     if player.dead or player.arrested:
         return None
     if state.mission.cutscene_active:
+        return None
+    if state.player.switch_in_progress:
+        return None
+    if state.mission.retry_in_flight:
         return None
 
     #: A car he could actually leave in: right way up, out of the water, not a
@@ -732,27 +755,51 @@ def threat_action(
     }
     leave = {"type": "wander_drive", "params": {"style": "avoid_traffic"}}
 
+    # v1.11: a target-explicit handle, when the bridge sends one. Preferred
+    # over the relationship-blind `fight` above at rung 3 — see the docstring.
+    # `attacker_handle` (currently swinging) outranks `being_jacked_by`
+    # (pulling him out) when, in some rare frame, both are set.
+    target_handle = state.threat.attacker_handle
+    if target_handle is None:
+        target_handle = state.threat.being_jacked_by
+
+    def fight_action() -> dict[str, Any]:
+        if target_handle is not None:
+            return {"type": "fight_ped", "params": {"handle": target_handle}}
+        return fight
+
     # 1. Too hurt to trade more hits.
     max_health = player.max_health if player.max_health > 0 else 200
     if player.health <= max_health * LOW_HEALTH_FRACTION:
         return break_contact()
 
-    # Damage arriving right now, from either detector: the sliding window
-    # (a beating, a few HP at a time) or the single-tick cliff.
-    taking_damage = under_attack or delta.big_health_drop
+    # Damage arriving right now, from any detector: the sliding window (a
+    # beating, a few HP at a time), the single-tick cliff, or — v1.11, and
+    # earlier than either of the other two — the bridge naming an attacker or
+    # a jacker directly. `attacking_me` is true the frame the game tasks a ped
+    # into combat against him, before the first punch lands or any HP moves.
+    taking_damage = under_attack or delta.big_health_drop or target_handle is not None
 
-    # 2. THE REVERSAL. Being beaten in a parked, working car outside a mission:
-    #    floor it. Faster and safer than getting out to fight the owner, and
-    #    the exact death this rung was written from.
+    # 2. THE REVERSAL. Being beaten (or jacked) in a parked, working car
+    #    outside a mission: floor it. Faster and safer than getting out to
+    #    fight the owner, and the exact death this rung was written from. This
+    #    is also the v1.11 hard rule from the brief: `fight_ped` is never
+    #    posted while `player.in_vehicle` and the vehicle is drivable — this
+    #    rung is what answers that case instead.
     if taking_damage and player.in_vehicle and can_leave and stationary and free_roam:
         return leave
 
-    # 3. Something is hitting him and it is close enough to hit back — on foot,
-    #    or in a car that cannot leave (upside down, in the water, a shell, or
-    #    one the state machine has measured as immobile). Leaving is always the
-    #    better answer when it is available; when it is not, this is.
-    if taking_damage and _attacker_close(state) and not (player.in_vehicle and can_leave):
-        return fight
+    # 3. Something is hitting him (or jacking him) and he cannot just drive
+    #    away — on foot, or in a car that cannot leave (upside down, in the
+    #    water, a shell, or one the state machine has measured as immobile).
+    #    A named handle needs no proximity check of its own: the bridge has
+    #    already vouched for it (v1.11 `attacking_me`/`threat`). Without one,
+    #    the pre-v1.11 rule applies unchanged — damage plus somebody in reach.
+    if not (player.in_vehicle and can_leave) and (
+        (taking_damage and target_handle is not None)
+        or (taking_damage and _attacker_close(state))
+    ):
+        return fight_action()
 
     # 4. A hostile in engagement range, healthy: fight — unless he is in a
     #    working car outside a mission, where leaving outranks fighting.

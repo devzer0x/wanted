@@ -6,9 +6,27 @@ using GTA;
 namespace WastedBridge
 {
     /// <summary>
-    /// CONTRACTS.md §1 driving-style names mapped to VehicleDrivingFlags bitfields (decision D3).
-    /// The names are the contract; the bit values may be tuned empirically in Phase 3 without a
-    /// contract change.
+    /// CONTRACTS.md §1 driving-style names mapped to VehicleDrivingFlags bitfields (decision D3,
+    /// retuned per the 2026-09-02 driving overhaul — docs/research/brief-driving-natives.json).
+    /// The names are the contract; the bit values may be tuned empirically without a contract
+    /// change ("The names are the contract; the bridge may tune the underlying bit values
+    /// empirically").
+    ///
+    /// RETUNE (2026-09-02): <c>avoid_traffic</c> was <c>DrivingModeAvoidVehiclesReckless</c>
+    /// (786468), documented by citizenfx/natives as "doesn't use the brakes at ALL to help with
+    /// steering" — a crash generator, and the plausible cause of observed head-on/reckless crashes
+    /// on stream. It is now composed from the non-reckless <c>DrivingModeAvoidVehicles</c> (786469)
+    /// plus <c>AllowGoingWrongWay</c>/<c>GoOffRoadWhenAvoiding</c>, since CONTRACTS v1.9 already
+    /// documents this as the style "available for a genuine chase" — i.e. the one pursuit-oriented
+    /// style among the four contract names, so the brief's "add these to a pursuit-oriented style"
+    /// item folds into this same retune rather than inventing a fifth style name. normal/rushed/
+    /// ignore_lights are numerically unchanged (verified below: their pre-existing composite
+    /// constants already include ChangeLanesAroundObstructions/UseShortCutLinks — see the OR'd-in
+    /// members on each style, which are therefore idempotent, not a behavior change) but are still
+    /// written as an explicit flag union rather than a single named constant, so the "every style
+    /// that drives on roads carries ChangeLanesAroundObstructions/UseShortCutLinks" invariant the
+    /// brief asks for is visible in the source, not just true by accident of which composite
+    /// constant SHVDN happens to define.
     ///
     /// Expressed as named flags from the pinned SHVDN nightly rather than raw integers, so a
     /// future SHVDN bump that <em>renames or removes</em> a member breaks the build. Renaming is
@@ -19,28 +37,46 @@ namespace WastedBridge
     /// </summary>
     internal static class DrivingStyles
     {
-        /// <summary>D3 normal = 786603: stop for cars/peds, obey lights, use shortcuts.</summary>
+        /// <summary>786603: stop for cars/peds, obey lights, use shortcuts/lane-changes.</summary>
         public const VehicleDrivingFlags Normal =
-            VehicleDrivingFlags.DrivingModeStopForVehicles;
+            VehicleDrivingFlags.DrivingModeStopForVehicles
+            | VehicleDrivingFlags.ChangeLanesAroundObstructions
+            | VehicleDrivingFlags.UseShortCutLinks;
 
-        /// <summary>D3 rushed = 1074528293: avoid vehicles, plus join the road in its direction.</summary>
+        /// <summary>1074528293: avoid vehicles, plus join the road in its direction.</summary>
         public const VehicleDrivingFlags Rushed =
             VehicleDrivingFlags.DrivingModeAvoidVehicles
-            | VehicleDrivingFlags.ForceJoinInRoadDirection;
+            | VehicleDrivingFlags.ForceJoinInRoadDirection
+            | VehicleDrivingFlags.ChangeLanesAroundObstructions
+            | VehicleDrivingFlags.UseShortCutLinks;
 
-        /// <summary>D3 ignore_lights = 786475: normal minus StopAtTrafficLights.</summary>
+        /// <summary>786475: normal minus StopAtTrafficLights.</summary>
         public const VehicleDrivingFlags IgnoreLights =
-            VehicleDrivingFlags.DrivingModeStopForVehiclesIgnoreLights;
+            VehicleDrivingFlags.DrivingModeStopForVehiclesIgnoreLights
+            | VehicleDrivingFlags.ChangeLanesAroundObstructions
+            | VehicleDrivingFlags.UseShortCutLinks;
 
-        /// <summary>D3 avoid_traffic = 786468: swerve hard, no stopping for peds.</summary>
+        /// <summary>
+        /// 787237 (RETUNED — was 786468/DrivingModeAvoidVehiclesReckless, the brake-free crash
+        /// generator). Non-reckless avoid-vehicles, still willing to cross the centre line or cut
+        /// off-road to keep up — the "genuine chase" style per CONTRACTS v1.9.
+        /// </summary>
         public const VehicleDrivingFlags AvoidTraffic =
-            VehicleDrivingFlags.DrivingModeAvoidVehiclesReckless;
+            VehicleDrivingFlags.DrivingModeAvoidVehicles
+            | VehicleDrivingFlags.ChangeLanesAroundObstructions
+            | VehicleDrivingFlags.UseShortCutLinks
+            | VehicleDrivingFlags.AllowGoingWrongWay
+            | VehicleDrivingFlags.GoOffRoadWhenAvoiding;
 
-        // Decimal values frozen by CONTRACTS §1 / RESEARCH D3.
+        // Decimal values this DLL is compiled against; Verify() checks the loaded assembly still
+        // agrees. normal/rushed/ignore_lights match the original CONTRACTS §1/RESEARCH D3 numbers
+        // (786603/1074528293/786475 respectively — the extra OR'd members above are already
+        // present inside those composite constants, see the class comment). avoid_traffic is the
+        // 2026-09-02 retune's own new frozen value, not D3's.
         private const uint NormalValue = 786603;
         private const uint RushedValue = 1074528293;
         private const uint IgnoreLightsValue = 786475;
-        private const uint AvoidTrafficValue = 786468;
+        private const uint AvoidTrafficValue = 787237;
 
         // The enum members each style is composed from, by name. Verify() looks these up in the
         // loaded assembly's metadata, which is the only way a renumbering can be noticed at run
@@ -49,7 +85,10 @@ namespace WastedBridge
         private const string MemberAvoidVehicles = "DrivingModeAvoidVehicles";
         private const string MemberForceJoinInRoadDirection = "ForceJoinInRoadDirection";
         private const string MemberIgnoreLights = "DrivingModeStopForVehiclesIgnoreLights";
-        private const string MemberAvoidVehiclesReckless = "DrivingModeAvoidVehiclesReckless";
+        private const string MemberChangeLanesAroundObstructions = "ChangeLanesAroundObstructions";
+        private const string MemberUseShortCutLinks = "UseShortCutLinks";
+        private const string MemberAllowGoingWrongWay = "AllowGoingWrongWay";
+        private const string MemberGoOffRoadWhenAvoiding = "GoOffRoadWhenAvoiding";
 
         /// <summary>Returns false when the name is not one of the four contract styles.</summary>
         public static bool TryParse(string name, out VehicleDrivingFlags flags)
@@ -89,12 +128,16 @@ namespace WastedBridge
         public static string Verify()
         {
             var drift = new StringBuilder();
-            CheckStyle(drift, "normal", Normal, NormalValue, MemberStopForVehicles);
+            CheckStyle(drift, "normal", Normal, NormalValue,
+                MemberStopForVehicles, MemberChangeLanesAroundObstructions, MemberUseShortCutLinks);
             CheckStyle(drift, "rushed", Rushed, RushedValue,
-                MemberAvoidVehicles, MemberForceJoinInRoadDirection);
-            CheckStyle(drift, "ignore_lights", IgnoreLights, IgnoreLightsValue, MemberIgnoreLights);
+                MemberAvoidVehicles, MemberForceJoinInRoadDirection,
+                MemberChangeLanesAroundObstructions, MemberUseShortCutLinks);
+            CheckStyle(drift, "ignore_lights", IgnoreLights, IgnoreLightsValue,
+                MemberIgnoreLights, MemberChangeLanesAroundObstructions, MemberUseShortCutLinks);
             CheckStyle(drift, "avoid_traffic", AvoidTraffic, AvoidTrafficValue,
-                MemberAvoidVehiclesReckless);
+                MemberAvoidVehicles, MemberChangeLanesAroundObstructions, MemberUseShortCutLinks,
+                MemberAllowGoingWrongWay, MemberGoOffRoadWhenAvoiding);
             return drift.Length == 0 ? null : drift.ToString().Trim();
         }
 

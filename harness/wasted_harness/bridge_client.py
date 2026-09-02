@@ -39,6 +39,7 @@ BRIDGE_TASK_TYPES: tuple[str, ...] = (
     "combat_hated_targets_around",
     "seek_cover",
     "follow_entity",
+    "fight_ped",
     "set_waypoint",
     "stop",
 )
@@ -190,6 +191,12 @@ class PlayerState(BaseModel):
     #: v1.5's `friendly` and v1.6's `pos` went through before the bridge
     #: started emitting them.
     protagonist: str = UNKNOWN_PROTAGONIST
+    #: v1.11: a protagonist switch (the aerial fly-over between Michael/
+    #: Franklin/Trevor) is playing. Treat exactly like `mission.cutscene_active`:
+    #: act on nothing, say nothing about "being the wrong character" — this is
+    #: the real signal behind that narration, which used to have no field to
+    #: read. Optional so a pre-v1.11 bridge still parses.
+    switch_in_progress: bool = False
 
 
 class VehicleState(BaseModel):
@@ -268,6 +275,29 @@ class MissionStart(BaseModel):
     protagonist: str = UNKNOWN_PROTAGONIST
 
 
+class EntityBlip(BaseModel):
+    """CONTRACTS v1.11 `mission.entity_blips[]`: a blip pinned to a ped/vehicle,
+    whether or not the game has plotted a route to it.
+
+    This is the long-range source that outlives `nearby.peds`' ~50 m radius:
+    when a followed crewmate drives off, his dot (and his name) are still here
+    while he has long since vanished from `nearby`. `name` is the game's own
+    map-legend text (`Blip.GetAppropriateName()`, e.g. "Lamar"), so it is a
+    legitimate source for `present_names` grounding even when the ped himself
+    is out of scan range.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    pos: Vec3
+    handle: int
+    #: SHVDN BlipColor member name; see RouteBlip.color for the same tolerance
+    #: note (an unnamed enum index serializes as its integer as a string).
+    color: str = ""
+    is_route: bool = False
+    distance: float = 0.0
+    name: str | None = None
+
+
 class MissionState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     active: bool
@@ -292,6 +322,15 @@ class MissionState(BaseModel):
     #: identity key for `brain.mission_knowledge`'s LEARNED mapping, never a
     #: display name on its own.
     script: str | None = None
+    #: v1.11: every blip pinned to a ped/vehicle, nearest first, at most 8 — see
+    #: :class:`EntityBlip`. Optional (default `[]`) so a pre-v1.11 bridge still
+    #: parses.
+    entity_blips: list[EntityBlip] = []
+    #: v1.11: the game's own `mission_repeat_controller` thread is running — a
+    #: retry / checkpoint reload is in progress. Suppress tasks and commentary
+    #: while true, same as `cutscene_active`. Optional so a pre-v1.11 bridge
+    #: still parses.
+    retry_in_flight: bool = False
 
 
 class NearbyVehicle(BaseModel):
@@ -322,6 +361,16 @@ class NearbyPed(BaseModel):
     #: omits them — the exact bug that made a followed friendly vanish the
     #: moment he got into a car). Optional so a pre-v1.10 bridge still parses.
     in_vehicle_handle: int | None = None
+    #: v1.11: true while this ped's melee swing targets the player (before
+    #: impact), while the ped is tasked into combat against the player (the
+    #: frame the game tasks them, before the first punch), or once the player
+    #: has actually been damaged by them. Deliberately ignores vehicle damage —
+    #: a ped whose car clipped us is not an attacker. Optional so a pre-v1.11
+    #: bridge still parses.
+    attacking_me: bool = False
+    #: v1.11: what this ped is attacking with, when known. Optional (default
+    #: None) so a pre-v1.11 bridge still parses.
+    weapon_class: Literal["unarmed", "melee", "gun", "projectile", "unknown"] | None = None
 
 
 #: Animal ped models. In this engine animals ARE peds, so `World.GetNearbyPeds` returns cats,
@@ -382,6 +431,22 @@ class BridgeInfo(BaseModel):
     edition: str
 
 
+class ThreatState(BaseModel):
+    """CONTRACTS v1.11 `threat`: the nearest ped actively attacking, and
+    whoever is pulling him out of a car.
+
+    This is the field that fixed the "beaten to death while standing still"
+    failure: `combat_hated_targets_around` silently no-ops unless a nearby
+    ped's relationship is Neutral/Dislike/Hate, and a carjack victim is
+    plausibly still Respect/Like. `attacker_handle` is target-explicit and
+    goes straight to `fight_ped`, no relationship lookup required.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    attacker_handle: int | None = None
+    being_jacked_by: int | None = None
+
+
 class GameState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ts: str
@@ -394,6 +459,10 @@ class GameState(BaseModel):
     nearby: Nearby
     last_task: LastTask
     bridge: BridgeInfo
+    #: v1.11. Optional with its own empty default so a pre-v1.11 bridge still
+    #: parses; both handles are then None, which is exactly the "no info yet"
+    #: state the DamageTracker fallback path expects.
+    threat: ThreatState = ThreatState()
 
 
 class Health(BaseModel):

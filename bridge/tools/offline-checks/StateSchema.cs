@@ -71,6 +71,9 @@ namespace WastedBridge.OfflineChecks
             // (defaults to "unknown" rather than being absent/null).
             new FieldSpec("player.protagonist", Kind.String,
                 allowed: new[] { "michael", "franklin", "trevor", "unknown" }),
+            // CONTRACTS v1.11: IS_PLAYER_SWITCH_IN_PROGRESS - true only while the camera is
+            // mid-flight between protagonists. Always present.
+            new FieldSpec("player.switch_in_progress", Kind.Boolean),
 
             // null when on foot — the key is always present (contract example shows "vehicle": null)
             new FieldSpec("vehicle", Kind.Object, nullable: true),
@@ -130,6 +133,24 @@ namespace WastedBridge.OfflineChecks
             // CONTRACTS v1.10 item 3: the active story-mission script name, or null. Only ever
             // non-null while mission.active.
             new FieldSpec("mission.script", Kind.String, nullable: true),
+            // CONTRACTS v1.11: true while a "mission_repeat_controller" script thread is running.
+            new FieldSpec("mission.retry_in_flight", Kind.Boolean),
+            // CONTRACTS v1.11: blips pinned to a ped/vehicle entity, nearest first, at most 8.
+            // Always an array, never null (route requirement dropped vs. route_blips - see
+            // EntityBlipDto).
+            new FieldSpec("mission.entity_blips", Kind.Array),
+            new FieldSpec("mission.entity_blips[]", Kind.Object),
+            new FieldSpec("mission.entity_blips[].pos", Kind.Object),
+            new FieldSpec("mission.entity_blips[].pos.x", Kind.Number),
+            new FieldSpec("mission.entity_blips[].pos.y", Kind.Number),
+            new FieldSpec("mission.entity_blips[].pos.z", Kind.Number),
+            new FieldSpec("mission.entity_blips[].handle", Kind.Integer),
+            new FieldSpec("mission.entity_blips[].color", Kind.String),
+            new FieldSpec("mission.entity_blips[].is_route", Kind.Boolean),
+            new FieldSpec("mission.entity_blips[].distance", Kind.Number),
+            // CONTRACTS v1.11: Blip.GetAppropriateName() - the map-legend text, or null when
+            // empty/unavailable.
+            new FieldSpec("mission.entity_blips[].name", Kind.String, nullable: true),
 
             new FieldSpec("nearby", Kind.Object),
             new FieldSpec("nearby.vehicles", Kind.Array),
@@ -162,6 +183,18 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("nearby.peds[].pos.z", Kind.Number),
             // CONTRACTS v1.10 item 2: the vehicle handle this ped is seated in, or null on foot.
             new FieldSpec("nearby.peds[].in_vehicle_handle", Kind.Integer, nullable: true),
+            // CONTRACTS v1.11: true if this ped's melee-target is the player, it is already tasked
+            // in combat against the player, or it has damaged the player this tick.
+            new FieldSpec("nearby.peds[].attacking_me", Kind.Boolean),
+            // CONTRACTS v1.11: IS_PED_ARMED classification of this ped's CURRENT weapon.
+            new FieldSpec("nearby.peds[].weapon_class", Kind.String,
+                allowed: new[] { "unarmed", "melee", "gun", "projectile", "unknown" }),
+
+            // CONTRACTS v1.11: the reflex-relevant "who is hurting me right now" summary. Always a
+            // present object; the two fields inside are independently nullable.
+            new FieldSpec("threat", Kind.Object),
+            new FieldSpec("threat.attacker_handle", Kind.Integer, nullable: true),
+            new FieldSpec("threat.being_jacked_by", Kind.Integer, nullable: true),
 
             new FieldSpec("last_task", Kind.Object),
             // CONTRACTS v1.2: present-and-null before the first task, never absent.

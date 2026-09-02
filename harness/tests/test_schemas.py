@@ -37,7 +37,7 @@ def test_mood_enum_exact() -> None:
 
 
 def test_action_catalog_exact() -> None:
-    assert len(BRIDGE_TASKS) == 11
+    assert len(BRIDGE_TASKS) == 12  # CONTRACTS v1.11 adds fight_ped
     assert PRIMITIVES == (
         "look_around",
         "brake_tap",
@@ -58,6 +58,7 @@ def test_action_catalog_exact() -> None:
         "walk_to": {"x": 1.0, "y": 2.0, "z": 3.0},
         "set_waypoint": {"x": 1.0, "y": 2.0},
         "follow_entity": {"handle": 1},
+        "fight_ped": {"handle": 1},
     }
     for t in ACTION_TYPES:
         ActionModel.model_validate({"type": t, "params": minimal_params.get(t, {})})
@@ -72,6 +73,19 @@ def test_action_catalog_exact() -> None:
         ActionModel.model_validate({"type": "teleport", "params": {}})
     with pytest.raises(ValidationError):
         ActionModel.model_validate({"type": "god_mode", "params": {}})
+
+
+def test_fight_ped_round_trips_with_only_a_handle() -> None:
+    """CONTRACTS v1.11 §1: `fight_ped {handle}`, nothing else."""
+    action = ActionModel.model_validate({"type": "fight_ped", "params": {"handle": 9012}})
+    assert action.wire_params() == {"handle": 9012}
+    with pytest.raises(ValidationError):
+        ActionModel.model_validate({"type": "fight_ped", "params": {}})
+    # A param fight_ped does not take never rides along.
+    stray = ActionModel.model_validate(
+        {"type": "fight_ped", "params": {"handle": 9012, "radius_m": 25.0}}
+    )
+    assert stray.wire_params() == {"handle": 9012}
 
 
 def test_the_wire_schema_can_express_coordinates() -> None:

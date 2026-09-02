@@ -406,7 +406,16 @@ def select(
     # `wait`; driving/combat/police tips he cannot act on would just be prompt noise. "Nothing
     # else" per the brief, enforced by returning immediately.
     control_enabled = _get(player, "control_enabled", True)
-    if bool(_get(game_mission, "cutscene_active", False)) or control_enabled is False:
+    # v1.11: a protagonist switch and a mission retry/checkpoint reload are the
+    # same "no agency" case as a cutscene — treated identically here.
+    switch_in_progress = bool(_get(player, "switch_in_progress", False))
+    retry_in_flight = bool(_get(game_mission, "retry_in_flight", False))
+    if (
+        bool(_get(game_mission, "cutscene_active", False))
+        or control_enabled is False
+        or switch_in_progress
+        or retry_in_flight
+    ):
         pool = [it for items in load_all().values() for it in items if _matches_any(it, CUTSCENE_KEYWORDS)]
         return _rank(_dedup(pool))[:CUTSCENE_MAX_ITEMS]
 

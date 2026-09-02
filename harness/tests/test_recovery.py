@@ -77,6 +77,7 @@ def make_state(**over) -> GameState:
             "arrested": over.pop("arrested", False),
             "in_vehicle": over.pop("in_vehicle", False),
             "control_enabled": True,
+            "switch_in_progress": over.pop("switch_in_progress", False),
         },
         "vehicle": over.pop("vehicle", None),
         "location": {"street": "Vinewood Blvd", "zone": "Downtown Vinewood"},
@@ -85,6 +86,7 @@ def make_state(**over) -> GameState:
             "active": over.pop("mission_active", False),
             "random_event_active": False,
             "cutscene_active": over.pop("cutscene_active", False),
+            "retry_in_flight": over.pop("retry_in_flight", False),
         },
         "nearby": {
             "vehicles": over.pop("nearby_vehicles", []),
@@ -97,6 +99,9 @@ def make_state(**over) -> GameState:
             "detail": "",
         },
         "bridge": {"version": over.pop("bridge_version", "1.0.0"), "edition": "legacy"},
+        # v1.11: {attacker_handle, being_jacked_by}. Absent by default, exactly
+        # the pre-v1.11-bridge state every existing test in this file predates.
+        "threat": over.pop("threat", {"attacker_handle": None, "being_jacked_by": None}),
     }
     assert not over, f"unused overrides: {sorted(over)}"
     return GameState.model_validate(body)
@@ -1193,6 +1198,55 @@ def test_threat_action_fights_a_neutral_attacker_when_health_is_falling() -> Non
     assert threat_action(state, NO_DANGER_DELTA, False) is None
 
 
+def test_threat_action_prefers_the_v1_11_attacker_handle_over_the_damage_heuristic() -> None:
+    """The headline retaliation fix. `threat.attacker_handle` is target-explicit
+    and needs no `nearby.peds`/relationship evidence at all — the carjack
+    victim who punched him to death on stream could plausibly still be
+    `neutral`/`friendly`, exactly the case `combat_hated_targets_around`
+    silently no-ops on."""
+    state = make_state(health=185, in_vehicle=False, threat={"attacker_handle": 9012, "being_jacked_by": None})
+    assert threat_action(state, NO_DANGER_DELTA, False) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012},
+    }
+
+
+def test_threat_action_fights_the_jacker_when_no_attacker_is_named() -> None:
+    state = make_state(health=185, in_vehicle=False, threat={"attacker_handle": None, "being_jacked_by": 555})
+    assert threat_action(state, NO_DANGER_DELTA, False) == {
+        "type": "fight_ped",
+        "params": {"handle": 555},
+    }
+
+
+def test_threat_action_never_posts_fight_ped_from_a_working_car() -> None:
+    """The v1.11 hard rule: leaving beats fighting from a car that can drive
+    away, exactly as it already did for the pre-v1.11 heuristic."""
+    vehicle = {
+        "handle": 1, "model": "adder", "display_name": "Adder", "class": "Super",
+        "speed": 0.0, "health": 900.0, "upside_down": False, "in_water": False,
+        "stopped_for_s": 3.0,
+    }
+    state = make_state(
+        health=185, in_vehicle=True, vehicle=vehicle,
+        threat={"attacker_handle": 9012, "being_jacked_by": None},
+    )
+    result = threat_action(state, NO_DANGER_DELTA, False)
+    assert result == {"type": "wander_drive", "params": {"style": "avoid_traffic"}}
+
+
+def test_threat_action_falls_back_to_the_damage_heuristic_on_a_pre_v1_11_bridge() -> None:
+    """`threat.attacker_handle`/`being_jacked_by` both `None` (a pre-v1.11
+    bridge, or simply nobody attacking by handle) must not change a single
+    existing rung: DamageTracker's `under_attack` still drives
+    `combat_hated_targets_around`."""
+    state = make_state(health=185, in_vehicle=False, nearby_peds=[_neutral(2.0)])
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "combat_hated_targets_around",
+        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
+    }
+
+
 def test_threat_action_breaks_contact_when_nothing_is_in_reach_to_hit() -> None:
     """Taking hits from something he cannot reach (a rifle, a fire, a fall) is
     a cover problem, not a combat one."""
@@ -1253,6 +1307,30 @@ def test_threat_action_is_silent_during_a_cutscene() -> None:
         mission_active=True,
         health=185,
         nearby_peds=[_hostile(2.0), _neutral(1.0)],
+        wanted=3,
+    )
+    assert threat_action(state, Delta(wanted_from=0, wanted_to=3, big_health_drop=True), True) is None
+
+
+def test_threat_action_is_silent_during_a_protagonist_switch() -> None:
+    """v1.11 `player.switch_in_progress`: treated exactly like a cutscene —
+    the game owns the camera and the body."""
+    state = make_state(
+        switch_in_progress=True,
+        health=185,
+        nearby_peds=[_hostile(2.0)],
+        wanted=3,
+    )
+    assert threat_action(state, Delta(wanted_from=0, wanted_to=3, big_health_drop=True), True) is None
+
+
+def test_threat_action_is_silent_during_a_mission_retry() -> None:
+    """v1.11 `mission.retry_in_flight`: a checkpoint reload is in progress;
+    nothing survival-related should post over it."""
+    state = make_state(
+        retry_in_flight=True,
+        health=185,
+        nearby_peds=[_hostile(2.0)],
         wanted=3,
     )
     assert threat_action(state, Delta(wanted_from=0, wanted_to=3, big_health_drop=True), True) is None

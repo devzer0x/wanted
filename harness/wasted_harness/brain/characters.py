@@ -48,25 +48,27 @@ log = get_logger("wasted.characters")
 #: story models. Extend as missions unlock — an unknown model is logged, never
 #: guessed.
 PED_MODEL_NAMES: dict[str, str] = {
+    # Keys are written bare (no `ig_` prefix) because that is what the bridge
+    # emits; `name_for_model` resolves prefixed spellings onto these.
     "player_zero": "Michael",
     "player_one": "Franklin",
     "player_two": "Trevor",
-    "ig_lamardavis": "Lamar",
-    "ig_davenorton": "Dave",
-    "ig_simeon": "Simeon",
-    "ig_lestercrest": "Lester",
-    "ig_jimmydisanto": "Jimmy",
-    "ig_tracydisanto": "Tracey",
-    "ig_amandatownley": "Amanda",
-    "ig_ron": "Ron",
-    "ig_wade": "Wade",
-    "ig_stretch": "Stretch",
-    "ig_tanisha": "Tanisha",
-    "ig_denise": "Denise",
-    "ig_franklin": "Franklin",
-    "ig_michael": "Michael",
-    "ig_trevor": "Trevor",
-    "a_c_chop": "Chop",
+    "lamardavis": "Lamar",
+    "davenorton": "Dave",
+    "simeon": "Simeon",
+    "lestercrest": "Lester",
+    "jimmydisanto": "Jimmy",
+    "tracydisanto": "Tracey",
+    "amandatownley": "Amanda",
+    "ron": "Ron",
+    "wade": "Wade",
+    "stretch": "Stretch",
+    "tanisha": "Tanisha",
+    "denise": "Denise",
+    "franklin": "Franklin",
+    "michael": "Michael",
+    "trevor": "Trevor",
+    "chop": "Chop",
 }
 
 #: Every name the table can produce. A capitalised word in a line is only ever
@@ -75,19 +77,50 @@ PED_MODEL_NAMES: dict[str, str] = {
 CHECKED_NAMES: frozenset[str] = frozenset(PED_MODEL_NAMES.values())
 
 
+#: Prefixes the game puts on ped models that carry no identity. The bridge
+#: reports the model as SHVDN gives it, which drops `ig_` — observed live
+#: 2026-09-02: Lamar came through as `lamardavis`, not `ig_lamardavis`, and the
+#: grounding check dropped a perfectly true line about the man standing 1 m away.
+#: Lookup therefore tries the name as-is, then with each prefix stripped, then
+#: with `ig_` added.
+_MODEL_PREFIXES = ("ig_", "a_c_", "csb_", "cs_", "u_m_y_", "u_m_m_")
+
+
 def name_for_model(model: str | None) -> str | None:
-    """The display name for a ped model, or None when we do not know it."""
+    """The display name for a ped model, or None when we do not know it.
+
+    Prefix-tolerant: `ig_lamardavis`, `lamardavis` and `IG_LamarDavis` all
+    resolve to Lamar, because different layers spell the same ped differently.
+    """
     if not model:
         return None
-    return PED_MODEL_NAMES.get(model.strip().lower())
+    raw = model.strip().lower()
+    if raw in PED_MODEL_NAMES:
+        return PED_MODEL_NAMES[raw]
+    for prefix in _MODEL_PREFIXES:
+        if raw.startswith(prefix) and raw[len(prefix):] in PED_MODEL_NAMES:
+            return PED_MODEL_NAMES[raw[len(prefix):]]
+        candidate = prefix + raw
+        if candidate in PED_MODEL_NAMES:
+            return PED_MODEL_NAMES[candidate]
+    return None
 
 
 def present_names(state: Any) -> set[str]:
     """Every story character the agent can legitimately talk about right now:
-    whoever is in `nearby.peds` this tick, plus whoever he currently IS.
+    whoever is in `nearby.peds` this tick, whoever `mission.entity_blips[]`
+    names (v1.11), plus whoever he currently IS.
 
     `player.protagonist` is included because he is always entitled to refer to
     himself by name — he is the one person guaranteed to be on screen.
+
+    `mission.entity_blips[].name` (CONTRACTS v1.11) is the game's own
+    map-legend text for a blip pinned to a ped/vehicle, and it outlives
+    `nearby.peds`' ~50 m radius: when a followed crewmate drives off, his dot
+    (and his name) are still here even though he vanished from `nearby`. Before
+    this, a true line like "Lamar's a ghost now, his dot is way out there" was
+    silenced as a hallucination, because the only source this function read
+    was a list the man had already left.
     """
     names: set[str] = set()
     protagonist = getattr(getattr(state, "player", None), "protagonist", None)
@@ -98,7 +131,41 @@ def present_names(state: Any) -> set[str]:
         found = name_for_model(getattr(ped, "model", None))
         if found:
             names.add(found)
+    blips = getattr(getattr(state, "mission", None), "entity_blips", None) or []
+    for blip in blips:
+        name = getattr(blip, "name", None)
+        if isinstance(name, str) and name.strip():
+            names.add(name.strip())
     return names
+
+
+def has_unidentified_friendly(state: Any) -> bool:
+    """Is there a `friendly` ped nearby whose model we cannot name?
+
+    If so, the grounding check must stay quiet: a friendly ped in a mission is
+    almost always a named crew member, and one we have no entry for could be
+    exactly the person the line names. Absence of evidence is not evidence of
+    absence — and silencing a TRUE line is worse than letting one through.
+    """
+    peds = getattr(getattr(state, "nearby", None), "peds", None) or []
+    return any(
+        getattr(p, "relationship", None) == "friendly" and name_for_model(getattr(p, "model", None)) is None
+        for p in peds
+    )
+
+
+#: Words that mean "this person is NOT here", which is a perfectly true thing to
+#: say about somebody who is not here. Observed live 2026-09-02: the check
+#: silenced "Lamar's a ghost now" and "empty Lamar-shaped hole" during a follow
+#: mission where Lamar had genuinely vanished — the single most interesting
+#: thing happening, and accurate. The harm this check exists to prevent is
+#: asserting that an absent character is PRESENT and doing things; narrating
+#: their absence is the opposite of that.
+_ABSENCE_WORDS = (
+    "gone", "ghost", "missing", "lost", "vanish", "disappear", "nowhere",
+    "no sign", "without", "left me", "ditched", "shook me", "empty", "alone",
+    "where is", "where's", "lose", "losing", "lost him", "shows", "turns up",
+)
 
 
 def absent_names_mentioned(text: str, allowed: Iterable[str]) -> list[str]:
@@ -107,8 +174,15 @@ def absent_names_mentioned(text: str, allowed: Iterable[str]) -> list[str]:
     Word-boundary matching on the CHECKED_NAMES set only. A name that is not in
     the table is not challenged (we have no opinion about it), and a name that
     IS in the table but present in `allowed` is fine.
+
+    A line that is plainly ABOUT somebody's absence is allowed to name them —
+    see :data:`_ABSENCE_WORDS`.
     """
     import re
+
+    lowered = text.lower()
+    if any(word in lowered for word in _ABSENCE_WORDS):
+        return []
 
     permitted = {n.lower() for n in allowed}
     offenders: list[str] = []
@@ -118,6 +192,16 @@ def absent_names_mentioned(text: str, allowed: Iterable[str]) -> list[str]:
         if re.search(rf"\b{re.escape(name)}\b", text, flags=re.IGNORECASE):
             offenders.append(name)
     return sorted(offenders)
+
+
+def _looks_like_a_story_ped(model: str) -> bool:
+    """Story peds are named models (`ig_*`, or a bare personal name); ambient
+    crowd peds are coded (`genstreet01amy`, `stwhi02amy`, `beach01amo` — all
+    seen live). The digits are the tell: no story character's model carries a
+    two-digit crowd index."""
+    import re
+
+    return not re.search(r"\d", model)
 
 
 def unknown_story_models(state: Any) -> list[str]:
@@ -130,6 +214,6 @@ def unknown_story_models(state: Any) -> list[str]:
     unknown: set[str] = set()
     for ped in peds:
         model = (getattr(ped, "model", None) or "").strip().lower()
-        if model.startswith("ig_") and model not in PED_MODEL_NAMES:
+        if model and name_for_model(model) is None and _looks_like_a_story_ped(model):
             unknown.add(model)
     return sorted(unknown)

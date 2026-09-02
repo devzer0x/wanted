@@ -44,6 +44,7 @@ from wasted_harness.behavior.recovery import (
     TaskStallDetector,
     ThreatLatch,
 )
+from wasted_harness.behavior.roam import HouseEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.brain.director import DirectorCadence
 from wasted_harness.brain.tactical import DecisionFailedError, TacticalCadence
@@ -363,6 +364,12 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     # the stranded escalator and the L2 wander reflex), so the real one is
     # wired here rather than stood in for — it makes no network calls.
     h.planner = DayPlanner(rng)
+    # The real roam engine: free roam's single owner. `_handle_mission_events`
+    # resets its "the story has to move" clock and `_reflex` reads its
+    # standing-still measure, so stubbing it out would stop testing exactly the
+    # machinery that keeps him from standing there.
+    h.roam = RoamEngine(rng)
+    h.house_escape = HouseEscape()
     h.stuck = StuckDetector()
     h.task_stall = TaskStallDetector()
     h.stranded = StrandedEscalator()
@@ -396,6 +403,8 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     h._park_deadline = 0.0
     h._quiet_until = 0.0
     h._cutscene_active = False
+    h._switch_in_progress = False
+    h._retry_in_flight = False
     h._player_down = False
     h._threat_has_the_wheel = False
     h._screen_blocked = False

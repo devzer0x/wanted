@@ -468,6 +468,9 @@ class _RoutedTarget:
 
     handle: int
     distance: float
+    #: The game's own label for the blip, when it had one ("Lamar"). v1.11; carried
+    #: so `note()` can tell the brain WHO it is tailing rather than a bare handle.
+    name: str | None = None
 
 
 @dataclass
@@ -548,6 +551,9 @@ class MissionFollower:
     #: (§1: handles are valid only while the entity exists), which is why it is
     #: re-read from `/state` every tick and never cached across a target change.
     _follow_handle: int | None = None
+    #: The game's own label for whoever is being tailed, when a v1.11 entity blip
+    #: supplied one. Purely for `note()` — the brain reads "tailing Lamar", not a handle.
+    _follow_name: str | None = None
     _follow_distance: float | None = None
     _follow_best_distance: float | None = None
     _follow_gap_since: float | None = None
@@ -595,6 +601,7 @@ class MissionFollower:
 
     def _end_follow(self) -> None:
         self._follow_handle = None
+        self._follow_name = None
         self._follow_distance = None
         self._follow_best_distance = None
         self._follow_gap_since = None
@@ -725,11 +732,34 @@ class MissionFollower:
             distance=planar_distance(here, (best.pos.x, best.pos.y, best.pos.z)),
         )
 
+    def _map_dot_target(self, state: GameState) -> Any:
+        """The map dot dressed up as something the tail logic can hold.
+
+        Same stand-in shape `_routed_entity` returns (`.handle`/`.distance`, plus a
+        `.name` when the game labelled it), so the gap, latch and escalation logic
+        below is shared rather than duplicated.
+        """
+        dot = self._best_map_dot(state)
+        if dot is None:
+            return None
+        return _RoutedTarget(
+            handle=dot.handle,
+            distance=getattr(dot, "distance", 0.0) or 0.0,
+            name=getattr(dot, "name", None),
+        )
+
     def _follow_friendly(self, state: GameState) -> dict[str, Any] | None:
         now = self.clock()
         # The game's own route wins; the nearest friendly is the fallback for
-        # when it has not plotted one (on-foot follows, and any pre-v1.8 bridge).
-        friendly = self._routed_entity(state) or self._nearest_friendly(state)
+        # when it has not plotted one (on-foot follows, and any pre-v1.8 bridge);
+        # and an entity blip (v1.11) is the fallback after THAT, because it is the
+        # only source that survives the ~50 m ped-scan radius — the map dot is
+        # still there when the man himself is out of sensor range.
+        friendly = (
+            self._routed_entity(state)
+            or self._nearest_friendly(state)
+            or self._map_dot_target(state)
+        )
         if friendly is None:
             return self._friendly_missing(state, now)
 
@@ -739,6 +769,7 @@ class MissionFollower:
             # `_end_follow` also resets the recovery ladder for the new episode.
             self._end_follow()
             self._follow_handle = friendly.handle
+            self._follow_name = getattr(friendly, "name", None)
             self._follow_best_distance = distance
             log.info(
                 "no objective marker; tailing the friendly blue dot instead",
@@ -978,7 +1009,7 @@ class MissionFollower:
     #: — already outranks this whole method from `_follow_friendly`, so it is
     #: not repeated here.
     _RECOVERY_RUNGS: tuple[str, ...] = (
-        "vehicle_handoff", "nearest_vehicle", "reacquire", "exhausted",
+        "vehicle_handoff", "nearest_vehicle", "map_dot", "reacquire", "exhausted",
     )
 
     def _try_recovery_rungs(self, state: GameState, now: float) -> dict[str, Any] | None:
@@ -1016,6 +1047,22 @@ class MissionFollower:
             return task
         return None
 
+    @staticmethod
+    def _best_map_dot(state: GameState) -> Any:
+        """The entity blip most likely to BE the target we just lost.
+
+        Preference, strongest evidence first: the one the game has plotted a route to
+        (`is_route`), then a named one (an unnamed dot is more likely scenery than crew),
+        then the nearest. Returns None when the bridge is pre-v1.11 or nothing is marked.
+        """
+        blips = [b for b in getattr(state.mission, "entity_blips", []) or [] if getattr(b, "handle", None)]
+        if not blips:
+            return None
+        routed = [b for b in blips if getattr(b, "is_route", False)]
+        named = [b for b in blips if getattr(b, "name", None)]
+        pool = routed or named or blips
+        return min(pool, key=lambda b: getattr(b, "distance", 0.0) or 0.0)
+
     def _recovery_rung_action(
         self, rung: str, state: GameState, now: float
     ) -> tuple[dict[str, Any], str] | None:
@@ -1034,6 +1081,34 @@ class MissionFollower:
             note = (
                 f"MISSION NAV: the friendly I was tailing vanished at {last_dist} — almost "
                 f"certainly got into a vehicle; following their car (handle {handle})."
+            )
+            return task, note
+
+        if rung == "map_dot":
+            # CONTRACTS v1.11: `mission.entity_blips[]` are blips pinned to a ped or a
+            # vehicle, present whether or not the game drew a route. They outlive
+            # `nearby.peds`' ~50 m radius, which is exactly the window this ladder is
+            # recovering from — and they carry the game's own label ("Lamar").
+            #
+            # OBSERVED LIVE 2026-09-02: he lost the crewmate at close range and then drove
+            # around at random ("No sign of him anywhere. Widening the search") while the
+            # dot sat on the minimap the whole time. A LIVE dot beats the `reacquire`
+            # rung below, which only knows where the man WAS when he vanished.
+            dot = self._best_map_dot(state)
+            if dot is None:
+                return None
+            who = f" ({dot.name})" if getattr(dot, "name", None) else ""
+            distance = getattr(dot, "distance", None)
+            out = f"{distance:.0f}m" if isinstance(distance, (int, float)) else "an unknown range"
+            # Follow the entity when we can: the engine tracks it as it moves, where a
+            # coordinate goes stale the moment he drives on.
+            task = {
+                "type": "follow_entity",
+                "params": {"handle": dot.handle, "in_vehicle": state.player.in_vehicle},
+            }
+            note = (
+                f"MISSION NAV: lost him from close range, but his dot is still on the map "
+                f"{out} out{who} — going to it."
             )
             return task, note
 
@@ -1152,7 +1227,8 @@ class MissionFollower:
                     f"and PULLING AWAY. follow_entity has no speed setting; if you want him "
                     f"caught, drive there yourself."
                 )
-            return f"MISSION NAV: no marker — tailing the friendly (blue dot), {dist} out."
+            who = f" — {self._follow_name}" if self._follow_name else ""
+            return f"MISSION NAV: no marker — tailing the friendly (blue dot){who}, {dist} out."
         if self._target is None:
             return "MISSION NAV: not pursuing (no objective blip yet, or a cutscene is playing)."
         if self._best_distance_at is not None and self.clock() - self._best_distance_at > self.stuck_window_s:

@@ -39,6 +39,7 @@ from wasted_harness.behavior.recovery import (
     TaskStallDetector,
     ThreatLatch,
 )
+from wasted_harness.behavior.roam import HouseEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.bridge_client import GameState
 from wasted_harness.main import Harness
@@ -122,6 +123,11 @@ class StubHarness:
         self.stuck = StuckDetector()
         self.task_stall = TaskStallDetector()
         self.stranded = StrandedEscalator()
+        # `_reflex` tries the house-escape ladder BEFORE the stranded ladder and
+        # measures how long he has stood still with the roam engine, so both are
+        # real here — a stub would hide the ordering that is the point of them.
+        self.roam = RoamEngine(random.Random(1))
+        self.house_escape = HouseEscape()
         self.threat_latch = ThreatLatch()
         self.damage = DamageTracker()
         self.vehicle = VehicleController()

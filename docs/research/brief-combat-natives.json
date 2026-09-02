@@ -1,0 +1,49 @@
+{
+ "answer": "Combat/self-defence research for WANTED (2026-09-02). Sources: SHVDN main source + the PINNED bridge/lib/ScriptHookVDotNet3.dll (members verified present), citizenfx/natives master, and R*'s own decompiled scripts (indilo53/v-decompiled-scripts). HEADLINE: (1) TASK_COMBAT_HATED_TARGETS_AROUND_PED needs at least one ped whose relationship toward the player is Neutral/Dislike/Hate or the created CTaskCombatClosestTargetInArea EXITS IMMEDIATELY - a carjack victim is plausibly still Respect/Like toward PLAYER, which is very likely why the agent's retaliation reflex does nothing. It also only ever attacks ONE target (the closest). Use target-explicit TASK_COMBAT_PED instead. (2) TASK_PUT_PED_DIRECTLY_INTO_MELEE (0x1C6CD14A876FFE39) IS CONFIRMED to work on PLAYER_PED_ID(): R* calls it that way in player_scene_t_bbfight (args player, target, 0f, -1f, 0f, 0), and SHVDN documents 'timeInTask only applies when the Ped being given the task is a player one' - direct evidence its maintainers verified player-ped behaviour. For a player ped it builds CTaskMelee directly. THIS is the instant punch-back. (3) PRE-DAMAGE detection beats damage accumulation: GET_MELEE_TARGET_FOR_PED (0x18A3E9EE1297FD39, SHVDN Ped.MeleeTarget) is valid WHILE THE SWING ANIMATION PLAYS - iterate nearby peds and if MeleeTarget == playerPed you are being punched right now, before impact; IS_PED_IN_COMBAT(ped, playerPed) (0x4859F1FC66A6278E, SHVDN Ped.IsInCombatAgainst) goes true the frame the ambient script tasks the victim, before the first punch. (4) CA_LEAVE_VEHICLES (attribute 3) set FALSE is the direct fix for 'exits a good car to fistfight'; in-vehicle the R*-sanctioned answer is TASK_VEHICLE_MISSION_PED_TARGET with VehicleMissionType.Flee=8 (re_cartheft does exactly this). (5) TASK_COMBAT_PED(ped, target, 0, 16): SHVDN names the magic 16 = TaskThreatResponseFlags.CanFightArmedPedsWhenNotArmed. (6) HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY is STICKY - CLEAR_ENTITY_LAST_DAMAGE_ENTITY every tick or 'who hit me' is stale forever (R*'s own re_cartheft pattern). SHVDN FOOTGUNS: Ped.IsInCombat calls the 2-arg native with ONE argument (use IsInCombatAgainst); Entity.HasBeenDamagedBy hardcodes bCheckDamagerVehicle=1 (call raw with 0 for melee attribution). FAIRNESS JUDGMENTS: legitimate attributes = 0 CA_USE_COVER, 5 CA_ALWAYS_FIGHT, 12 blind-fire, 13 CA_AGGRESSIVE, 21 chase on foot, 42 flank, 43/44 cover switching, 46 CA_CAN_FIGHT_ARMED_PEDS_WHEN_NOT_ARMED, 54 CA_ALWAYS_EQUIP_BEST_WEAPON, and 3 CA_LEAVE_VEHICLES=false; CHEATS to refuse = 27 CA_PERFECT_ACCURACY (aimbot), 30 CA_CAN_SHOOT_WITHOUT_LOS, 55 see-underwater, 38 disable-bullet-reactions, SET_PED_ACCURACY>=75, SET_PED_SHOOT_RATE>150, GIVE_WEAPON_TO_PED, TASK_LEAVE_VEHICLE flag 16 (teleport out), CLEAR_PLAYER_WANTED_LEVEL, SET_POLICE_IGNORE_PLAYER. Selecting a weapon he ALREADY OWNS (SET_CURRENT_PED_WEAPON / Ped.Weapons.Select, guarded by HAS_PED_GOT_WEAPON) is legitimate - one keypress for a human. POLICE: flee AWAY FROM GET_PLAYER_WANTED_CENTRE_POSITION (0x0C92BA89F1AF26F8), watch ARE_PLAYER_STARS_GREYED_OUT (0x0A6EB355EE14A2DB, = cops lost you, searching) and ARE_PLAYER_FLASHING_STARS_ABOUT_TO_DROP (0xAFAF86043E5874E9), IS_PLAYER_BEING_ARRESTED(player, 1) fires while hands go up and is still recoverable. GET_WANTED_LEVEL_RADIUS does nothing in GTA V (GTA IV remnant).",
+ "facts": [
+  {
+   "claim": "TASK_COMBAT_HATED_TARGETS_AROUND_PED 0x7BF835BB9E2698C8: p2 is a TaskCombatFlags not a bool; attacks only the CLOSEST target; requires >=1 ped with relationship Neutral/Dislike/Hate toward the player or the task exits immediately",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/Task/TaskInvoker.cs (XML remarks) + https://github.com/citizenfx/natives/blob/master/TASK/TaskCombatHatedTargetsAroundPed.md"
+  },
+  {
+   "claim": "TASK_PUT_PED_DIRECTLY_INTO_MELEE 0x1C6CD14A876FFE39 works on the PLAYER ped: R* calls TASK_PUT_PED_DIRECTLY_INTO_MELEE(PLAYER_PED_ID(), enemyPed, 0f, -1f, 0f, 0); SHVDN documents timeInTask as 'Only applies when the Ped being given the task is a player one' and that CanFightArmedPedsWhenNotArmed is implicitly set only for AI/NPC peds",
+   "source": "https://github.com/indilo53/v-decompiled-scripts/blob/master/player_scene_t_bbfight.ysc.c (L1144) + SHVDN TaskInvoker.cs"
+  },
+  {
+   "claim": "GET_MELEE_TARGET_FOR_PED 0x18A3E9EE1297FD39 (SHVDN Ped.MeleeTarget) reads CTaskMeleeActionResult's target and is valid while the swing animation plays - i.e. BEFORE impact. IS_PED_IN_COMBAT 0x4859F1FC66A6278E (Ped.IsInCombatAgainst) is true the frame the attacker's CTaskCombat targets you",
+   "source": "https://github.com/citizenfx/natives/blob/master/PED/GetMeleeTargetForPed.md + SHVDN Ped.cs"
+  },
+  {
+   "claim": "SHVDN BUGS: Ped.IsInCombat calls the two-arg IS_PED_IN_COMBAT with only one argument (Ped.cs ~L2028); Entity.HasBeenDamagedBy hardcodes bCheckDamagerVehicle = 1 (Entity.cs ~L875), so a ped whose CAR clipped you registers as the melee damager",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/Ped.cs and .../Entities/Entity.cs"
+  },
+  {
+   "claim": "HAS_ENTITY_BEEN_DAMAGED_BY_ENTITY 0xC86D67D52A707CF8 is sticky until CLEAR_ENTITY_LAST_DAMAGE_ENTITY 0xA72CD9CA74A5ECBA; R*'s re_cartheft clears it every cycle and guards re-tasking with IS_PED_IN_COMBAT before re-issuing TASK_COMBAT_PED(ped, target, 0, 16)",
+   "source": "https://github.com/indilo53/v-decompiled-scripts/blob/master/re_cartheft.ysc.c (L370, L458, L494-496)"
+  },
+  {
+   "claim": "TASK_COMBAT_PED 0xF166E48407BAC484: SHVDN names p2 TaskCombatFlags (None=0, UseFlinchAimIntro=16384, ArrestTarget=65536, PreventChangingTarget=67108864, ...) and p3 TaskThreatResponseFlags (None=0, CanFightArmedPedsWhenNotArmed=16), so R*'s magic 16 is CanFightArmedPedsWhenNotArmed",
+   "source": "https://github.com/scripthookvdotnet/scripthookvdotnet/blob/main/source/scripting_v3/GTA/Entities/Peds/Task/TaskInvoker.cs (L185-188)"
+  },
+  {
+   "claim": "In-vehicle answer is drive away: R*'s re_cartheft uses TASK_VEHICLE_MISSION_PED_TARGET(ped, vehicle, targetPed, 8 /*Flee*/, ...). Attribute 3 CA_LEAVE_VEHICLES false forces staying in the vehicle; 6 CA_FLEE_WHILST_IN_VEHICLE and 2 CA_DO_DRIVEBYS gate the rest. TASK_LEAVE_VEHICLE flag 16 teleports the ped out (a cheat)",
+   "source": "https://github.com/indilo53/v-decompiled-scripts/blob/master/re_cartheft.ysc.c (L341, L635) + https://github.com/citizenfx/natives/blob/master/TASK/TaskLeaveVehicle.md"
+  },
+  {
+   "claim": "Police evasion signals: ARE_PLAYER_STARS_GREYED_OUT 0x0A6EB355EE14A2DB (cops lost you / searching), ARE_PLAYER_FLASHING_STARS_ABOUT_TO_DROP 0xAFAF86043E5874E9, GET_PLAYER_WANTED_CENTRE_POSITION 0x0C92BA89F1AF26F8 (flee away from THIS, not from a cop), IS_PLAYER_BEING_ARRESTED 0x388A47C51ABDAC8E (atArresting=1 fires while still controllable). GET_WANTED_LEVEL_RADIUS is a GTA IV remnant and does nothing in GTA V",
+   "source": "https://github.com/citizenfx/natives/tree/master/PLAYER + SHVDN Wanted.cs"
+  },
+  {
+   "claim": "NOT CONFIRMED: whether SET_PED_COMBAT_ATTRIBUTES/_ABILITY/_ACCURACY/_SHOOT_RATE modulate a PLAYER ped running CTaskCombat (R* only ever sets attribute 2 on the player, in am_taxi; zero precedent for TASK_COMBAT_PED on PLAYER_PED_ID) - must be A/B measured live; TASK_DRIVE_BY on a player ped (NativeDB says it does nothing, TwoPlayerMod uses it successfully - direct conflict); SET_PED_COMBAT_ABILITY effect size (a tester reports no difference between 0/1/2); SET_PED_COMBAT_MOVEMENT value 3 (SHVDN WillRetreat vs NativeDB 'Suicidal Offensive'); the default relationship of an ambient carjack victim toward PLAYER (measurable in one tick with GET_RELATIONSHIP_BETWEEN_PEDS - this decides whether combat_hated_targets_around can ever fire)",
+   "source": "research session 2026-09-02"
+  },
+  {
+   "claim": "Prior art: Vampire-Chan/Guard-The-AREA mirrors the enemy's weapon class (unarmed enemy -> select Unarmed) and warns 'DON'T block permanent events - it prevents combat reactions'; BenjaminFaal/TwoPlayerMod uses Ped.AlwaysKeepTask + SET_BLOCKING_OF_NON_TEMPORARY_EVENTS(true) + attribute 46 (contradicts Guard-The-AREA; for the agent do NOT block permanent events - the engine's reflexes are wanted)",
+   "source": "https://github.com/Vampire-Chan/Guard-The-AREA + https://github.com/BenjaminFaal/TwoPlayerMod/blob/master/PlayerPed.cs"
+  },
+  {
+   "claim": "IS_PED_ARMED 0x475768A975D5AD17 BOOL(Ped, int typeFlags) - bit 1 = melee, bit 2 = explosive/projectile, bit 4 = other/gun (guns); passing 0 ALWAYS returns false. SHVDN exposes Ped.IsArmed(WeaponCheckFlags) with IncludeMelee=1, IncludeProjectile=2, IncludeGun=4, All=7. This is the bitmask behind nearby.peds[].weapon_class in CONTRACTS v1.11",
+   "source": "https://github.com/citizenfx/natives/blob/master/WEAPON/IsPedArmed.md"
+  }
+ ]
+}

@@ -29,6 +29,9 @@ namespace WastedBridge
         [JsonProperty("in_vehicle")] public bool InVehicle;
         [JsonProperty("control_enabled")] public bool ControlEnabled;
         [JsonProperty("protagonist")] public string Protagonist;   // v1.7: michael|franklin|trevor|unknown
+        // v1.11: IS_PLAYER_SWITCH_IN_PROGRESS - true while the camera is mid-flight between
+        // protagonists. The real signal behind "wrong body / waiting for the switch" commentary.
+        [JsonProperty("switch_in_progress")] public bool SwitchInProgress;
     }
 
     internal sealed class VehicleDto
@@ -86,6 +89,30 @@ namespace WastedBridge
         [JsonProperty("color")] public string Color;
     }
 
+    /// <summary>
+    /// CONTRACTS v1.11: a blip ATTACHED TO AN ENTITY (a ped or a vehicle), whether or not the game
+    /// has plotted a route to it. This is the blue dot a follow mission puts on a crewmate.
+    ///
+    /// Why it exists, observed live 2026-09-02: `nearby.peds[]` reaches ~50 m, so the moment the
+    /// crewmate being tailed drove off he vanished from /state entirely and the agent went looking for
+    /// him by driving around at random - while the game was drawing his position on the minimap the
+    /// whole time. `route_blips[]` did not cover it: that list is route-enabled blips only, and a
+    /// plain blue crew dot usually has no route. Entity attachment is a FACT (the blip is pinned to
+    /// a specific entity) rather than a colour convention, which is the same reasoning
+    /// `objective_blip` already uses for routes.
+    /// </summary>
+    internal sealed class EntityBlipDto
+    {
+        [JsonProperty("pos")] public Vec3Dto Pos;
+        [JsonProperty("handle")] public int Handle;      // the ENTITY handle, never the blip's
+        [JsonProperty("color")] public string Color;     // BlipColor member name, or its integer
+        [JsonProperty("is_route")] public bool IsRoute;  // the game is also drawing a route to it
+        [JsonProperty("distance")] public float Distance;
+        // v1.11: Blip.GetAppropriateName() - the map-legend text ("Lamar", "Objective"), or null
+        // when empty/unavailable. Turns an anonymous dot into a name with no OCR.
+        [JsonProperty("name")] public string Name;
+    }
+
     internal sealed class MissionDto
     {
         [JsonProperty("active")] public bool Active;
@@ -102,6 +129,12 @@ namespace WastedBridge
         // v1.10: the active story-mission script name (e.g. "armenian1"), or null. Only ever
         // non-null while "active" is true.
         [JsonProperty("script")] public string Script;
+        // v1.11: blips pinned to a ped/vehicle, nearest first, at most 8. Always an array.
+        [JsonProperty("entity_blips")] public List<EntityBlipDto> EntityBlips = new List<EntityBlipDto>();
+        // v1.11: true while a "mission_repeat_controller" script thread is running (the
+        // checkpoint-reload/retry executor - see docs/research/brief-mission-comprehension.json).
+        // Detected from the same script-thread walk mission.script already runs.
+        [JsonProperty("retry_in_flight")] public bool RetryInFlight;
     }
 
     internal sealed class NearbyVehicleDto
@@ -124,12 +157,36 @@ namespace WastedBridge
         [JsonProperty("pos")] public Vec3Dto Pos;                 // v1.6: world position - the minimap dot, as data
         // v1.10: the vehicle handle this ped is currently seated in, or null on foot.
         [JsonProperty("in_vehicle_handle")] public int? InVehicleHandle;
+        // v1.11: true if this ped's melee-target is the player, the game already has it tasked
+        // in combat against the player, or it has damaged the player this tick (see
+        // SnapshotBuilder's threat scan). True BEFORE the first punch lands where possible.
+        [JsonProperty("attacking_me")] public bool AttackingMe;
+        // v1.11: "unarmed"|"melee"|"gun"|"projectile"|"unknown" - IS_PED_ARMED bit classification
+        // of this ped's CURRENT weapon. Drives fight_ped's melee-vs-ranged response.
+        [JsonProperty("weapon_class")] public string WeaponClass;
     }
 
     internal sealed class NearbyDto
     {
         [JsonProperty("vehicles")] public List<NearbyVehicleDto> Vehicles = new List<NearbyVehicleDto>();
         [JsonProperty("peds")] public List<NearbyPedDto> Peds = new List<NearbyPedDto>();
+    }
+
+    /// <summary>
+    /// CONTRACTS v1.11: the reflex-relevant "who is hurting me right now" summary, derived from
+    /// the same per-tick threat scan that sets nearby.peds[].attacking_me. Root-caused fix for
+    /// the 2026-09-02 live bug: a carjack victim, plausibly still Respect/Like toward the player,
+    /// punched the agent to death because TASK_COMBAT_HATED_TARGETS_AROUND_PED silently no-ops
+    /// without a Neutral/Dislike/Hate relationship. attacker_handle lets the harness target
+    /// fight_ped explicitly instead of depending on the hated-relationship gate.
+    /// </summary>
+    internal sealed class ThreatDto
+    {
+        // Nearest ped with attacking_me true, or null. Always present as an object (never itself
+        // null) - only the two fields inside are nullable.
+        [JsonProperty("attacker_handle")] public int? AttackerHandle;
+        // GET_PEDS_JACKER(player) while IS_PED_BEING_JACKED(player) is true, else null.
+        [JsonProperty("being_jacked_by")] public int? BeingJackedBy;
     }
 
     internal sealed class LastTaskDto
@@ -160,6 +217,9 @@ namespace WastedBridge
         [JsonProperty("world")] public WorldDto World;
         [JsonProperty("mission")] public MissionDto Mission;
         [JsonProperty("nearby")] public NearbyDto Nearby;
+        // v1.11: always a present object (see ThreatDto); defaulted so a builder that forgets to
+        // set it still serializes the documented shape.
+        [JsonProperty("threat")] public ThreatDto Threat = new ThreatDto();
         [JsonProperty("last_task")] public LastTaskDto LastTask;
         [JsonProperty("bridge")] public BridgeInfoDto Bridge;
     }

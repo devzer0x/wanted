@@ -1,9 +1,61 @@
 # WANTED — CONTRACTS
 
-**Version: 1.10 — FROZEN 2026-09-02.** Executors treat this file as read-only; changes go through
+**Version: 1.11 — FROZEN 2026-09-02.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
 Changelog:
+- v1.11 (behavioural, from three sourced research passes after the operator asked "isn't there a
+  mod that makes him a pro": docs/research/brief-driving-natives.json, brief-combat-natives.json,
+  brief-mission-comprehension.json). The answer was that the "mod" is Script Hook V + SHVDN, which
+  we already run — the gap was native API we were not calling. Bridge 1.2.0 → **1.4.0**.
+  **New `/state` fields (all additive):**
+  1. `mission.entity_blips[]` = `[{pos:{x,y,z}, handle, color, is_route: bool, distance: float,
+     name: string|null}]`, nearest first, at most 8 — every blip PINNED TO AN ENTITY (a ped or a
+     vehicle), **whether or not the game has plotted a route to it**. `route_blips[]` only ever
+     carried route-enabled blips, and a crew "blue dot" usually has none, so when the crewmate
+     being followed drove beyond the ~50 m `nearby.peds` radius he vanished from `/state`
+     completely and the agent searched for him by driving at random — while the game was drawing his
+     position on the minimap the whole time. `name` is the blip's own map-legend text
+     (`Blip.GetAppropriateName()`): "Lamar", "Objective". Entity attachment is a FACT, not a colour
+     convention — the same reasoning `objective_blip` already applies to routes.
+  2. `nearby.peds[].attacking_me: bool` and `.weapon_class: "unarmed"|"melee"|"gun"|"projectile"|"unknown"`.
+     `attacking_me` is true when the ped's melee target IS the player (valid **while the swing
+     animation plays**, i.e. before impact), when the ped is in combat against the player (true the
+     frame the game tasks them, before the first punch), or when the player has been damaged by
+     that ped. Damage attribution deliberately ignores vehicle damage, so a ped whose car clipped
+     us is not called an attacker.
+  3. `threat` = `{attacker_handle: int|null, being_jacked_by: int|null}` — the nearest ped currently
+     attacking, and whoever is pulling him out of a car.
+  4. `player.switch_in_progress: bool` — a protagonist switch is playing. This is the real signal
+     behind the agent narrating "wrong body / waiting for the switch": the game was mid-switch and he
+     had no field that said so.
+  5. `mission.retry_in_flight: bool` — the game's own `mission_repeat_controller` script thread is
+     running, i.e. a retry / checkpoint reload is in progress. Read from the same thread walk that
+     already produces `mission.script`.
+  **New §1 task type — `fight_ped` `{handle}`:** fight one NAMED ped. The bridge picks the
+  mechanism from the target's weapon class: unarmed/melee → the engine's direct-melee task, which
+  is CONFIRMED to work on the player ped (Rockstar's own `player_scene_t_bbfight` calls it that
+  way); armed → the combat task. `failed`/`"target_lost"` when the handle does not resolve; `done`
+  when the target is dead or gone. **Why a new verb was needed:** `combat_hated_targets_around`
+  requires at least one ped whose relationship toward the player is Neutral/Dislike/Hate or the
+  engine task EXITS IMMEDIATELY, and a civilian whose car the agent just stole is plausibly still
+  Respect/Like — so the only retaliation action in the vocabulary had been a silent no-op, which is
+  why he stood still and was beaten to death on stream. `fight_ped` is target-explicit and needs no
+  relationship setup. `combat_hated_targets_around` is unchanged and still available.
+  **Behavioural changes with no wire change:** the `avoid_traffic` driving style was the game's
+  RECKLESS preset (documented as "doesn't use the brakes at ALL to help with steering") and is
+  retuned — §1 already states the style NAMES are the contract and the bridge may tune the bit
+  values; an in-vehicle `follow_entity` now uses the engine's mission-follow task with a
+  straight-line-to-target distance, which is what stops him losing a target at junctions; a wedged
+  car is recovered with reverse / reverse-and-turn nudges (never a teleport); and while he is in a
+  vehicle the engine is told not to let him get out to fight, because leaving a working car to
+  fistfight the owner is how he died.
+  **Declared assist (not a cheat, recorded here on purpose):** the bridge sets the engine's own
+  driver-ability and aggressiveness for the player ped (0.8 / 0.5–0.8). Both are engine-clamped to
+  1.0 and change AI COMPETENCE, not vehicle physics — no extra grip, torque or invulnerability.
+  **Refused as cheats** and absent from the code: perfect-accuracy and shoot-through-walls combat
+  attributes, accuracy/shoot-rate above human range, giving weapons or ammo, the teleport-out
+  vehicle-exit flag, wanted-level clearing, police-ignore, and self-righting a flipped car.
 - v1.10 (root-caused from the 2026-09-02 live follow-mission failure — "drives and then stops").
   Four changes, three additive and one a semantic DEFECT FIX:
   1. **`objective_blip.handle` / `route_blips[].handle` now carry the ENTITY handle when
@@ -213,6 +265,17 @@ Field notes:
   own Companion/Like/Respect relationship towards the player, i.e. mission crewmates. `pos` (v1.6)
   = world position, same shape as `player.pos`; vehicles carry it too. `in_vehicle_handle`
   (v1.10) = the vehicle the ped is currently seated in, or null on foot.
+- `mission.entity_blips[]` (v1.11, nearest first, at most 8): `{"pos": {x,y,z}, "handle": <entity>,
+  "color": "<BlipColor member name>", "is_route": bool, "distance": float, "name": "<map-legend
+  text>"|null}` — blips pinned to a ped/vehicle REGARDLESS of whether a route is drawn. This is the
+  long-range source that outlives `nearby.peds`' ~50 m radius: when the crewmate drives off, his
+  dot (and his name) are still here. `name` comes from the game's own map legend.
+- `mission.retry_in_flight` (v1.11): the game's `mission_repeat_controller` thread is running — a
+  retry/checkpoint reload is in progress. Suppress tasks and commentary while true.
+- `threat` (v1.11): `{"attacker_handle": int|null, "being_jacked_by": int|null}`. `attacker_handle`
+  is the nearest ped with `attacking_me` true — pass it straight to `fight_ped`.
+- `player.switch_in_progress` (v1.11): a protagonist switch is playing. Treat exactly like a
+  cutscene: act on nothing, say nothing about "being the wrong character".
 - `last_task.status` lifecycle: `idle` (no task ever / cleared) → `running` → `done` | `failed`.
   **v1.2:** when no task has ever been posted (fresh bridge load / script reload), `id` and `type`
   are `null`; every consumer must treat them as nullable. `status` and `detail` are always present.
@@ -242,6 +305,7 @@ values empirically (Phase 3) without a contract change.
 | `combat_hated_targets_around` | `{radius_m}` | engine combat task; `done` when no hated targets remain in radius |
 | `seek_cover` | `{duration_s: 10}` | cover reached or timeout |
 | `follow_entity` | `{handle, in_vehicle: bool, style: "ignore_lights", speed_mps: 30.0}` | runs until preempted or entity gone (`failed`, `"target_lost"`). `style`/`speed_mps` apply to the in-vehicle tail only; on foot he always runs. Defaults keep pace with a mission NPC — see v1.9 |
+| `fight_ped` | `{handle}` | v1.11. Fight ONE named ped; the bridge picks melee vs combat from the target's `weapon_class`. `failed`/`"target_lost"` if the handle does not resolve; `done` when the target is dead or gone. Needs no relationship setup, unlike `combat_hated_targets_around` |
 | `set_waypoint` | `{x, y}` | immediate (`done` same tick); map waypoint only, no movement |
 | `stop` | `{}` | clears current task → `idle` |
 

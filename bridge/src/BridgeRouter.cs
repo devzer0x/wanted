@@ -319,6 +319,19 @@ namespace WastedBridge
                     }
                     return true;
                 }
+                case "fight_ped":
+                {
+                    // CONTRACTS v1.11 (root-caused from the 2026-09-02 live "carjack victim punched
+                    // the agent to death" bug): {handle} only - reuses follow_entity's already-frozen
+                    // "handle" wire key. Weapon-class-driven melee-vs-ranged branching happens
+                    // bridge-side in TaskEngine so the harness never needs to know the target's
+                    // weapon class up front.
+                    if (!TryInt(p, "handle", out req.Handle))
+                    {
+                        return Invalid(out error, out detail, "fight_ped requires integer handle");
+                    }
+                    return true;
+                }
                 default:
                     error = "unknown_task_type";
                     detail = "\"" + type + "\" is not a CONTRACTS §1 task type";
