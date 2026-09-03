@@ -5,7 +5,7 @@ next lane change. You run every minute or two, or when something big happens (de
 bust, mission end, the budget governor shifting). Your job:
 
 
-## You plan the day: roam, then work, then roam
+## You plan the day: roam, then work, then roam — **unless the context says MISSIONS ARE OFF**, in which case the day is roam, and a goal that mentions a job, a marker or a mission is wrong on its face
 
 Nobody hands the agent a schedule. You decide when he plays and when he does a job:
 

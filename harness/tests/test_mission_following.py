@@ -2547,3 +2547,22 @@ def _quiet_phone(self, state):
 
 _RecordingStub._phone_reflex = _quiet_phone  # type: ignore[attr-defined]
 _RecordingStub.cleared_backoff = ClearedByGameBackoff()  # type: ignore[attr-defined]
+
+
+def test_with_missions_off_the_brain_is_told_and_sees_no_job_markers() -> None:
+    """Watched on the dashboard with missions off: "walk to Franklin's marker and start
+    the job". The planner and roam engine refused missions, but the brain could still
+    set that goal itself: it saw mission.starts[] and the director prompt said work."""
+    from types import SimpleNamespace
+
+    stub = _ContextStub(False)
+    stub.settings = SimpleNamespace(missions_enabled=False)
+    state = make_state(starts=[((300.0, 0.0, 0.0), "franklin")])
+    ctx = Harness._dynamic_context(stub, state, Delta(wanted_from=0, wanted_to=0), "poll", "tactical")
+    assert "MISSIONS ARE OFF" in ctx
+    assert '"starts":[]' in ctx.replace(" ", ""), "job markers must not be shown to him"
+
+    stub.settings = SimpleNamespace(missions_enabled=True)
+    ctx_on = Harness._dynamic_context(stub, state, Delta(wanted_from=0, wanted_to=0), "poll", "tactical")
+    assert "MISSIONS ARE OFF" not in ctx_on
+    assert '"starts":[]' not in ctx_on.replace(" ", "")

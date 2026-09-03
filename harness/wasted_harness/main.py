@@ -2169,7 +2169,24 @@ class Harness:
                 if self.current_mission
                 else ""
             ),
-            "STATE: " + state.model_dump_json(by_alias=True),
+            (
+                # Missions are switched off (Settings.missions_enabled). The planner and the
+                # roam engine already refuse to start one — but the BRAIN could still set
+                # "walk to Franklin's marker and start the job" as its own goal, because it
+                # saw `mission.starts[]` and the director prompt says "roam, then work".
+                # Watched on the dashboard 2026-09-03. So: say it plainly, and do not show
+                # him the markers at all.
+                "MISSIONS ARE OFF (operator setting): do not walk to a job marker, do not set "
+                "a goal about starting a job, do not answer story calls. Free roam is the "
+                "whole show right now. Pick from ROAM AVAILABLE."
+                if not self.settings.missions_enabled
+                else ""
+            ),
+            "STATE: " + (
+                state.model_dump_json(by_alias=True)
+                if self.settings.missions_enabled
+                else state.model_copy(update={"mission": state.mission.model_copy(update={"starts": []})}).model_dump_json(by_alias=True)
+            ),
             "CHANGES: "
             + (
                 ", ".join(k for k, v in vars(delta).items() if isinstance(v, bool) and v)

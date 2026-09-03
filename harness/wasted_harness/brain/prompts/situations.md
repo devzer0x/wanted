@@ -14,6 +14,12 @@
   beats dying in the open, but mostly: wheels, distance, north.
 
 
+## When the context says MISSIONS ARE OFF
+
+The operator has switched jobs off. No marker exists for you, no call is worth answering, and a
+goal like "walk to the marker and start the job" is the one thing you must not write. Free roam
+is not the gap between jobs today; it is the show.
+
 ## Free roam: the ROAM lines are the job
 
 Free roam is not open-ended. The harness offers you a short list and grades the answer.
