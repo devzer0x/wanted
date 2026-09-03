@@ -236,8 +236,12 @@ class DayPlanner:
         self,
         rng: random.Random | None = None,
         clock: Any = time.monotonic,
+        *,
+        missions_enabled: bool = True,
     ) -> None:
         self._rng = rng or random.Random()
+        #: Operator switch. Off: no mission block is ever scheduled or requested.
+        self._missions_enabled = missions_enabled
         self._clock = clock
 
         self._phase = _Phase.ROAM
@@ -327,6 +331,8 @@ class DayPlanner:
         25 m on-foot final approach the corona needs. Two implementations of that
         trip would be two engines posting into the same slot.
         """
+        if not self._missions_enabled:
+            return
         if self._phase is not _Phase.ROAM or self._mission_requested == reason:
             return
         self._mission_requested = reason
@@ -662,6 +668,8 @@ class DayPlanner:
         return self._overdue_for_a_mission(now)
 
     def _overdue_for_a_mission(self, now: float) -> bool:
+        if not self._missions_enabled:
+            return False
         if self._last_mission_at is None:
             return True  # none yet this session
         return now - self._last_mission_at >= MISSION_OVERDUE_S

@@ -694,7 +694,7 @@ class Harness:
         #: (which is why `self.activities` above is now only the L3 scenic-park
         #: helper and the death-spot memory); the ActivityRunner is kept as the
         #: step machine it always was, driven from here instead of from a pick.
-        self.roam = RoamEngine(self.rng)
+        self.roam = RoamEngine(self.rng, missions_enabled=settings.missions_enabled)
         #: The one thing StrandedEscalator cannot do: get him out of a building.
         #: Runs BEFORE it, because widening a vehicle search from inside a house
         #: just picks a car that is further away and behind more walls.
@@ -708,7 +708,7 @@ class Harness:
         self.mission_follower = MissionFollower()
         #: Decides the SHAPE of the day: roam blocks and mission blocks, and
         #: when to go and stand in a `mission.starts[]` marker. No model call.
-        self.planner = DayPlanner(self.rng)
+        self.planner = DayPlanner(self.rng, missions_enabled=settings.missions_enabled)
         self.stuck = StuckDetector()
         #: The on-foot half of "stuck": `StuckDetector` needs a vehicle and a
         #: driving task, so a task that runs forever and pins him on foot was
@@ -1482,6 +1482,21 @@ class Harness:
                     # while the planner is walking him into a start marker it
                     # owns getting him a car, and a second `enter_nearest_vehicle`
                     # from here would preempt the first one every tick.
+                    self.stranded.reset()
+                elif self.roam.current is not None:
+                    # ...and extended again to a LIVE ROAM GOAL, for the same
+                    # reason and after watching it happen on stream: `stranded`
+                    # is reflex-class, so it outranked roam and preempted every
+                    # goal within two seconds of it being picked —
+                    #     roam goal picked   goal=roam_the_block
+                    #     wheel preempted    owner=roam by=stranded
+                    #     roam goal ended    outcome=preempted duration_s=0.3
+                    # — including `roam_the_block`, whose own plan IS
+                    # `enter_nearest_vehicle`. It was preempting a goal in order
+                    # to do the thing that goal was already doing, forever.
+                    # A man walking to a fight is not stranded. The goal owns
+                    # getting him there, and it has its own stuck watchdog
+                    # (GOAL_STUCK_S, two strikes) for when it genuinely cannot.
                     self.stranded.reset()
                 else:
                     # BEFORE the stranded ladder, and it resets it: from inside
@@ -3004,7 +3019,7 @@ class Harness:
         # The roam engine's memory is all cross-tick derivations about a world
         # that no longer exists — vehicle handles are ephemeral by contract, so
         # "that bus has been stopped for 3 s" is void behind a new game process.
-        self.roam = RoamEngine(self.rng)
+        self.roam = RoamEngine(self.rng, missions_enabled=self.settings.missions_enabled)
         self.house_escape = HouseEscape()
         # Interior-proxy handles belong to the dead process, and so does every
         # exit this run had learned for them.
@@ -3012,7 +3027,7 @@ class Harness:
         self._interior_token = None
         self.missions = MissionTracker()
         self.mission_follower = MissionFollower()
-        self.planner = DayPlanner(self.rng)
+        self.planner = DayPlanner(self.rng, missions_enabled=self.settings.missions_enabled)
         self.death_recovery = DeathArrestRecovery()
         self.blocking_screen_watchdog = BlockingScreenWatchdog()
         self._screen_blocked = False

@@ -1317,8 +1317,17 @@ class RoamEngine:
     exactly one place a movement task can come from.
     """
 
-    def __init__(self, rng: random.Random | None = None, clock: Any = time.monotonic) -> None:
+    def __init__(
+        self,
+        rng: random.Random | None = None,
+        clock: Any = time.monotonic,
+        *,
+        missions_enabled: bool = True,
+    ) -> None:
         self._rng = rng or random.Random()
+        #: Operator switch (Settings.missions_enabled). Off: `start_nearest_mission`
+        #: is never offered and never forced, so free roam is the whole show.
+        self._missions_enabled = missions_enabled
         self._clock = clock
         self.current: LockedGoal | None = None
 
@@ -1464,6 +1473,8 @@ class RoamEngine:
 
     def mission_forced(self) -> bool:
         """Has the story waited long enough that a job is the only thing on offer?"""
+        if not self._missions_enabled:
+            return False
         return (
             self._completed_since_mission >= GOALS_BEFORE_MISSION
             or self._clock() - self._roam_started_at >= ROAM_BEFORE_MISSION_S
@@ -1491,7 +1502,7 @@ class RoamEngine:
 
         # 2. The story has to move.
         job = GOALS_BY_ID["start_nearest_mission"]
-        if self.mission_forced() and job.needs(state, view):
+        if self._missions_enabled and self.mission_forced() and job.needs(state, view):
             # The fallback rides along even here, and it is not decoration.
             # `start_nearest_mission` posts NOTHING itself — picking it hands the
             # trip to DayPlanner. If the planner declines (its own health gate)
@@ -1514,6 +1525,8 @@ class RoamEngine:
         for goal in CATALOG:
             if goal.override_only or goal.fallback:
                 continue
+            if goal.handoff and not self._missions_enabled:
+                continue  # the operator has missions switched off
             if now - self._last_run.get(goal.id, -1e12) < goal.cooldown_s:
                 continue
             if goal.chaos_cost > chaos:

@@ -42,6 +42,12 @@ class Settings:
     state_dir: Path
     pricing_file: Path
     poll_hz: float = field(default=3.0)  # perception poll rate, clamped 2-4 Hz
+    #: Whether the agent may START story missions. Off means: `start_nearest_mission`
+    #: is never offered or forced, the day planner never schedules a mission block,
+    #: and an incoming story call is left to ring out (answering one starts a
+    #: mission whether he is ready or not). Missions that begin some other way are
+    #: still played — this is about not walking into them on purpose.
+    missions_enabled: bool = field(default=True)
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> Settings:
@@ -80,6 +86,8 @@ class Settings:
             overlay_host=_env("WASTED_OVERLAY_HOST", "127.0.0.1"),  # type: ignore[arg-type]
             overlay_port=overlay_port,
             hourly_cap_usd=hourly_cap,
+            missions_enabled=str(_env("WASTED_MISSIONS_ENABLED", "true")).strip().lower()
+            not in ("0", "false", "no", "off"),
             # Both paths are anchored to the package, never to the CWD: on the
             # server the harness starts from a scheduled task whose working
             # directory is not the repo. expanduser() so %USERPROFILE%-style

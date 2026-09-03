@@ -1196,3 +1196,73 @@ def test_gang_trouble_ends_when_he_is_losing() -> None:
         nearby_peds=[_ped(60, "g_m_y_ballasout_01", 8.0, rel="hostile")],
     ))
     assert e.judge(hurt) == "done", "he leaves before the survival ladder has to drag him out"
+
+
+def test_a_live_roam_goal_is_not_stranded() -> None:
+    """Watched on stream 2026-09-03. `stranded` is reflex-class, so it outranked
+    roam and preempted every goal ~2 s after it was picked:
+
+        roam goal picked   goal=roam_the_block
+        wheel preempted    owner=roam by=stranded
+        roam goal ended    outcome=preempted duration_s=0.3
+
+    including `roam_the_block`, whose own plan IS `enter_nearest_vehicle` — it
+    preempted a goal to do the thing that goal was already doing, forever. A man
+    walking to a fight is not stranded; the goal owns getting him there.
+    """
+    import inspect
+
+    from wasted_harness import main as main_mod
+
+    src = inspect.getsource(main_mod.Harness._reflex)
+    assert "self.roam.current is not None" in src, (
+        "the stranded ladder must stand down while a roam goal is live"
+    )
+    guard = src.index("self.roam.current is not None")
+    reset = src.index("self.stranded.reset()", guard)
+    strand_check = src.index("self.stranded.check(state)")
+    assert reset < strand_check, "the reset must come BEFORE the stranded check"
+
+
+# --- missions switched off (Settings.missions_enabled) --------------------------
+# Operator call 2026-09-03: "maybe not do a mission cos dont think he is ready
+# yet". Off means the job is never offered, never forced, and never scheduled —
+# free roam is the whole show until it is switched back on.
+
+
+def test_with_missions_off_the_job_is_never_offered_even_when_a_marker_is_right_there() -> None:
+    e = RoamEngine(random.Random(1), clock=FakeClock(), missions_enabled=False)
+    state = observed(e, make_state(starts=[start((30.0, 0.0, 0.0))]))
+    assert "start_nearest_mission" not in [o.id for o in e.available(state)]
+
+
+def test_with_missions_off_three_goals_do_not_force_the_job() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(1), clock=clock, missions_enabled=False)
+    state = observed(e, make_state(starts=[start((300.0, 0.0, 0.0))]))
+    for _ in range(GOALS_BEFORE_MISSION + 2):
+        e.pick(state, goal_id="roam_the_block")
+        e.close("done")
+        clock.tick(1.0)
+        e.observe(state)
+    assert not e.mission_forced(), "nothing forces a job while missions are off"
+    assert "start_nearest_mission" not in [o.id for o in e.available(state)]
+
+
+def test_with_missions_off_fifteen_minutes_do_not_force_the_job_either() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(1), clock=clock, missions_enabled=False)
+    state = observed(e, make_state(starts=[start((300.0, 0.0, 0.0))]))
+    clock.tick(ROAM_BEFORE_MISSION_S + 60.0)
+    assert not e.mission_forced()
+    offers = [o.id for o in e.available(state)]
+    assert offers and "start_nearest_mission" not in offers, "the menu stays alive without the job"
+
+
+def test_the_planner_never_schedules_or_requests_a_mission_when_off() -> None:
+    from wasted_harness.behavior.planner import DayPlanner
+
+    p = DayPlanner(random.Random(1), missions_enabled=False)
+    assert not p._overdue_for_a_mission(10**9), "never overdue for something switched off"
+    p.request_mission_block("let's get paid")
+    assert not p.in_mission_block, "an explicit request is refused too"
