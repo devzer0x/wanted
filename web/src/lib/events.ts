@@ -60,8 +60,29 @@ export function describeEvent(e: EventRow): string {
     }
     case "activity_start":
       return `Started: ${str(p, "activity") ?? "an activity"}`;
-    case "activity_end":
-      return `Finished: ${str(p, "activity") ?? "an activity"}`;
+    case "activity_end": {
+      // The harness reports HOW a free-roam goal ended (`outcome`) and whether its own completion
+      // test fired (`verified`). "Finished" was shown for every outcome — including a goal he never
+      // moved for — which read as a lie on stream (operator, 2026-09-03: "said finished even when
+      // he didn't"). Only a verified completion is "Finished".
+      const activity = str(p, "activity") ?? "an activity";
+      const outcome = str(p, "outcome");
+      const verified = p?.["verified"] === true;
+      if (outcome === "completed" || (outcome === null && verified)) return `Finished: ${activity}`;
+      const label: Record<string, string> = {
+        timeout: "Gave up on",
+        stuck: "Stuck, dropped",
+        preempted: "Dropped",
+        wanted: "Cops cut short",
+        mission: "Job cut short",
+        player_down: "Cut short",
+        actions_done_goal_unmet: "Didn't work out",
+        escalate: "Didn't work out",
+        bridge_task_lost: "Dropped",
+        no_plan: "Dropped",
+      };
+      return `${outcome !== null && label[outcome] ? label[outcome] : "Ended"}: ${activity}`;
+    }
     case "session_start":
       return "Session started";
     case "session_end":

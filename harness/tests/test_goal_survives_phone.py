@@ -43,10 +43,19 @@ def test_a_goal_survives_answer_call_and_restarts_its_plan() -> None:
     # While the phone task runs nothing is posted over it (it would be preempted).
     assert len(_roam_posts(h)) == before
 
-    # The phone task is done: the goal restarts its plan on the same lock.
-    done = make_state(
+    # The phone task is done and the call is over: the goal restarts its plan on
+    # the same lock. (While `in_call` is still true nothing is posted at all —
+    # the game runs no movement task on a ped on the phone, live 2026-09-03.)
+    still_on_the_phone = make_state(
         in_vehicle=True, task_type="answer_call", task_status="done", task_id="phone-1",
         phone={"ringing": False, "in_call": True},
+    )
+    _run(h, still_on_the_phone, 2)
+    assert h.roam.current is not None and h.roam.current.goal.id == goal_id
+    assert len(_roam_posts(h)) == before, "nothing may be posted while he is on the phone"
+    done = make_state(
+        in_vehicle=True, task_type="answer_call", task_status="done", task_id="phone-1",
+        phone={"ringing": False, "in_call": False},
     )
     _run(h, done, 2)
     assert h.roam.current is not None and h.roam.current.goal.id == goal_id

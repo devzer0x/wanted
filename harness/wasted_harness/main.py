@@ -185,6 +185,15 @@ INITIAL_GOAL = "wake up, find wheels, see what the day wants"
 #: Never the model's free-text `goal`; see `Harness.goal_text`.
 NEUTRAL_GOAL_TEXT = "seeing what Los Santos throws at him next"
 
+#: Movement tasks that must NEVER be re-posted while one is already running,
+#: because a re-post cancels an in-progress sequence before the ped commits and
+#: he freezes in place. `enter_nearest_vehicle` is the one proven in-game
+#: (2026-09-03: re-posting it every 2.5 s → 0.00 m for the whole run, while a
+#: single post walked him to a car); `wander_drive` is here for the same reason
+#: — both are "no coordinates, find/keep going" tasks that a restart resets to
+#: zero, unlike `walk_to`/`drive_to` which carry a target and redirect cleanly.
+RESTART_HOSTILE_TASKS: frozenset[str] = frozenset({"enter_nearest_vehicle", "wander_drive"})
+
 #: T3 (findings.md R2): action types that mean "he is fighting" for the
 #: purposes of gating `say` on an event — the decision itself choosing one of
 #: these is the event, independent of whatever `nearby.peds`/`threat` said a
@@ -759,9 +768,8 @@ def _phone_line(state: GameState, missions_enabled: bool) -> str:
                 "the words. Play whatever it leads to."
             )
         return (
-            "PHONE: a call is connected. Jobs are switched off, so the harness will hang up "
-            "on its own soon (sooner if a fight or a chase is on) — you did not pick the "
-            "words and there is nothing for you to do about the call itself."
+            "PHONE: a call got connected. Jobs are switched off, so the harness is hanging "
+            "up right now — you did not pick the words, and you cannot move while it is up."
         )
     if not phone.ringing:
         return ""
@@ -771,9 +779,8 @@ def _phone_line(state: GameState, missions_enabled: bool) -> str:
             "STARTS THAT JOB. You cannot see who is calling, so do not name them."
         )
     return (
-        "PHONE: ringing — jobs are switched off, but the harness answers anyway (calls are "
-        "entertaining and can start story); it will hang up on its own soon. You cannot see "
-        "who it was."
+        "PHONE: ringing — jobs are switched off, so the harness is rejecting it for you "
+        "(a call would freeze you in place). You cannot see who it was."
     )
 
 
@@ -1027,6 +1034,10 @@ class Harness:
         #: `PHONE_HANGUP_AFTER_S` budget; reset every time `phone.in_call`
         #: goes false so a NEW call gets its own fresh budget.
         self._phone_call_connected_at: float | None = None
+        #: The phone task id whose interruption of a roam step was already
+        #: answered with a re-issue (`_advance_roam_goal`); one re-issue per
+        #: phone task, however many polls still report it.
+        self._phone_task_reissued_for: str | None = None
         #: T8: the hang-up budget while missions are off, and a plain
         #: attribute (not a bare module constant) so a test can shrink it
         #: without waiting out the real 25 s.
@@ -1731,6 +1742,10 @@ class Harness:
                     # getting him there, and it has its own stuck watchdog
                     # (GOAL_STUCK_S, two strikes) for when it genuinely cannot.
                     self.stranded.reset()
+                elif state.phone.in_call:
+                    # On the phone: the game will not walk him to a car, so a
+                    # widening search only re-posts a task that cannot run.
+                    self.stranded.reset()
                 elif recently_jacked:
                     # T9 (findings.md R1/R5): he was just pulled out of his
                     # own car (`threat.being_jacked_by`, fought off a few
@@ -1896,8 +1911,13 @@ class Harness:
                 )
             )
             elapsed = time.monotonic() - self._phone_call_connected_at
-            if not fighting and elapsed < self.phone_hangup_after_s:
-                return False
+            # LIVE 2026-09-03 12:29Z: with jobs off a connected story call froze
+            # him for its whole length — `/state` showed `phone.in_call` true,
+            # control on, and every walk/enter task at 0.00 m for 25 s+ (the
+            # game runs no script movement task on a ped who is on the phone).
+            # The 25 s "entertaining" budget therefore cost a goal per call:
+            # hang up the moment a call is connected while he is not taking
+            # jobs. `PHONE_HANGUP_AFTER_S` no longer gates this branch.
             if self.wheel.posted_this_tick:
                 # Bridge-side it is still one task at a time; the call stays
                 # connected next tick and this latch is untouched, so the
@@ -1916,7 +1936,7 @@ class Harness:
                 extra={
                     "kv": {
                         "task_id": task_id,
-                        "reason": "fight_or_chase" if fighting else "budget",
+                        "reason": "fight_or_chase" if fighting else "jobs_off",
                         "elapsed_s": round(elapsed, 1),
                     }
                 },
@@ -1944,6 +1964,22 @@ class Harness:
                 "phone: ringing, deferring the answer — a task is already posted this tick"
             )
             return False
+        if not self.settings.missions_enabled:
+            # Jobs off: the ring is REJECTED, not answered. Answering a story
+            # call (Simeon, every few minutes at this point in the story) only
+            # sets up a job he will not take, and while the call is connected
+            # the game ignores every movement task — measured live as 25 s+ of
+            # standing still per call and a "stuck" goal each time. The
+            # operator also found the calls "kinda disturbing".
+            task_id = self._execute_action("reject_call", {})
+            if task_id is None:
+                return False
+            self._phone_answered_this_ring = True
+            log.info(
+                "phone: ringing — rejecting (jobs are off; a call would freeze him)",
+                extra={"kv": {"task_id": task_id, "tick": self.wheel.tick}},
+            )
+            return True
         task_id = self._execute_action("answer_call", {})
         if task_id is None:
             return False
@@ -2207,6 +2243,11 @@ class Harness:
             # A deliberate `wait` from the brain. Sitting still IS the action;
             # overriding it would make the brain's own choice meaningless.
             return "deliberate_wait"
+        if state.phone.in_call:
+            # The game runs no script movement task on a ped who is on the
+            # phone (measured live 2026-09-03: 0.00 m for the whole call with
+            # control on). Posting drives at him only burns the hold-downs.
+            return "phone_call"
         if self.governor.level >= 3:
             # CONTRACTS §7 L3 is "asleep in the car, parked somewhere scenic".
             # Driving out of the parking spot is precisely how L3 came to mean
@@ -2420,7 +2461,7 @@ class Harness:
         )
         parts = [
             f"TRIGGER: {trigger}",
-            f"GOAL: {self.goal_text}",
+            self._goal_prompt_line(),
             f"MOOD (tracker): {self.mood.mood}, held {self.mood.held_for_s():.0f}s",
             f"GOVERNOR: L{self.governor.level} ({LEVEL_NOTES[self.governor.level]})",
             (
@@ -2504,6 +2545,30 @@ class Harness:
                 f"${self.settings.hourly_cap_usd:.2f} cap"
             )
         return "\n\n".join(p for p in parts if p)
+
+    def _goal_prompt_line(self) -> str:
+        """The GOAL line of the dynamic context — an instruction, not an echo.
+
+        LIVE 2026-09-03: printed as `GOAL: seeing what Los Santos throws at him
+        next` (the dashboard's neutral text) the model copied it straight into
+        its `goal` field, the validator rejected it as naming no offered id, and
+        every think cost a second call. The dashboard keeps `goal_text`; the
+        model is told what to put in the field.
+        """
+        locked = self.roam.current
+        if locked is not None:
+            return (
+                f'GOAL: {locked.goal.id} — {locked.goal.description}. Put EXACTLY "{locked.goal.id}" '
+                'in your "goal" field while it runs.'
+            )
+        offered = self.roam.offered_ids()
+        if offered and not self._mission_active:
+            return (
+                'GOAL: none locked. Choose ONE id from ROAM AVAILABLE below and put the bare id in '
+                'your "goal" field — the goal engine does the driving; your action is for talking, '
+                'looking, the radio, the phone.'
+            )
+        return f"GOAL: {self.goal_text}"
 
     def _validation_context(self, state: GameState) -> DecisionValidationContext:
         """T4 (findings.md R4): the plain-data snapshot `validate_decision_content`
@@ -2744,6 +2809,30 @@ class Harness:
         # Primitives are never dropped: radio, horn, look_around and a short wait
         # move nothing and keep the commentary alive, which is the difference
         # between committing to a goal and going mute for two minutes.
+        if self._free_roam_owns_movement(d.action.type):
+            # LIVE 2026-09-03 12:20Z, first minutes on the new build: the model
+            # answered `enter_nearest_vehicle` / `drive_to` on every think, the
+            # `brain` owner (mission class) took the wheel over `roam` each
+            # time, and the goal it had just been offered lasted 4 s. Every
+            # fresh enter task restarted the walk to the car, so he never
+            # reached one. In free roam the model CHOOSES the goal (its `goal`
+            # field, validated against the menu) and the goal engine moves him;
+            # a movement task from the model is dropped whenever the engine has
+            # a goal locked or a menu on offer. It is still obeyed when the
+            # engine has nothing — then nothing else would move him.
+            log.info(
+                "decision action dropped: free roam — the goal engine moves him, the model picks the goal",
+                extra={
+                    "kv": {
+                        "action": d.action.type,
+                        "locked_goal": self.roam.current.goal.id if self.roam.current else None,
+                        "offered": list(self.roam.offered_ids())[:4],
+                        "decision_goal": d.goal[:60],
+                    }
+                },
+            )
+            time.sleep(reaction_delay(self.rng))
+            return
         if self.roam.blocks_foreign_action(d.action.type, d.goal):
             log.info(
                 "decision action dropped: a roam goal is locked and this is not it",
@@ -2797,6 +2886,17 @@ class Harness:
         self._end_activity_if_running("preempted_by_decision")
         time.sleep(reaction_delay(self.rng))  # humanizer: 300-900 ms reaction
         self._execute_action(d.action.type, d.action.wire_params(), token)
+
+    def _free_roam_owns_movement(self, action_type: str) -> bool:
+        """Must a model MOVEMENT action yield to the free-roam goal engine?
+
+        True in free roam (no mission running) when the engine has a goal
+        locked or a menu on offer — i.e. whenever there is a goal for the
+        model to choose instead. Primitives and phone tasks never yield.
+        """
+        if action_type not in MOVEMENT_TASKS or self._mission_active:
+            return False
+        return self.roam.current is not None or bool(self.roam.offered_ids())
 
     def _wait_has_a_reason(self) -> bool:
         """Is there anything a `wait` could be waiting FOR this tick?
@@ -2867,6 +2967,25 @@ class Harness:
                 extra={"kv": {"action": action_type, "wait_s": round(wait, 1)}},
             )
             return None
+        if action_type in RESTART_HOSTILE_TASKS:
+            lt = getattr(self, "_live_last_task", None)
+            if lt is not None and lt.type == action_type and lt.status == "running":
+                # PROVEN IN-GAME 2026-09-03 13:20Z: posting `enter_nearest_vehicle`
+                # once walks him to a car; re-posting it every couple of seconds
+                # freezes him at 0.00 m — each re-post cancels the walk-and-get-in
+                # sequence before he takes a step. The harness's own stuck
+                # watchdog was doing exactly that (freeze → "stuck" → replan →
+                # re-post → freeze), which is the "he can't move / can't get in a
+                # car" the operator saw. So a running "find a car" / "just drive"
+                # task is NEVER restarted: trust it, and the bridge's own
+                # no_progress watchdog fails it if it truly stalls — and THAT
+                # (status != running) lifts this guard. Returns the live id so a
+                # step machine re-binds to the same task instead of a phantom.
+                log.debug(
+                    "not re-posting a running restart-hostile task; letting it finish",
+                    extra={"kv": {"type": action_type, "task_id": lt.id}},
+                )
+                return lt.id
         if action_type in MOVEMENT_TASKS and not self.wheel.holds(token):
             # The caller was refused (or never asked) and posted anyway. That is
             # a bug in the caller, not a condition of the world, so it is loud.
@@ -3150,6 +3269,8 @@ class Harness:
             self._advance_roam_goal(state)
             return
 
+        if state.phone.in_call:
+            return  # a goal picked now would stand still for the whole call
         if not self.roam.due():
             # Not idle, just between goals — but "between goals" is capped by
             # `RoamEngine.due`, which ignores its own jittered beat the moment he
@@ -3200,6 +3321,38 @@ class Harness:
         `done_when` still false buys one fresh plan, and after that the goal
         fails honestly.
         """
+        if state.phone.in_call:
+            # Nothing the plan posts can run while he is on the phone; the goal
+            # waits (its stillness clock is held in `RoamEngine.observe`).
+            return
+        running = self.activity_runner.current
+        if (
+            running is not None
+            and not running.finished
+            and state.last_task.type in PHONE_TASKS
+            and state.last_task.status != "running"
+            and self.activity_runner.step_expects_task
+            and self.activity_runner.step_task_id is not None
+            and state.last_task.id != self.activity_runner.step_task_id
+            and state.last_task.id != self._phone_task_reissued_for
+        ):
+            # The phone task (answer/reject, CONTRACTS v1.13) replaced the
+            # step's bridge task and has since finished. The runner never saw
+            # it RUNNING (the call hold above skipped those ticks), so it still
+            # believes its own task is alive: re-issue the plan from here
+            # rather than wait for the stuck watchdog to notice ten seconds on.
+            # Latched on the phone task's id — the snapshot can report it for
+            # a poll after the re-issue — and it spends no re-plan attempt:
+            # the plan was not wrong, it was interrupted.
+            self._phone_task_reissued_for = state.last_task.id
+            log.info(
+                "roam step task was replaced by a phone task; re-issuing the plan",
+                extra={"kv": {"goal": self.roam.current.goal.id, "phone_task": state.last_task.type}},
+            )
+            replaced = self.activity_runner.replace_plan(self.roam.current.plan)
+            if replaced is not None:
+                self._issue_activity_step(replaced)
+            return
         step = self.activity_runner.next_step(state.last_task.status, state.last_task.id)
         if step is not None:
             self._issue_activity_step(step)
@@ -3993,6 +4146,7 @@ class Harness:
                 self._player_down = state.player.dead or state.player.arrested
                 self._mission_active = state.mission.active
                 self._wanted_now = state.player.wanted
+                self._live_last_task = state.last_task
 
                 self._reflex(state, delta)
 

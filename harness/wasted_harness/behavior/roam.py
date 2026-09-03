@@ -200,6 +200,18 @@ def player_pos(state: GameState) -> tuple[float, float, float]:
     return (p.x, p.y, p.z)
 
 
+def _movement_task_running(state: GameState) -> bool:
+    """Is a bridge movement task in flight this snapshot?
+
+    Used by `judge()` to defer stillness accounting to the bridge's own
+    no_progress watchdog while one is running (see the comment there).
+    """
+    from ..brain.schemas import MOVEMENT_TASKS
+
+    lt = state.last_task
+    return lt is not None and lt.status == "running" and lt.type in MOVEMENT_TASKS
+
+
 def health_fraction(state: GameState) -> float:
     p = state.player
     if p.max_health <= 0:
@@ -2398,6 +2410,12 @@ class RoamEngine:
 
     def _observe_movement(self, state: GameState, now: float) -> None:
         here = (state.player.pos.x, state.player.pos.y)
+        if getattr(state.phone, "in_call", False):
+            # A connected call is not stillness he chose: the game runs no
+            # movement task on a ped on the phone (live 2026-09-03), so the
+            # stuck watchdog's clock is held rather than spent.
+            self._anchor, self._anchor_at = here, now
+            return
         if self._anchor is None:
             # First sample after a reset. The POSITION is new, the CLOCK is not:
             # `reset_movement_anchor` already stamped when the window opened, and
@@ -2752,7 +2770,15 @@ class RoamEngine:
             return "wanted_override"
         if locked.elapsed(self._clock()) >= locked.goal.timeout_s:
             return "timeout"
-        if self.still_for_s() >= GOAL_STUCK_S:
+        if self.still_for_s() >= GOAL_STUCK_S and not _movement_task_running(state):
+            # Only second-guess stillness the BRIDGE is not already accounting
+            # for. While a movement task (walk/drive/enter/flee) is `running`,
+            # the bridge's own no_progress watchdog owns "is he actually
+            # moving"; escalating here on the roam anchor as well is what turned
+            # a slow-but-progressing walk-to-a-far-car into a "stuck" verdict
+            # that re-posted the task and froze him (2026-09-03). If the task is
+            # genuinely stalled the bridge fails it, `last_task.status` leaves
+            # `running`, and this fires on the next tick as it should.
             locked.strikes += 1
             self.reset_movement_anchor()
             if locked.strikes >= GOAL_STUCK_STRIKES:

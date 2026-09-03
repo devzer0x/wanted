@@ -573,6 +573,16 @@ class ActivityRunner:
         self._step_expects_task = False
         return running.plan[0]
 
+    @property
+    def step_task_id(self) -> str | None:
+        """The bridge task id the current step is bound to (None for a primitive)."""
+        return self._step_task_id
+
+    @property
+    def step_expects_task(self) -> bool:
+        """Does the current step wait on a bridge task at all?"""
+        return self._step_expects_task
+
     def bind_step_task(self, task_id: str | None) -> None:
         """Record the id ``POST /task`` returned for the step just issued.
 

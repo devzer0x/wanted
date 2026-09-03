@@ -2333,6 +2333,10 @@ class _ContextStub:
         # `_dynamic_context` now reads `settings.missions_enabled` for the PHONE line.
         self.settings = SimpleNamespace(missions_enabled=True)
         self._under_attack = False
+        self._mission_active = False
+
+    def _goal_prompt_line(self) -> str:
+        return Harness._goal_prompt_line(self)
 
     @property
     def goal_text(self) -> str:
@@ -2626,13 +2630,16 @@ def _phone_state_under_attack(handle: int = 9012) -> GameState:
     return GameState.model_validate(body)
 
 
-def test_a_ringing_phone_is_answered_once_per_ring_missions_on_or_off() -> None:
-    for missions_enabled in (False, True):
+def test_a_ringing_phone_gets_one_attempt_per_ring_answer_on_reject_off() -> None:
+    """LIVE 2026-09-03 12:29Z: an answered story call froze him for its whole
+    length (`phone.in_call` true, control on, every movement task at 0.00 m), so
+    with jobs off the ring is REJECTED; with jobs on it is still answered."""
+    for missions_enabled, verb in ((False, "reject_call"), (True, "answer_call")):
         h = _phone_harness(missions_enabled=missions_enabled)
         ringing = _phone_state(ringing=True, in_call=False)
         h.wheel.begin_tick()
         assert Harness._phone_reflex(h, ringing) is True
-        assert [t for t, _ in h.bridge.posted] == ["answer_call"]
+        assert [t for t, _ in h.bridge.posted] == [verb]
         h.wheel.begin_tick()
         assert Harness._phone_reflex(h, ringing) is False, "one attempt per ring, not every tick"
         assert len(h.bridge.posted) == 1
@@ -2644,7 +2651,10 @@ def test_a_ringing_phone_is_answered_once_per_ring_missions_on_or_off() -> None:
         assert len(h.bridge.posted) == 2
 
 
-def test_with_missions_off_a_connected_call_is_hung_up_after_the_budget(monkeypatch) -> None:
+def test_with_missions_off_a_connected_call_is_hung_up_at_once(monkeypatch) -> None:
+    """The 25 s budget used to apply here; measured live (2026-09-03 12:29Z),
+    every second of a connected call is a second he cannot move, so a call that
+    got connected while jobs are off is hung up immediately."""
     import time as time_mod
 
     now = {"t": 1_000_000.0}
@@ -2653,27 +2663,20 @@ def test_with_missions_off_a_connected_call_is_hung_up_after_the_budget(monkeypa
     live = _phone_state(ringing=False, in_call=True)
 
     h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, live) is False, "still inside the budget"
-    assert h.bridge.posted == []
-
-    now["t"] += PHONE_HANGUP_AFTER_S + 0.1
-    h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, live) is True
+    assert Harness._phone_reflex(h, live) is True, "no budget: hang up now"
     assert [t for t, _ in h.bridge.posted] == ["reject_call"]
 
     h.wheel.begin_tick()
     assert Harness._phone_reflex(h, live) is False, "latched: one hang-up per call"
     assert len(h.bridge.posted) == 1
 
-    # the call ends and a new one connects: the budget and the latch both re-arm
+    # the call ends and a new one connects: the latch re-arms
     h.wheel.begin_tick()
     Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))
     h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, live) is False, "a fresh call gets its own full budget"
-    now["t"] += PHONE_HANGUP_AFTER_S + 0.1
-    h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, live) is True
+    assert Harness._phone_reflex(h, live) is True, "a fresh call gets its own hang-up"
     assert len(h.bridge.posted) == 2
+    assert PHONE_HANGUP_AFTER_S > 0  # the jobs-on documentation constant survives
 
 
 def test_with_missions_off_a_connected_call_is_hung_up_immediately_during_a_fight() -> None:
@@ -2743,10 +2746,18 @@ def test_a_phone_reflex_post_reaches_the_real_bridge_client_not_just_the_fake() 
         assert Harness._phone_reflex(h, live) is True
         assert calls == [("reject_call", {})]
 
-        # And the answer half of the same path, on a fresh ring.
+        # And the ring half of the same path: jobs off → rejected (live
+        # 2026-09-03: an answered call freezes him for its whole length).
         calls.clear()
         h.wheel.begin_tick()
         assert Harness._phone_reflex(h, _phone_state(ringing=True, in_call=False)) is True
+        assert calls == [("reject_call", {})]
+        # Jobs on: the same ring is answered through the same real client.
+        calls.clear()
+        h2 = _phone_harness(missions_enabled=True)
+        h2.bridge = client
+        h2.wheel.begin_tick()
+        assert Harness._phone_reflex(h2, _phone_state(ringing=True, in_call=False)) is True
         assert calls == [("answer_call", {})]
     finally:
         client.close()
@@ -2763,3 +2774,34 @@ def test_a_wait_in_free_roam_with_control_is_ignored() -> None:
     h._wanted_now = 1
     Harness._execute_action(h, "wait", {"seconds": 90})
     assert 0.0 < h._quiet_until <= time.monotonic() + 30.0 + 0.01
+
+
+def test_a_running_enter_is_not_re_posted_and_freezes_him(monkeypatch) -> None:
+    """PROVEN IN-GAME 2026-09-03 13:20Z: re-posting `enter_nearest_vehicle` every
+    couple of seconds freezes the ped at 0.00 m; posting once walks him to a car.
+    So `_execute_action` must not re-post a running `enter_nearest_vehicle` /
+    `wander_drive` — it returns the live id and posts nothing new."""
+    from wasted_harness.bridge_client import LastTask
+
+    h = _bare_harness(cutscene_active=False)
+    # First post reaches the bridge (no last_task cached yet → guard inert).
+    first = Harness._execute_action(
+        h, "enter_nearest_vehicle", {"prefer": "any", "search_radius_m": 60.0}, _holding(h, "roam")
+    )
+    assert first == "t-fake-1"
+    assert len(h.bridge.posted) == 1
+    # The bridge now reports it running. A second post of the SAME task is a no-op.
+    h._live_last_task = LastTask(id=first, type="enter_nearest_vehicle", status="running", detail="")
+    h.wheel.begin_tick()
+    second = Harness._execute_action(
+        h, "enter_nearest_vehicle", {"prefer": "any", "search_radius_m": 90.0}, _holding(h, "roam")
+    )
+    assert second == first, "a running enter must be left alone, not restarted"
+    assert len(h.bridge.posted) == 1, "nothing new posted while it runs"
+    # Once the bridge fails it, the guard lifts and recovery may re-post.
+    h._live_last_task = LastTask(id=first, type="enter_nearest_vehicle", status="failed", detail="no_progress")
+    h.wheel.begin_tick()
+    Harness._execute_action(
+        h, "enter_nearest_vehicle", {"prefer": "any", "search_radius_m": 90.0}, _holding(h, "roam")
+    )
+    assert len(h.bridge.posted) == 2, "a failed task no longer blocks a fresh post"

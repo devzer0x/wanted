@@ -9,6 +9,13 @@ const tsMs = (iso: string) => {
   return Number.isNaN(t) ? 0 : t;
 };
 
+// Goal lifecycle is telemetry, not commentary. The public feed showed a "Started: <goal_id>"
+// and a "Stuck, dropped: <goal_id>" for every free-roam goal, which read as a wall of internal
+// churn with raw ids (operator, 2026-09-03: "doesn't look clean ... it shows what it is doing").
+// The CURRENT GOAL card already shows what he is doing in human words, so the feed keeps only his
+// spoken lines and the dramatic beats (death, busted, wanted, mission, stunt, clip, session).
+const FEED_HIDDEN_EVENTS = new Set(["activity_start", "activity_end"]);
+
 /** Interleave decisions + events, newest first. Pure derivation from rows. */
 export function buildFeed(
   decisions: DecisionRow[],
@@ -22,12 +29,14 @@ export function buildFeed(
       ts: row.ts,
       row,
     })),
-    ...events.map<FeedItem>((row) => ({
-      kind: "event",
-      key: `e-${row.id}`,
-      ts: row.ts,
-      row,
-    })),
+    ...events
+      .filter((row) => !FEED_HIDDEN_EVENTS.has(row.type))
+      .map<FeedItem>((row) => ({
+        kind: "event",
+        key: `e-${row.id}`,
+        ts: row.ts,
+        row,
+      })),
   ];
   items.sort((a, b) => tsMs(b.ts) - tsMs(a.ts) || b.row.id - a.row.id);
   return items.slice(0, limit);

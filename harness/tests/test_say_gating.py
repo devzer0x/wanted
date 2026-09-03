@@ -163,7 +163,11 @@ class _ApplyDecisionStub:
         self.current_goal = "see the city"
         self.mood = _MoodStub()
         self._tick_roam_transition = False
+        self._mission_active = False
         self.executed: list[tuple[str, dict[str, Any]]] = []
+
+    def _free_roam_owns_movement(self, action_type: str) -> bool:
+        return Harness._free_roam_owns_movement(self, action_type)
 
     def _execute_action(
         self, action_type: str, params: dict[str, Any], token: Any = None
@@ -254,3 +258,28 @@ def test_published_mood_is_the_tracked_mood_not_the_models(tmp_path: Path) -> No
     assert stub.bus.published[0][1]["mood"] == "scared"  # _MoodStub.mood, not "hyped"
     # The raw model mood is still preserved on the audit row.
     assert stub.writer.decisions[0]["mood"] == "hyped"
+
+
+def test_in_free_roam_a_model_movement_action_yields_to_the_goal_engine(tmp_path: Path) -> None:
+    """LIVE 2026-09-03 12:20Z: the model answered `enter_nearest_vehicle` on every
+    think, `brain` (mission class) took the wheel over `roam` each time and the goal
+    it had just been offered lasted 4 s. With a menu on offer the model picks the
+    goal; the engine moves him. With nothing on offer the action is still obeyed."""
+    stub = _ApplyDecisionStub(tmp_path)
+    stub.wheel = SimpleNamespace(
+        acquire=lambda *a, **k: object(), owner=None, reason=None, release=lambda *a, **k: None,
+        token_for=lambda *a, **k: object(),
+    )
+    on_foot = make_state(in_vehicle=False)
+    stub.roam.observe(on_foot)
+    assert stub.roam.offered_ids(), "the fallback goal is always on the menu"
+    result = _result(
+        _decision(action_type="enter_nearest_vehicle", params={"prefer": "any", "search_radius_m": 50.0})
+    )
+    Harness._apply_decision(stub, "tactical", result, on_foot, QUIET_DELTA, None)
+    assert stub.executed == [], "a movement action must not preempt the goal engine's pick"
+    # Nothing on offer (a fresh engine that has observed nothing): the model may move him.
+    stub2 = _ApplyDecisionStub(tmp_path)
+    stub2.wheel = stub.wheel
+    Harness._apply_decision(stub2, "tactical", result, on_foot, QUIET_DELTA, None)
+    assert [t for t, _ in stub2.executed] == ["enter_nearest_vehicle"]

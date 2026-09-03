@@ -387,6 +387,9 @@ class ReplayHarness:
     _judge_roam_goal = Harness._judge_roam_goal
     _advance_roam_goal = Harness._advance_roam_goal
     _restart_locked_plan = Harness._restart_locked_plan
+    _goal_prompt_line = Harness._goal_prompt_line
+    _free_roam_owns_movement = Harness._free_roam_owns_movement
+    _wait_has_a_reason = Harness._wait_has_a_reason
     _begin_roam_goal = Harness._begin_roam_goal
     _issue_activity_step = Harness._issue_activity_step
     _drive_day_plan = Harness._drive_day_plan
@@ -498,6 +501,8 @@ class ReplayHarness:
         self._player_down = False
         self._mission_active = False
         self._wanted_now = 0
+        self._phone_task_reissued_for = None
+        self._live_last_task = None
         self._threat_has_the_wheel = False
         self._under_attack = False
         self._phone_answered_this_ring = False
@@ -541,6 +546,7 @@ class ReplayHarness:
         self._player_down = state.player.dead or state.player.arrested
         self._mission_active = state.mission.active
         self._wanted_now = state.player.wanted
+        self._live_last_task = state.last_task
 
         delta: Delta = self.perceptor.observe(state, None)
         self.mood.observe("quiet")
