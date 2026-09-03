@@ -287,6 +287,41 @@ test("footer disclosure is on every page", async ({ page }) => {
   }
 });
 
+const CONTRACT = "7Sj87Hw7Xb3hPfDWyRfThL2iEE8Bu7pcpJbbSYh4pump";
+
+test("the navbar carries the X link and the contract address on every page", async ({ page }) => {
+  for (const path of ROUTES) {
+    await page.goto(path);
+    const nav = page.locator("header");
+
+    const x = nav.locator('a[href="https://x.com/wantedagent"]');
+    await expect(x).toBeVisible();
+    // A new tab without `noopener` hands the opened page a handle back to ours.
+    await expect(x).toHaveAttribute("rel", /noopener/);
+    await expect(x).toHaveAttribute("target", "_blank");
+
+    const ca = nav.locator('button[aria-label^="Copy contract address"]');
+    await expect(ca).toBeVisible();
+    await expect(ca).toHaveAttribute("aria-label", `Copy contract address ${CONTRACT}`);
+    // The full address must be readable off the page, not only via the clipboard.
+    await expect(ca).toContainText(CONTRACT);
+  }
+});
+
+test("the displayed contract address keeps its case", async ({ page }) => {
+  // Caught live: the navbar's `.ticker` class sets `text-transform: uppercase`,
+  // which rendered `7SJ87HW7...SYH4PUMP`. base58 is case-sensitive, so anyone
+  // reading that off the screen instead of clicking copy gets a DIFFERENT
+  // address. The visible label must match the real string exactly.
+  await page.goto("/");
+  const shown = page.locator('button[aria-label^="Copy contract address"] span.font-mono');
+  const text = (await shown.innerText()).trim();
+  expect(text).not.toBe(text.toUpperCase());
+  const [lead, tail] = text.split("\u2026");
+  expect(CONTRACT.startsWith(lead)).toBe(true);
+  expect(CONTRACT.endsWith(tail)).toBe(true);
+});
+
 for (const path of ROUTES) {
   test(`${path} renders without horizontal scroll`, async ({ page }) => {
     await page.goto(path);
