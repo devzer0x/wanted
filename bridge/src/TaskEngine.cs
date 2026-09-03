@@ -18,6 +18,18 @@ namespace WastedBridge
         private const int FleeReissueMs = 5000;           // re-aim at updated police position
         private const float WalkArriveRadiusM = 2f;       // contract: walk_to done within 2 m
 
+        // MEASURED IN-GAME 2026-09-03: TASK_FOLLOW_NAV_MESH_TO_COORD moves the player ped to a
+        // target 25 m away (arrives) and 120 m away (57.9 m of progress in 10 s), but a target
+        // 400 m away produces EXACTLY ZERO movement while the task still reports itself as
+        // running. The nav mesh will not path that far in one order, and the silent no-op is what
+        // left the agent standing in the street while a goal that had walked him at a distant landmark
+        // timed out over and over. So a long walk is issued as a chain of LEGS: each leg is at most
+        // WalkLegMaxM toward the real target, and the next one is issued when the current one is
+        // reached. `walk_to` still reports `done` only at the caller's real target, so the wire
+        // contract (CONTRACTS §1 `{x,y,z,run}`, done within 2 m) is unchanged.
+        private const float WalkLegMaxM = 120f;
+        private const float WalkLegArriveM = 6f;          // a leg is "reached" loosely; only the real target uses 2 m
+
         // CONTRACTS v1.9 defaults for follow_entity's in-vehicle tail, applied by BridgeRouter when
         // the caller omits style/speed_mps. The old hard-coded DrivingStyles.Normal + 15 m/s (54
         // km/h) cruise cap could not keep pace with a mission NPC, who neither stops for lights nor
@@ -277,6 +289,8 @@ namespace WastedBridge
         // type). That is why the progress anchor below is two floats rather than a Vector3.
         private int _driveVerifyAt;          // Game.GameTime ms at which to grade the start; 0 = off
         private int _driveStarts;            // re-issues of the drive task this episode (cap: 1)
+        private float _walkLegX;             // current nav-mesh leg of a long walk (see WalkLegMaxM)
+        private float _walkLegY;
 
         // T1 no-progress watchdog state, reset per task episode in Start().
         private int _progressAt;             // Game.GameTime ms the current no-progress window opened
@@ -575,6 +589,17 @@ namespace WastedBridge
                     if (DistanceXY(ped.Position, _req.X, _req.Y) <= WalkArriveRadiusM)
                     {
                         Done("");
+                    }
+                    else if (WalkLegIsIntermediate()
+                             && DistanceXY(ped.Position, _walkLegX, _walkLegY) <= WalkLegArriveM)
+                    {
+                        // Reached an intermediate leg of a long walk: aim the next one. Not Done —
+                        // the caller asked for the real target and only that ends this task.
+                        BridgeLog.Info("task " + _req.Id + " (walk_to): leg reached, "
+                            + DistanceXY(ped.Position, _req.X, _req.Y).ToString("F0")
+                            + " m still to go - issuing the next leg");
+                        IssueWalkTo(ped);
+                        ResetProgress(ped);
                     }
                     else if (elapsed > WalkToTimeoutMs)
                     {
@@ -2034,10 +2059,39 @@ namespace WastedBridge
         private void IssueWalkTo(Ped ped)
         {
             Function.Call(Hash.SET_PED_MOVE_RATE_OVERRIDE, ped.Handle, 1f);
-            ped.Task.FollowNavMeshTo(new Vector3(_req.X, _req.Y, _req.Z),
-                _req.Run ? PedMoveBlendRatio.Sprint : PedMoveBlendRatio.Walk);
+            Vector3 leg = NextWalkLeg(ped);
+            _walkLegX = leg.X;
+            _walkLegY = leg.Y;
+            ped.Task.FollowNavMeshTo(leg, _req.Run ? PedMoveBlendRatio.Sprint : PedMoveBlendRatio.Walk);
             // Wraps TASK_FOLLOW_NAV_MESH_TO_COORD -> FollowNavMeshToCoord.
             SetExpectedHash(ScriptTaskNameHash.FollowNavMeshToCoord);
+        }
+
+        /// <summary>
+        /// The next nav-mesh order for a walk_to: the real target when it is within
+        /// <see cref="WalkLegMaxM"/>, otherwise a point that far along the straight line to it.
+        /// See the WalkLegMaxM comment for the in-game measurement this exists for.
+        /// </summary>
+        private Vector3 NextWalkLeg(Ped ped)
+        {
+            Vector3 here = ped.Position;
+            float dx = _req.X - here.X;
+            float dy = _req.Y - here.Y;
+            float dist = (float)System.Math.Sqrt((dx * dx) + (dy * dy));
+            if (dist <= WalkLegMaxM || dist <= 0.01f)
+            {
+                return new Vector3(_req.X, _req.Y, _req.Z);
+            }
+            float f = WalkLegMaxM / dist;
+            return new Vector3(here.X + (dx * f), here.Y + (dy * f), here.Z);
+        }
+
+        /// <summary>True when this walk's current leg is not the caller's real target.</summary>
+        private bool WalkLegIsIntermediate()
+        {
+            float dx = _walkLegX - _req.X;
+            float dy = _walkLegY - _req.Y;
+            return ((dx * dx) + (dy * dy)) > 1f;
         }
 
         /// <summary>
