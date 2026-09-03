@@ -57,8 +57,12 @@ from .behavior.recovery import (
     flipped_action,
     threat_action,
 )
-from .behavior.roam import HouseEscape, RoamEngine, as_activity
+from .behavior.roam import (
+    PREEMPTED_OUTCOME as ROAM_PREEMPTED,
+)
+from .behavior.roam import HouseEscape, InteriorEscape, RoamEngine, as_activity
 from .behavior.vehicle import (
+    MovementToken,
     MovementWheel,
     VehicleController,
     VehiclePhase,
@@ -155,6 +159,16 @@ FLUSH_INTERVAL_S = 2.0
 KNOWLEDGE_BUDGET_CHARS = 1800
 
 INITIAL_GOAL = "wake up, find wheels, see what the day wants"
+
+# `ROAM_PREEMPTED` (= `behavior.roam.PREEMPTED_OUTCOME`) is the
+# `activity_end.outcome` that means "a higher owner took the movement wheel off
+# free roam". It is the harness's `roam_goal_failed{reason: "preempted", by:
+# <owner>}`: `roam_goal_failed` is NOT one of the CONTRACTS §4 event types, §4
+# is a closed enum, and its Supabase CHECK constraint is already live on the
+# production project — an insert of an unlisted type would be rejected and take
+# the whole batch with it. So the signal rides on `activity_end` with the goal
+# id, the outcome and the preempting owner in the payload, exactly as
+# `RoamEngine.close()` has documented since it was written.
 #: Events worth a replay-buffer clip. Kept to the banner moments so a clip is
 #: always something a viewer would actually want to see again.
 CLIP_EVENTS: frozenset[str] = frozenset({"death", "busted"})
@@ -685,6 +699,11 @@ class Harness:
         #: Runs BEFORE it, because widening a vehicle search from inside a house
         #: just picks a car that is further away and behind more walls.
         self.house_escape = HouseEscape()
+        #: CONTRACTS v1.12: the same job, off the bridge's own `player.interior`
+        #: instead of `house_escape`'s guess. This is the one that actually gets
+        #: reached in the live loop — `house_escape` needed 20 s of stillness AND
+        #: a failed `enter_nearest_vehicle` before it would even look.
+        self.interior_escape = InteriorEscape()
         self.missions = MissionTracker()
         self.mission_follower = MissionFollower()
         #: Decides the SHAPE of the day: roam blocks and mission blocks, and
@@ -707,9 +726,32 @@ class Harness:
         #: actually moving, which is how he sat in a stolen convertible and let
         #: the owner beat him to death through the open door (2026-09-02).
         self.vehicle = VehicleController()
-        #: Exactly one owner of movement per tick, logged on every change. The
-        #: explicit successor to the `_threat_has_the_wheel` bool.
+        #: One owner of bridge-task movement at a time, ENFORCED. Every
+        #: `_execute_action` that posts a CONTRACTS §1 task carries the
+        #: holder's token and is refused without it, which is where the
+        #: "two owners issued movement in the same tick" deadlock class dies.
         self.wheel = MovementWheel()
+        #: What losing the wheel MEANS for each owner. The wheel cannot reach
+        #: the roam engine, the mission follower or the day planner from
+        #: `behavior/vehicle.py` without an import cycle, and "what do I cancel
+        #: when I am preempted" is each layer's own business anyway.
+        self.wheel.on_preempt("roam", self._roam_preempted)
+        self.wheel.on_preempt("mission", self._mission_preempted)
+        self.wheel.on_preempt("day_plan", self._day_plan_preempted)
+        self.wheel.on_preempt("governor", self._governor_preempted)
+        self.wheel.on_preempt("exit_interior", self._interior_preempted)
+        #: Open-lease tokens: the owners that hold the wheel across many ticks
+        #: and release explicitly (a locked roam goal, an active mission, the
+        #: day plan's trip to a marker, the governor's scenic park). The reflex
+        #: layer takes one-tick leases instead and simply asks again.
+        self._roam_token: MovementToken | None = None
+        self._mission_token: MovementToken | None = None
+        self._day_plan_token: MovementToken | None = None
+        self._governor_token: MovementToken | None = None
+        #: The escape holds an OPEN lease too: its ladder runs across many ticks
+        #: with its own per-rung timeouts, and holding it is what keeps free roam
+        #: from picking a goal he could not possibly walk to from a living room.
+        self._interior_token: MovementToken | None = None
         self.bridge_down = BridgeDownTracker()
         self.bridge_stall = BridgeStallTracker()
         self.restart = GameRestartDetector()
@@ -1084,9 +1126,11 @@ class Harness:
         # `last_task` check cannot see it yet - `state` predates the POST).
         self._threat_has_the_wheel = False
         self._under_attack = False
-        # One owner of movement per tick, decided here (the reflex layer runs
-        # first) and logged on every change, so a future "he just did nothing"
-        # is readable out of the log rather than guessed at.
+        # Open the movement tick: one-tick reflex leases expire here, so the
+        # ladder is re-decided from scratch, and the "one bridge task per tick"
+        # latch resets. Everything below asks the wheel for permission; a
+        # refusal means post nothing, and every acquire/refusal/preemption is
+        # logged with owner, reason and tick.
         self.wheel.begin_tick()
         if delta.died:
             self.counters["deaths"] = self.totals.bump("deaths")
@@ -1181,6 +1225,52 @@ class Harness:
                 extra={"kv": {"cause": recovery["respawn_cause"]}},
             )
 
+        # THE TWO WHEEL OVERRIDES, before any layer may ask for it.
+        #
+        # 1. The game owns the controls (death, arrest, a cutscene, a
+        #    protagonist switch, a checkpoint reload, `control_enabled` false).
+        #    Nothing posted now reaches the player — `_execute_action` refuses
+        #    every bridge task in exactly these states — so the wheel goes to
+        #    `idle` and whatever was running is cancelled through its preempt
+        #    hook. The ladder then starts from scratch when control comes back.
+        # 2. Otherwise the mission flag drives the wheel: `mission.active`
+        #    false->true takes it unconditionally for `mission`, true->false
+        #    releases it. That is what makes "roam posts nothing during a
+        #    mission" structural instead of a gate somebody can forget.
+        if self._game_owns_controls(state):
+            self.wheel.force_idle(self._game_control_reason(state))
+            self._mission_token = None
+        else:
+            self._mission_token = self.wheel.mission_active(state.mission.active)
+
+        # CONTRACTS v1.12, and it runs EVERY tick ahead of every gate: "he came
+        # out" has to be seen on the tick it happens whatever else is going on,
+        # and the position on that tick is the only honest source for a learned
+        # way out of that interior. Dead, arrested, mid-cutscene, mid-mission —
+        # all of them still leave doors behind them.
+        left_interior = self.interior_escape.observe(state)
+        if left_interior is not None and state.player.interior is None:
+            # `interior -> null`. The wheel goes back and normal selection
+            # resumes on this same tick.
+            #
+            # NOT written to Supabase: `left_interior` is not one of the
+            # CONTRACTS §4 event types and §4 is a closed enum per contract
+            # version, so `events.py` is not this package's to widen — the same
+            # rule `roam.close()` documents for `roam_goal_picked`. It is a log
+            # line, which is also what the acceptance check for this fix reads.
+            log.info(
+                "left_interior",
+                extra={
+                    "kv": {
+                        "interior_id": left_interior,
+                        "was_escaping": self._interior_token is not None,
+                        "pos": [round(v, 1) for v in (state.player.pos.x, state.player.pos.y)],
+                    }
+                },
+            )
+            self._release_interior_wheel("left_interior")
+            self.interior_escape.reset()
+
         if state.player.dead or state.player.arrested:
             # Nothing physical to do but wait: every reflex below would
             # either be a no-op on a corpse (StuckDetector's reverse_out) or
@@ -1200,14 +1290,18 @@ class Harness:
             # firefight, which is exactly when a car ends up wedged on a kerb.
             # A combat task and a stuck-car check are independent and both
             # cheap, and the physical-recovery half posts primitives or
-            # /unstick, not tasks, so it cannot preempt the combat task.
+            # /unstick, not tasks, so it cannot preempt the combat task — which
+            # is also why `physical` calls `wheel.note()` rather than
+            # `wheel.acquire()`: it takes nothing and refuses nobody, it only
+            # keeps `taken_by_reflex()` honest for the planners below.
             #
             # `flipped_action` is the one exception: it posts `exit_vehicle`,
-            # a real task, so it is computed FIRST and suppresses the threat
-            # post for this tick. Getting out of an upside-down car outranks
-            # shooting from inside one, and posting combat only to preempt it
-            # two lines later would waste the post and start the latch's
-            # hold-down for nothing.
+            # a real task, so it is computed FIRST and it now sits at the TOP
+            # of the ladder (owner `flip`) rather than being posted at the
+            # bottom of the block behind a `flip is None` guard on the threat
+            # post. Getting out of an upside-down car outranks shooting from
+            # inside one; the old shape let a task-stall `stop` AND an
+            # `exit_vehicle` both go out on the same tick.
             flip = flipped_action(state)
             # One call per tick, here and nowhere else: the tracker's window is
             # keyed on wall-clock time, and feeding it twice in a tick would
@@ -1229,6 +1323,14 @@ class Harness:
                 suspended=(
                     self.governor.level >= 3  # L3 is asleep in a parked car (§7)
                     or time.monotonic() < self._quiet_until  # a deliberate `wait`
+                    # CONTRACTS v1.12: the interior escape has its OWN 30 s
+                    # per-rung timeouts, and its whole job is to post a
+                    # `walk_to` that will look like "a running task that is not
+                    # moving him" for as long as the ped is picking its way
+                    # through a hallway. Left running, this detector would
+                    # `stop` the escape's walk from a HIGHER wheel owner and the
+                    # ladder would never finish a rung.
+                    or self.interior_escape.active()
                     # A blocked screen freezes `state`, so "he has not moved"
                     # is trivially true and means nothing. Exactly one of the
                     # two interventions may be live at a time, and the
@@ -1263,56 +1365,78 @@ class Harness:
                 # runner would stand down for a survival action that is never
                 # going to be issued.
                 threat = None
-            if stalled_type is not None:
-                self.wheel.claim("threat", f"{stalled_type} pinned him; clearing it")
-            elif threat is not None:
-                # Claimed even when ThreatLatch suppresses the POST: the latch
-                # only ever suppresses because the engine is ALREADY running
-                # exactly this task, so survival really does have the wheel.
-                self.wheel.claim("threat", f"survival: {threat['type']}")
-            if stalled_type is not None:
+            # --- the reflex ladder, highest owner first -------------------
+            # Exactly one BRIDGE TASK may leave this block, and the order of
+            # these branches is the priority order (`vehicle.MOVEMENT_OWNER_
+            # TABLE` is the same order written down). The wheel enforces it
+            # twice over: a lower owner is refused while a higher one holds,
+            # and no owner may acquire at all once a task has been posted this
+            # tick.
+            if flip is not None:
+                # Upside down or in the water. Above survival: shooting from
+                # inside an inverted car is not a plan.
+                token = self.wheel.acquire("flip", f"upside down / in water: {flip['type']}")
+                if token is not None:
+                    self._execute_action(flip["type"], flip["params"], token)
+            elif stalled_type is not None:
                 # `stop` only: CONTRACTS §1's own "clear current task -> idle".
                 # What to do INSTEAD is the day plan's / the activity runner's
                 # / the brain's call, and they all get this same tick.
-                self._execute_action("stop", {})
-            elif threat is not None and flip is None and self.threat_latch.should_issue(threat, state):
-                # ThreatLatch, not a fresh post per tick: every POST /task
-                # preempts the running task (CONTRACTS §1), so re-issuing the
-                # same combat order at 3 Hz restarted the engine's aim cycle
-                # three times a second — observed on stream as stuttering
-                # movement and shots that never landed.
-                task_id = self._execute_action(threat["type"], threat["params"])
-                if task_id is not None:
-                    # Only a post that actually reached the game starts the
-                    # hold-down. A task suppressed mid-cutscene or lost to a
-                    # bridge blip never happened, and he must be free to ask
-                    # again on the next tick.
-                    self.threat_latch.issued(threat)
+                token = self.wheel.acquire(
+                    "threat", f"{stalled_type} pinned him; clearing it"
+                )
+                if token is not None:
+                    self._execute_action("stop", {}, token)
+            elif threat is not None:
+                # Acquired even when ThreatLatch suppresses the POST: the latch
+                # only ever suppresses because the engine is ALREADY running
+                # exactly this task, so survival really does have the wheel and
+                # the planners below must stand down for it.
+                token = self.wheel.acquire("threat", f"survival: {threat['type']}")
+                if token is not None and self.threat_latch.should_issue(threat, state):
+                    # ThreatLatch, not a fresh post per tick: every POST /task
+                    # preempts the running task (CONTRACTS §1), so re-issuing
+                    # the same combat order at 3 Hz restarted the engine's aim
+                    # cycle three times a second — observed on stream as
+                    # stuttering movement and shots that never landed.
+                    task_id = self._execute_action(threat["type"], threat["params"], token)
+                    if task_id is not None:
+                        # Only a post that actually reached the game starts the
+                        # hold-down. A task suppressed mid-cutscene or lost to a
+                        # bridge blip never happened, and he must be free to ask
+                        # again on the next tick.
+                        self.threat_latch.issued(threat)
 
             # The vehicle reflex: drive away the moment he is seated with
             # nobody steering, and grade whether a drive order actually moved
-            # the world. Strictly below survival — `claim` refuses if the
+            # the world. Strictly below survival — the wheel refuses it if the
             # threat ladder already took this tick — and strictly above every
             # planner, which is what stops "he got in and sat there" from
-            # depending on a model call that costs seconds and money.
-            if vehicle_intent is not None and self.wheel.claim(
-                "vehicle", f"{vehicle_intent.kind}: {vehicle_intent.reason}"
-            ):
-                task_id = self._execute_action(
-                    vehicle_intent.action["type"], vehicle_intent.action["params"]
+            # depending on a model call that costs seconds and money. Its
+            # recovery ladder mixes tasks and keypresses, so it goes through
+            # the same helper the whole harness uses.
+            if vehicle_intent is not None:
+                task_id, attempted = self._reflex_act(
+                    "vehicle",
+                    vehicle_intent.action,
+                    f"{vehicle_intent.kind}: {vehicle_intent.reason}",
                 )
-                self.vehicle.bind_task(task_id)
+                if attempted:
+                    self.vehicle.bind_task(task_id)
 
             stuck_action = self.stuck.check(state)
             if stuck_action == "reverse_out" and self.primitives is not None:
                 # Through the single choke point rather than straight at
-                # SendInput: raw input that fights a running engine task is
-                # exactly the un-arbitrated case the movement wheel exists to
-                # make visible, and `_execute_action` is where every other
-                # refusal (cutscene, dead, blocking screen) already lives.
-                self.wheel.claim("physical", "stuck: reverse_out")
+                # SendInput, because `_execute_action` is where every other
+                # refusal (cutscene, dead, blocking screen) already lives. It
+                # takes NO wheel token: a keypress posts no task and preempts
+                # nothing, which is precisely why the stuck ladder starts with
+                # one — gating it here would re-open the starvation bug where
+                # a firefight stopped the unstick ladder from ever running.
+                self.wheel.note("physical", "stuck: reverse_out")
                 self._execute_action("reverse_out", {"ms": 1400})
             elif stuck_action == "unstick":
+                self.wheel.note("physical", "stuck: unstick nudge")
                 moved = self.stuck.try_unstick(self.bridge)
                 if moved is not None:
                     self.writer.record_event(
@@ -1323,9 +1447,6 @@ class Harness:
                         },
                     )
                     self._say("That was a legal nudge. Three meters. Judges allow it.")
-            if flip is not None:
-                self.wheel.claim("physical", "upside down: exit_vehicle")
-                self._execute_action(flip["type"], flip["params"])
 
             if threat is None and vehicle_intent is None:
                 # Free-roam reflexes only when nothing is shooting at him:
@@ -1340,7 +1461,23 @@ class Harness:
                 # free-roam reflexes must not compete with
                 # `_drive_mission_objective`, which owns getting him a car for
                 # a mission on its own terms.
-                if self.missions.in_mission or self.planner.in_mission_block:
+                # CONTRACTS v1.12 — THE GROUND-TRUTH INTERIOR ESCAPE, and the
+                # reason this whole fix exists. It sits ABOVE the mission-block
+                # gate below on purpose: while he is inside a building the day
+                # plan's walk to a mission-start marker cannot possibly complete
+                # either (the nav mesh is disconnected by doors), so standing
+                # down for it would reproduce the original failure with extra
+                # steps. `InteriorEscape.applies()` does its own gating on
+                # `mission.active`, cutscenes, switches and control — missions
+                # happen indoors on purpose and are never escaped from.
+                escaping = self.interior_escape.applies(state) and self._run_interior_escape(
+                    state
+                )
+                if escaping:
+                    # He is being walked out of a building. Nothing below this
+                    # can help and every one of them would be refused anyway.
+                    self.stranded.reset()
+                elif self.missions.in_mission or self.planner.in_mission_block:
                     # Same rule extended to the day plan's own mission block:
                     # while the planner is walking him into a start marker it
                     # owns getting him a car, and a second `enter_nearest_vehicle`
@@ -1357,16 +1494,11 @@ class Harness:
                     escape = self.house_escape.check(state, self.roam.still_for_s())
                     if escape is not None:
                         self.stranded.reset()
-                        if self.wheel.claim(
-                            "house_escape", f"apparently indoors: {escape['type']}"
-                        ):
-                            self._execute_action(escape["type"], escape["params"])
+                        self._reflex_act("house_escape", escape, "apparently indoors")
                     else:
                         strand = self.stranded.check(state)
-                        if strand is not None and self.wheel.claim(
-                            "stranded", f"on foot with no car: {strand['type']}"
-                        ):
-                            self._execute_action(strand["type"], strand["params"])
+                        if strand is not None:
+                            self._reflex_act("stranded", strand, "on foot with no car")
                 # Governor L2: reflex drives — keep a wander task alive with
                 # mood style. The activity runner is also reflex-layer
                 # behaviour and outranks this; posting a wander on top of a
@@ -1384,15 +1516,217 @@ class Harness:
                     and not self.planner.in_mission_block
                     and state.player.in_vehicle
                     and state.last_task.status in ("idle", "done", "failed")
-                ) and self.wheel.claim("governor", "L2: reflex drives"):
-                    self._execute_action("wander_drive", {"style": self.mood.driving_style()})
+                ):
+                    self._reflex_act(
+                        "governor",
+                        {"type": "wander_drive", "params": {"style": self.mood.driving_style()}},
+                        "L2: reflex drives",
+                    )
 
         # The arbiter's answer, published under the name the three planners
-        # already read. It now means "a REFLEX has the wheel" rather than only
-        # "survival has the wheel": the vehicle reflex has exactly the same
-        # claim on the tick, and a day-plan or mission trip posted over the
-        # drive-away would put him straight back in the parked convertible.
+        # already read. It means "a REFLEX acted this tick" — either it holds
+        # the wheel or it fired a keypress recovery that `state.last_task`
+        # cannot show yet — and a day-plan or mission trip posted over the top
+        # would put him straight back in the parked convertible.
         self._threat_has_the_wheel = self.wheel.taken_by_reflex()
+
+    # -- movement arbitration --------------------------------------------------
+
+    def _game_owns_controls(self, state: GameState) -> bool:
+        """True when nothing this harness posts can reach the player.
+
+        Exactly the set `_execute_action` refuses bridge tasks for, read off
+        THIS tick's snapshot rather than the cached per-tick flags, because
+        `_reflex` runs before some of them are set on the very first tick.
+        """
+        return (
+            state.mission.cutscene_active
+            or state.player.dead
+            or state.player.arrested
+            or state.player.switch_in_progress
+            or state.mission.retry_in_flight
+            or not state.player.control_enabled
+        )
+
+    def _game_control_reason(self, state: GameState) -> str:
+        if state.mission.cutscene_active:
+            return "cutscene playing"
+        if state.player.dead or state.player.arrested:
+            return "player down (dead/arrested)"
+        if state.player.switch_in_progress:
+            return "protagonist switch in progress"
+        if state.mission.retry_in_flight:
+            return "mission retry/checkpoint reload in progress"
+        return "control_enabled is false"
+
+    def _reflex_act(
+        self, owner: str, action: dict[str, Any], reason: str
+    ) -> tuple[str | None, bool]:
+        """Run one reflex-layer action under `owner`. Returns `(task_id, attempted)`.
+
+        The reflex ladder mixes CONTRACTS §1 bridge tasks (which preempt
+        whatever is running, and therefore need the wheel) with §2 primitives
+        (which post nothing and preempt nothing, and therefore do not).
+        `attempted` is False only when the wheel REFUSED — the caller must then
+        do nothing at all with the result, not even bind a null task id.
+        """
+        action_type = action["type"]
+        if action_type not in BRIDGE_TASKS:
+            self.wheel.note(owner, f"{action_type}: {reason}")
+            return self._execute_action(action_type, action["params"]), True
+        token = self.wheel.acquire(owner, f"{action_type}: {reason}")
+        if token is None:
+            return None, False
+        return self._execute_action(action_type, action["params"], token), True
+
+    def _roam_preempted(self, by: str, reason: str) -> None:
+        """Free roam lost the wheel. The goal it was running is over, for real.
+
+        This is the operator's rule: "when reflex or mission acquires over
+        roam, the wheel cancels roam's active task, clears `roam.current`, and
+        emits roam_goal_failed{reason: preempted, by: <owner>}". Cancelling the
+        bookkeeping is what makes it real — leaving `roam.current` locked while
+        somebody else drives is precisely the state that produced "follow Lamar
+        while standing next to the objective car".
+        """
+        self._roam_token = None
+        if self.roam.current is None and self.activity_runner.current is None:
+            return
+        log.info(
+            "roam goal preempted",
+            extra={
+                "kv": {
+                    "goal": None if self.roam.current is None else self.roam.current.goal.id,
+                    "by": by,
+                    "reason": reason,
+                }
+            },
+        )
+        self._end_activity_if_running(ROAM_PREEMPTED, by=by)
+
+    def _mission_preempted(self, by: str, reason: str) -> None:
+        self._mission_token = None
+        # The follower must forget the task it was watching: it is no longer
+        # the task the engine is running, and its own "someone else has the
+        # wheel" check reads `state.last_task`, which is a tick behind.
+        self.mission_follower.bind_task(None)
+
+    def _day_plan_preempted(self, by: str, reason: str) -> None:
+        self._day_plan_token = None
+        self.planner.bind_task(None)
+
+    def _governor_preempted(self, by: str, reason: str) -> None:
+        self._governor_token = None
+        self._park_task_id = None
+        self._park_deadline = 0.0
+
+    def _interior_preempted(self, by: str, reason: str) -> None:
+        """Something above the escape took the wheel (a firefight, a mission).
+
+        The ladder is NOT abandoned — he is still in the building and
+        `player.interior` will still say so on the next tick — but the rung it
+        had running has been preempted by definition (CONTRACTS §1: a new task
+        preempts the old one), so its 30 s clock is meaningless and it asks for
+        the wheel again from the same rung once the higher owner is done.
+        """
+        self._interior_token = None
+        self.interior_escape.retry_step()
+        log.info(
+            "exit_interior preempted",
+            extra={
+                "kv": {
+                    "interior_id": self.interior_escape.interior_id,
+                    "by": by,
+                    "reason": reason,
+                }
+            },
+        )
+
+    def _run_interior_escape(self, state: GameState) -> bool:
+        """CONTRACTS v1.12: walk him out of the interior he is standing in.
+
+        Returns True while the escape owns this tick (it holds the wheel and
+        the layers below must stand down), False once it has given up or was
+        refused the wheel by a higher owner.
+
+        THE POINT OF THIS METHOD is that it is REACHED. The previous version of
+        this behaviour (`HouseEscape`) was real code with real tests that the
+        live loop essentially never called, because the only way in was a
+        heuristic needing 20 s of stillness AND a failed `enter_nearest_vehicle`
+        on the same snapshot. `interior_detected` below is logged at the moment
+        of detection in the LIVE tick precisely so that its presence in a
+        session log is proof of reachability rather than an argument about it.
+        """
+        interior = state.player.interior
+        assert interior is not None  # applies() is the caller's guard
+
+        # True the first tick the ladder engages for THIS interior id — including
+        # walking straight from one interior into another, which is a new problem
+        # with a new way out.
+        first = self.interior_escape.interior_id != interior.id
+        action = self.interior_escape.check(state)
+        if not self.interior_escape.active():
+            # It gave up (or stood itself down). Hand the wheel back rather than
+            # sitting on it: the rest of the loop still has a show to run.
+            self._release_interior_wheel("escape exhausted")
+            return False
+        if first:
+            log.warning(
+                "interior_detected",
+                extra={
+                    "kv": {
+                        "id": interior.id,
+                        "since_s": round(interior.since_s, 1),
+                        "has_last_outdoor": state.player.last_outdoor is not None,
+                        "protagonist": state.player.protagonist,
+                    }
+                },
+            )
+
+        # An OPEN lease, renewed every tick: the ladder spans many ticks and its
+        # rungs have their own timeouts, and holding it is what makes free roam
+        # stand down (`_drive_activities` returns on `wheel.taken_by_reflex()`)
+        # instead of locking a goal it cannot walk to from a living room.
+        token = self.wheel.acquire(
+            "exit_interior", f"exit_interior: interior {interior.id}", lease_ticks=None
+        )
+        if token is None:
+            # Outranked — a firefight, or the game took the controls. The rung
+            # keeps its place; it asks again next tick.
+            self._interior_token = None
+            return False
+        self._interior_token = token
+        if action is None:
+            return True  # a rung is running; let it have its 30 s
+        log.info(
+            "exit_interior step",
+            extra={
+                "kv": {
+                    "step": self.interior_escape.step,
+                    "interior_id": interior.id,
+                    "target": [round(action["params"][k], 1) for k in ("x", "y", "z")],
+                }
+            },
+        )
+        task_id = self._execute_action(action["type"], action["params"], token)
+        if task_id is None:
+            # Refused downstream (a modal screen, a blocked task type). The rung
+            # never happened, so it does not burn its timeout.
+            self.interior_escape.retry_step()
+        else:
+            self.interior_escape.posted(task_id)
+        return True
+
+    def _release_interior_wheel(self, why: str) -> None:
+        """Hand the wheel back, so normal selection resumes on this same tick."""
+        if self._interior_token is None:
+            return
+        next_up = self.wheel.release(self._interior_token)
+        self._interior_token = None
+        log.info(
+            "exit_interior released the wheel",
+            extra={"kv": {"why": why, "next_in_line": next_up}},
+        )
 
     def _vehicle_hold(self, state: GameState) -> str | None:
         """Why sitting still in a car is CORRECT right now — or None.
@@ -1875,21 +2209,92 @@ class Harness:
             )
             time.sleep(reaction_delay(self.rng))
             return
-        if d.action.type in BRIDGE_TASKS:
-            self._end_activity_if_running("preempted_by_decision")
+        if d.action.type not in BRIDGE_TASKS:
+            # A primitive posts no task and preempts nothing, so it never asks
+            # the wheel: radio, horn, look_around and a short wait keep the
+            # commentary alive even on a tick survival owns.
+            time.sleep(reaction_delay(self.rng))  # humanizer: 300-900 ms reaction
+            self._execute_action(d.action.type, d.action.wire_params())
+            return
+        # ARBITRATED, not merely registered. The brain used to `force()` its way
+        # onto the wheel: it had no stand-down rule against the reflex layer, so
+        # a decision computed from a snapshot 1-2 s old could post navigation
+        # straight over a combat task issued milliseconds earlier and
+        # ThreatLatch's hold-down would then suppress the re-post — the reflex
+        # silently defeated. `brain` sits in the MISSION class: it outranks the
+        # mission follower, the day plan and free roam (a deliberate decision
+        # beats a structural one), and it yields to the reflex ladder.
+        token = self.wheel.acquire("brain", f"{layer} decision: {d.action.type}")
+        if token is None:
+            log.info(
+                "decision action dropped: the wheel is held by a higher owner",
+                extra={
+                    "kv": {
+                        "action": d.action.type,
+                        "held_by": self.wheel.owner,
+                        "held_reason": self.wheel.reason,
+                    }
+                },
+            )
+            time.sleep(reaction_delay(self.rng))
+            return
+        # A bridge task from the brain ends whatever free roam was doing. The
+        # wheel's preempt hook has usually already done it (roam is below the
+        # brain, so acquiring took the wheel off it); this covers a handoff goal
+        # that holds no token because it posts nothing of its own.
+        self._end_activity_if_running("preempted_by_decision")
         time.sleep(reaction_delay(self.rng))  # humanizer: 300-900 ms reaction
-        # Registered, not arbitrated: the brain has no stand-down rule against
-        # the reflex layer today and inventing one here would be a silent
-        # behaviour change. A collision is logged as a conflict instead, which
-        # is the diagnosis the old single bool could never produce.
-        self.wheel.force("brain", f"{layer} decision: {d.action.type}")
-        self._execute_action(d.action.type, d.action.wire_params())
+        self._execute_action(d.action.type, d.action.wire_params(), token)
 
-    def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
+    def _execute_action(
+        self,
+        action_type: str,
+        params: dict[str, Any],
+        token: MovementToken | None = None,
+    ) -> str | None:
         """Run one decision-schema action. Returns the bridge task id when the
         action posted a task (POST /task's `task_id` is authoritative — the
         caller must match on it, never on whatever id the next snapshot shows),
-        and None for primitives, quiet periods and failures."""
+        and None for primitives, quiet periods and failures.
+
+        **THE MOVEMENT GATE.** Every CONTRACTS §1 bridge task must carry the
+        movement wheel's current token or it is refused here. The wheel's own
+        spec said to put this assertion in the bridge; it is here instead, on
+        purpose and with no wire change:
+
+        * the harness is the bridge's ONLY client, and this method is the ONLY
+          funnel — every reflex, every planner, every roam step, every brain
+          decision and every primitive already passes through it, because the
+          cutscene / dead / blocking-screen / stalled-type refusals all live
+          here and each of them was moved here for the same reason;
+        * so a token check here gives exactly the guarantee "no bridge task
+          reaches the game without the wheel", with no `POST /task` body
+          change, no CONTRACTS version bump and no bridge redeploy on a
+          production box we are not allowed to touch.
+
+        §2 primitives take no token: `look_around` is a mouse sweep, `wait`
+        posts nothing at all, `radio`/`horn` are their own endpoints and
+        `brake_tap`/`swerve`/`reverse_out`/`press_prompt_key` are short raw key
+        holds. None of them is a `POST /task`, so none of them preempts a
+        running task, so none of them belongs to the wheel.
+        """
+        if action_type in BRIDGE_TASKS and not self.wheel.holds(token):
+            # The caller was refused (or never asked) and posted anyway. That is
+            # a bug in the caller, not a condition of the world, so it is loud.
+            log.error(
+                "task refused: the caller does not hold the movement wheel",
+                extra={
+                    "kv": {
+                        "type": action_type,
+                        "token_owner": None if token is None else token.owner,
+                        "token": None if token is None else token.id,
+                        "held_by": self.wheel.owner,
+                        "held_reason": self.wheel.reason,
+                        "tick": self.wheel.tick,
+                    }
+                },
+            )
+            return None
         if action_type in BRIDGE_TASKS and (
             self._cutscene_active
             or self._player_down
@@ -1954,6 +2359,14 @@ class Harness:
                     # of the driver's seat, and the "that's my car" trigger
                     # fires on his own decision to get out.
                     self.roam.note_self_exit()
+                # Latch the tick BEFORE the round trip: from here on the wheel
+                # refuses every other owner until the next `begin_tick`, so "no
+                # two movement tasks from different owners in the same tick" is
+                # structural rather than a property of the call order. Marked on
+                # the ATTEMPT, because a task lost to a bridge blip still used
+                # this tick's one shot and the reflexes will ask again next tick.
+                if token is not None:  # always true: the gate at the top said so
+                    self.wheel.mark_posted(token, action_type)
                 return self.bridge.post_task(action_type, params)
             elif action_type == "radio":
                 self.bridge.set_radio(str(params.get("station", "off")))
@@ -2007,7 +2420,13 @@ class Harness:
 
     # -- activities ------------------------------------------------------------
 
-    def _end_activity_if_running(self, outcome: str) -> None:
+    def _end_activity_if_running(self, outcome: str, *, by: str | None = None) -> None:
+        # Free roam's goal is over, so free roam's claim on the wheel is over
+        # too. Released FIRST and unconditionally: a token left behind by a
+        # goal that has ended is a hold nothing will ever give back, and the
+        # owners below `roam` would wait on it forever.
+        self._roam_token = None
+        self.wheel.release_owner("roam")
         # One slot, one owner: closing the step machine also closes the roam
         # goal that owned it, so the two can never disagree about whether
         # something is running. `close` returns the goal id, the quotable `why`
@@ -2024,6 +2443,11 @@ class Harness:
             return
         _, payload = ended
         payload.update(extra)
+        if by is not None:
+            # The harness's `roam_goal_failed{reason: "preempted", by: <owner>}`.
+            # See ROAM_PREEMPTED at the top of this file for why it rides on
+            # `activity_end` instead of being a §4 type of its own.
+            payload["by"] = by
         self.writer.record_event("activity_end", payload)
 
     def _drive_activities(self, state: GameState) -> None:
@@ -2054,8 +2478,20 @@ class Harness:
         self.roam.observe(state, mood=self.mood.mood, mood_style=self.mood.driving_style())
 
         # 2. Grade the locked goal against the world.
-        if self.roam.current is not None and self._judge_roam_goal(state):
-            return
+        if self.roam.current is not None:
+            # A locked goal is not up for renegotiation. If the model named a
+            # DIFFERENT id this tick it is ignored on purpose — switching
+            # mid-goal is exactly the boring loop free roam exists to prevent —
+            # but it is logged, because a run of these means the prompt is not
+            # telling him to repeat the locked id and the menu keeps tempting him.
+            said = self.roam.model_choice(self.current_goal)
+            if said is not None and said != self.roam.current.goal.id:
+                log.info(
+                    "goal_switch_ignored: a goal is locked; the model named another",
+                    extra={"kv": {"locked": self.roam.current.goal.id, "named": said}},
+                )
+            if self._judge_roam_goal(state):
+                return
 
         if self.governor.level >= 3 or self.breaks.on_break:
             return
@@ -2162,19 +2598,48 @@ class Harness:
         for this roam block. A name that is not on the menu is ignored, which is
         what "the model may only pick from that list" means in code.
         """
+        # THE WHEEL FIRST, before anything is chosen. A refused acquire means
+        # free roam does NOTHING this tick: it posts no task, it starts no goal
+        # timer, and it does not even pick — a goal locked while somebody else
+        # is driving is a goal that runs its whole timeout without ever moving
+        # him, which is the "he picked something and then stood still" failure.
+        # An OPEN lease: the goal owns the wheel until it completes, fails,
+        # times out or is preempted, not just for this tick.
+        token = self.wheel.acquire("roam", "picking a goal", lease_ticks=None)
+        if token is None:
+            return
         # `observe` refreshed the menu at the top of this tick, so the id the
         # model named is validated against what is on offer NOW.
         chosen = self.roam.model_choice(self.current_goal)
+        if chosen is None and self.roam.offered_ids():
+            # The one decision in free roam that is genuinely the model's, and it
+            # did not make it: the `goal` field named no offered id (or named
+            # two). The engine falls back to the head of the menu, which is the
+            # triggered offer when there is one, so the show carries on — but
+            # this is logged because a RUN of these means the prompt and the menu
+            # have drifted apart, and that is invisible from the stream.
+            log.info(
+                "goal_fallback: the model named no offered goal; taking the top of the menu",
+                extra={"kv": {"said": (self.current_goal or "")[:80],
+                              "offered": list(self.roam.offered_ids())}},
+            )
         picked = self.roam.pick(
             state, goal_id=chosen, prefer=self.planner.roam_preference
         )
         if picked is None:
+            self.wheel.release(token)
             return
+        self._roam_token = token
         locked, first = picked
         if locked.goal.handoff:
             # It posts nothing itself: the day planner owns the trip to a marker
             # end to end, and this goal exists to ASK for it and then watch
-            # `mission.active` for the answer.
+            # `mission.active` for the answer. So it gives the wheel straight
+            # back — holding it would mean the day plan had to PREEMPT the goal
+            # that just asked it for a favour, and the preemption would cancel
+            # that goal one tick after it started.
+            self._roam_token = None
+            self.wheel.release(token)
             self.planner.request_mission_block(locked.why)
             self.planner.roam_activity_started(locked.goal.id)
             self.writer.record_event(
@@ -2186,6 +2651,8 @@ class Harness:
         activity = as_activity(locked.goal)
         step = self.activity_runner.start_plan(activity, locked.plan)
         if step is None:
+            self._roam_token = None
+            self.wheel.release(token)
             self.roam.close("no_plan")
             return
         self.planner.roam_activity_started(locked.goal.id)
@@ -2209,9 +2676,24 @@ class Harness:
         `last_task.id` is what stops the runner from latching the PREVIOUS task
         (3 Hz poll vs a 60 Hz game thread) and skipping the step.
         """
-        self.wheel.force("activity", step["type"])
-        task_id = self._execute_action(step["type"], step["params"])
-        if step["type"] in BRIDGE_TASKS and task_id is None:
+        if step["type"] not in BRIDGE_TASKS:
+            # `look_around`, `press_prompt_key`, a short `wait`: no task, no
+            # preemption, no wheel. A goal is allowed to breathe on a tick
+            # survival owns.
+            self.activity_runner.bind_step_task(self._execute_action(step["type"], step["params"]))
+            return
+        # The goal already holds the wheel (`_begin_roam_goal` took it before it
+        # picked). Re-acquiring rather than trusting the cached token is what
+        # makes a preemption STICK: if something above free roam has taken it,
+        # this is refused and the step is not posted over the top of them.
+        token = self.wheel.acquire("roam", step["type"], lease_ticks=None)
+        if token is None:
+            # Refused: the goal is already over (the preempt hook ended it the
+            # moment the wheel changed hands), so there is nothing left to bind.
+            return
+        self._roam_token = token
+        task_id = self._execute_action(step["type"], step["params"], token)
+        if task_id is None:
             # The step never reached the game (bridge down / not ready). Nothing
             # will complete it; end the activity now rather than sit through the
             # step timeout pretending it is running.
@@ -2254,8 +2736,18 @@ class Harness:
             return
         if time.monotonic() < self._quiet_until:
             return  # honour a deliberate `wait` from the brain
-        self.wheel.force("day_plan", outcome.task["type"])
-        task_id = self._execute_action(outcome.task["type"], outcome.task["params"])
+        # An OPEN lease: the trip to a mission-start marker spans many ticks and
+        # the planner's own re-post latch depends on nothing else stealing it in
+        # between. Above `roam` and below `mission`/`brain`, so the trip
+        # preempts a free-roam goal (that is what a mission block MEANS) and
+        # yields to the mission itself the moment it starts.
+        token = self.wheel.acquire(
+            "day_plan", outcome.task["type"], lease_ticks=None
+        )
+        if token is None:
+            return
+        self._day_plan_token = token
+        task_id = self._execute_action(outcome.task["type"], outcome.task["params"], token)
         self.planner.bind_task(task_id)
 
     # -- mission following -------------------------------------------------------
@@ -2281,8 +2773,16 @@ class Harness:
         step = self.mission_follower.plan(state)
         if step is None:
             return
-        self.wheel.force("mission", step["type"])
-        task_id = self._execute_action(step["type"], step["params"])
+        # `mission.active` already put the wheel in `mission`'s hands (see
+        # `_reflex`); this renews that hold and returns the live token. It is
+        # refused only when the reflex ladder or a brain decision owns the tick,
+        # and in both of those cases posting objective navigation over the top
+        # is exactly the double-post this arbitration exists to stop.
+        token = self.wheel.acquire("mission", step["type"], lease_ticks=None)
+        if token is None:
+            return
+        self._mission_token = token
+        task_id = self._execute_action(step["type"], step["params"], token)
         self.mission_follower.bind_task(task_id)
 
     # -- governor L3 -----------------------------------------------------------
@@ -2300,21 +2800,38 @@ class Harness:
         self._end_activity_if_running("governor_l3")
         self._park_task_id = None
         self._park_deadline = 0.0
+        # The budget stop is a REFLEX-class owner on an open lease: it holds the
+        # wheel from here until the `stop` at the end of the drive, so nothing
+        # below it can wander him back out of the parking spot — which is how
+        # L3 came to mean nothing at all the first time round.
+        token = self.wheel.acquire("governor", "L3: park somewhere scenic", lease_ticks=None)
+        if token is None:
+            log.info(
+                "governor L3 park deferred: the wheel is held",
+                extra={"kv": {"held_by": self.wheel.owner, "held_reason": self.wheel.reason}},
+            )
+            self._pending_park = True  # ask again next tick; the cap has not moved
+            return
+        self._governor_token = token
         if not state.player.in_vehicle or state.player.dead or state.player.arrested:
             # On foot / dead / in a cell: there is no car to be asleep in. Stop
             # and say so plainly rather than walking him across the map.
-            self._execute_action("stop", {})
+            self._execute_action("stop", {}, token)
+            self._governor_token = None
+            self.wheel.release(token)
             self._say(
                 "Out of budget for the hour. Standing right here until the meter resets."
             )
             return
         pos = (state.player.pos.x, state.player.pos.y, state.player.pos.z)
         spot, plan = scenic_park_plan(pos, self.mood.driving_style())
-        task_id = self._execute_action(plan[0]["type"], plan[0]["params"])
+        task_id = self._execute_action(plan[0]["type"], plan[0]["params"], token)
         if task_id is None:
             # Could not post the drive (bridge down / not ready): stop where he
             # is. Better parked badly than driving with nobody watching.
-            self._execute_action("stop", {})
+            self._execute_action("stop", {}, token)
+            self._governor_token = None
+            self.wheel.release(token)
             self._say("Out of budget for the hour. Parking. Back when the meter resets.")
             return
         self._park_task_id = task_id
@@ -2335,6 +2852,8 @@ class Harness:
             # The hour reset mid-drive; he is awake and the drive is his again.
             self._park_task_id = None
             self._park_deadline = 0.0
+            self._governor_token = None
+            self.wheel.release_owner("governor")
             return
         lt = state.last_task
         arrived = lt.id == self._park_task_id and lt.status in ("done", "failed")
@@ -2345,8 +2864,16 @@ class Harness:
         self._park_task_id = None
         self._park_deadline = 0.0
         if hijacked:
-            return  # something else is driving; do not fight it
-        self._execute_action("stop", {})
+            # Something else is driving; do not fight it. The wheel says who,
+            # and the park gives up its claim rather than sitting on it.
+            self._governor_token = None
+            self.wheel.release_owner("governor")
+            return
+        token = self.wheel.acquire("governor", "L3: parked, engine off", lease_ticks=None)
+        if token is not None:
+            self._execute_action("stop", {}, token)
+            self._governor_token = None
+            self.wheel.release(token)
         self._say(
             "Parked. Engine off, meter running down. Back when the hour resets.", "chill"
         )
@@ -2479,6 +3006,10 @@ class Harness:
         # "that bus has been stopped for 3 s" is void behind a new game process.
         self.roam = RoamEngine(self.rng)
         self.house_escape = HouseEscape()
+        # Interior-proxy handles belong to the dead process, and so does every
+        # exit this run had learned for them.
+        self.interior_escape = InteriorEscape()
+        self._interior_token = None
         self.missions = MissionTracker()
         self.mission_follower = MissionFollower()
         self.planner = DayPlanner(self.rng)
@@ -2825,7 +3356,14 @@ class Harness:
                         ):
                             idle = self.idle.pick(self.mood.mood)
                             if idle is not None:
-                                self.wheel.force("idle", idle.action["type"])
+                                # `idle` is the bottom rung of the ladder and it
+                                # never needs the wheel: every one of
+                                # IdlePicker's behaviours is a §2 primitive
+                                # (`look_around`, `radio`, `wait`, `horn`), so
+                                # it posts no task and preempts nothing. Noted
+                                # rather than acquired so the log still says
+                                # who filled the tick.
+                                self.wheel.note("idle", idle.action["type"])
                                 self._execute_action(idle.action["type"], idle.action["params"])
 
                 # All three run AFTER the brain, so a decision always gets first

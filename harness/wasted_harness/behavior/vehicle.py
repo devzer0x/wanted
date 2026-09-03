@@ -664,152 +664,600 @@ class VehicleController:
         return "VEHICLE: on foot."
 
 
-# --- controller ownership (brief 55) -----------------------------------------
+# --- movement ownership: the wheel GATES, it does not merely record ----------
+#
+# WHAT CHANGED AND WHY (the operator's words, 2026-09-03): "Free roam registers
+# with MovementWheel after posting its task. Two owners can issue movement in
+# the same tick (roam + reflex, roam + mission), which is the deadlock class
+# that produced 'follow Lamar while standing next to the objective car'."
+#
+# The first version of this class was ADVISORY. `claim()` returned a bool the
+# caller was free to ignore and `force()` only logged a WARNING when a second
+# layer posted on the same tick. It recorded history; it prevented nothing. So
+# a mission-follow `follow_entity` and a roam-goal `walk_to` could both reach
+# `POST /task` inside one tick, and CONTRACTS §1 is explicit that "posting a
+# new task preempts the running one" — the two orders cancelled each other out
+# at the poll rate and the agent stood still next to the thing he was meant to be
+# driving to.
+#
+# This version is a GATE. `acquire()` hands out a token or refuses, `release()`
+# gives it back, and `main._execute_action` — the single funnel every bridge
+# task in this harness passes through — will not POST a task whose token is not
+# the current holder's.
+#
+# WHAT IT ARBITRATES, precisely: **CONTRACTS §1 bridge tasks**, all twelve, and
+# nothing else. That is the whole deadlock currency, because posting any one of
+# them preempts whatever task is running (§1). The §2 primitives are NOT
+# arbitrated: `look_around` is a mouse sweep, `wait` posts nothing at all,
+# `radio`/`horn` are their own endpoints, `press_prompt_key` is one 100 ms "E",
+# and `brake_tap`/`swerve`/`reverse_out` are 200–2000 ms key holds that exist
+# *specifically* to nudge a car while somebody else's drive task keeps running
+# — that is why the stuck ladder's first rungs are keypresses rather than
+# tasks, and gating them here would re-open the reflex-starvation bug that
+# design fixed. A reflex whose action is a primitive calls :meth:`note`
+# instead: it is logged, it keeps `taken_by_reflex()` honest, and it refuses
+# nobody.
 
-#: Every layer that can post a movement task, in the order a tick reaches them.
-#: Used only for logging and for the assertion in the tests that nobody claims
-#: under a name the log will not explain.
-MOVEMENT_OWNERS: tuple[str, ...] = (
-    "threat",  # recovery.threat_action — survival, outranks everything
-    "vehicle",  # this module — drive away / get the car moving
-    "physical",  # StuckDetector / flipped_action — unwedge, get out of a flip
-    "stranded",  # StrandedEscalator — find a car at all
-    "governor",  # governor L2 wander / L3 scenic park
-    "brain",  # a tactical/director decision
-    "idle",  # IdlePicker
-    "day_plan",  # DayPlanner's trip to a mission marker
-    "activity",  # ActivityRunner's current step
-    "mission",  # MissionFollower's objective navigation
+#: The four ownership CLASSES of the operator's ladder. Higher wins.
+WHEEL_REFLEX = 3
+WHEEL_MISSION = 2
+WHEEL_ROAM = 1
+WHEEL_IDLE = 0
+
+WHEEL_CLASS_NAMES: dict[int, str] = {
+    WHEEL_REFLEX: "reflex",
+    WHEEL_MISSION: "mission",
+    WHEEL_ROAM: "roam",
+    WHEEL_IDLE: "idle",
+}
+
+
+@dataclass(frozen=True)
+class MovementOwner:
+    """One layer that can post a bridge task, and where it sits in the ladder.
+
+    `klass` is the operator's four-rung ladder (reflex > mission > roam >
+    idle). `rank` breaks ties *inside* a class, because this harness has more
+    layers than the ladder has rungs and their relative order is already known
+    and already tested — survival outranks the drive-away reflex, the
+    drive-away reflex outranks the stranded search, and so on. The pair
+    `(klass, rank)` is a strict total order, so "higher or equal priority
+    wins" only ever means "the same owner is renewing", which is exactly what
+    it should mean.
+    """
+
+    name: str
+    klass: int
+    rank: int
+    what: str
+
+
+#: Every layer that can post a bridge task, highest priority first. The order
+#: of this table is the specification: a tick must reach these layers in this
+#: order, because the first bridge task posted in a tick is the only one.
+MOVEMENT_OWNER_TABLE: tuple[MovementOwner, ...] = (
+    MovementOwner("flip", WHEEL_REFLEX, 7, "upside down / in the water: get out"),
+    MovementOwner("threat", WHEEL_REFLEX, 6, "survival, and clearing a task that has him pinned"),
+    MovementOwner("vehicle", WHEEL_REFLEX, 5, "drive away / get the car moving"),
+    MovementOwner("physical", WHEEL_REFLEX, 4, "wedged: reverse_out / swerve / unstick"),
+    MovementOwner("governor", WHEEL_REFLEX, 3, "budget override: L2 wander, L3 scenic park"),
+    # CONTRACTS v1.12: `player.interior` says he is indoors, so he is. Above
+    # `house_escape` (which is the pre-v1.12 GUESS at the same thing) and above
+    # `stranded` (whose whole answer is to widen a vehicle search, which from
+    # inside a building only ever picks a car behind more walls). Below the
+    # survival and physical rungs: being shot at indoors is still worse than
+    # being indoors. It holds an OPEN lease — the ladder runs across many ticks
+    # with its own per-step timeouts — which is also what stops free roam
+    # picking a goal it could not possibly walk to while he is in a living room.
+    MovementOwner("exit_interior", WHEEL_REFLEX, 2, "indoors (player.interior): walk out"),
+    MovementOwner("house_escape", WHEEL_REFLEX, 1, "apparently indoors: walk out"),
+    MovementOwner("stranded", WHEEL_REFLEX, 0, "on foot with no car"),
+    MovementOwner("brain", WHEEL_MISSION, 2, "a tactical/director decision"),
+    MovementOwner("mission", WHEEL_MISSION, 1, "MissionFollower's objective navigation"),
+    MovementOwner("day_plan", WHEEL_MISSION, 0, "DayPlanner's trip to a mission-start marker"),
+    MovementOwner("roam", WHEEL_ROAM, 0, "the locked free-roam goal's plan steps"),
+    MovementOwner("idle", WHEEL_IDLE, 0, "IdlePicker — posts no bridge task at all"),
 )
+
+OWNERS_BY_NAME: dict[str, MovementOwner] = {o.name: o for o in MOVEMENT_OWNER_TABLE}
+
+#: Kept as a flat tuple of names because that is what a log grep and a test
+#: assertion actually want ("nobody claims under a name the log will not
+#: explain").
+MOVEMENT_OWNERS: tuple[str, ...] = tuple(o.name for o in MOVEMENT_OWNER_TABLE)
+
+
+class UnknownMovementOwner(KeyError):
+    """An owner name that is not in :data:`MOVEMENT_OWNER_TABLE`.
+
+    Raised rather than tolerated: an unknown owner has no place in the ladder,
+    so it could neither be refused nor preempted correctly, and a typo'd owner
+    name is exactly the bug this class exists to make impossible.
+    """
+
+
+def _priority(owner: str) -> tuple[int, int]:
+    try:
+        entry = OWNERS_BY_NAME[owner]
+    except KeyError as exc:  # pragma: no cover - defensive, see the docstring
+        raise UnknownMovementOwner(owner) from exc
+    return (entry.klass, entry.rank)
+
+
+@dataclass(frozen=True)
+class MovementToken:
+    """Proof that the bearer holds the wheel.
+
+    `id` is a plain incrementing integer. It is NOT a security boundary and is
+    not meant to be one — the only holders of a token are our own layers in
+    our own process, and the thing being defended against is one of them
+    posting a task it was refused (a bug), not an attacker forging one. An
+    incrementing id plus the owner name is enough to catch that, costs nothing
+    and reads clearly in the log.
+    """
+
+    id: int
+    owner: str
+    reason: str
+    tick: int
 
 
 @dataclass
 class MovementWheel:
-    """Exactly one owner of movement per tick, and a log line whenever it changes.
+    """One owner of bridge-task movement at a time, enforced, and logged.
 
-    `main._threat_has_the_wheel` was the seed of this: a single bool set by the
-    reflex layer so the three planners that run later in the SAME tick stand
-    down (their own "someone else has the wheel" checks read `state.last_task`,
-    which predates the reflex's POST and therefore cannot see it). It worked,
-    and it was invisible: when the agent did nothing there was no way to tell which
-    layer had the wheel and declined to use it, so "he just sits there" could
-    only be diagnosed by guessing.
+    THE RULES (the operator's spec, implemented literally):
 
-    This makes it explicit. First claim in a tick wins, which is exactly the
-    existing precedence because the tick already reaches the layers in priority
-    order (reflex → brain → day plan → activities → mission). A refused claim is
-    logged at DEBUG; a CHANGE of owner between ticks is logged at INFO with the
-    reason, so the log answers "who was driving, and why did nobody else get a
-    turn" without a rerun.
+    * ``token = wheel.acquire(owner, reason)`` returns a token, or ``None``.
+      A refusal means **the caller must do nothing this tick** — no task, no
+      timers, no goal pick, no commentary.
+    * Higher priority than the current holder wins and the current holder is
+      PREEMPTED (its token stops working and its preempt hook runs). The same
+      owner asking again simply renews and gets its token back. Lower priority
+      is refused.
+    * ``wheel.release(token)`` when that owner's work completes, fails or times
+      out. It returns the name of the highest-priority owner that was refused
+      while the wheel was held, so the log says who is next in line.
+    * Every posted task carries its token and `main._execute_action` refuses to
+      post when the token is not the current holder's.
+    * On ``mission.active`` false→true the wheel goes to ``mission``
+      unconditionally. On true→false ``mission`` releases.
+    * Death, a cutscene, a protagonist switch, a checkpoint reload, or
+      ``control_enabled`` false: the holder is forced to ``idle`` and whatever
+      it was running is cancelled through its preempt hook.
+    * Every acquire, release, renew, refusal, preemption and forced idle is
+      logged with owner, reason and tick. This log is how a deadlock gets
+      diagnosed on stream, so it is complete and greppable rather than tidy:
+      grep ``wheel``.
+
+    LEASES. A token is either a **one-tick lease** (the default) or an **open
+    lease** (``lease_ticks=None``). The reflex layer is a set of pure functions
+    re-evaluated from scratch every tick, so it takes one-tick leases and
+    simply asks again next tick if it still needs the wheel; nothing there can
+    forget to release. The layers that own something across many ticks — a
+    locked roam goal, an active mission, the day plan's trip to a marker, the
+    governor's scenic park — take an open lease and release explicitly. A
+    missing ``release()`` on an open lease therefore cannot wedge the show:
+    everything above that owner can still preempt it, and the owner itself can
+    still renew. Holding one for a very long time is reported as a WARNING
+    rather than force-released, because force-releasing mid-mission would be a
+    worse failure than the one being reported.
+
+    ONE TASK PER TICK, STRUCTURALLY. Priority alone does not give that: a
+    high-priority layer that runs late in the tick could preempt a low one that
+    has already posted, and both tasks would be on the wire. So the wheel also
+    remembers that a task was posted this tick (``mark_posted``) and refuses
+    every acquire by a DIFFERENT owner for the rest of it, whatever the
+    priority. The ladder is therefore enforced by the ORDER the tick reaches
+    the layers in, and :data:`MOVEMENT_OWNER_TABLE` is that order written down.
     """
 
     clock: Any = time.monotonic
-    _owner: str | None = None
-    _reason: str = ""
-    _last_owner: str | None = None
-    _owner_since: float = 0.0
+    #: How long a single holder may keep an open lease before the log starts
+    #: complaining. Not a release: see the class docstring.
+    long_hold_warn_s: float = 300.0
 
-    def begin_tick(self) -> None:
-        """Called once per poll tick, before any layer may claim."""
-        self._owner = None
-        self._reason = ""
+    _holder: MovementToken | None = None
+    _lease_until: int | None = None
+    _next_id: int = 0
+    _tick: int = 0
+    _held_since: float = 0.0
+    _warned_at: float = 0.0
+    _posted_tick: int = -1
+    _posted_owner: str | None = None
+    _noted_reflex_tick: int = -1
+    _waiting: dict[str, str] = field(default_factory=dict)
+    _hooks: dict[str, Any] = field(default_factory=dict)
+    _mission_active: bool = False
+    _forced_idle: bool = False
 
-    def claim(self, owner: str, reason: str = "") -> bool:
-        """Try to take the wheel for this tick. True = granted."""
-        if self._owner is not None:
-            log.debug(
-                "movement claim refused",
-                extra={"kv": {"wanted": owner, "held_by": self._owner, "reason": reason}},
-            )
-            return False
-        self._owner = owner
-        self._reason = reason
-        now = self.clock()
-        if owner != self._last_owner:
-            log.info(
-                "movement owner changed",
-                extra={
-                    "kv": {
-                        "from": self._last_owner,
-                        "to": owner,
-                        "reason": reason,
-                        "held_for_s": round(now - self._owner_since, 1) if self._last_owner else None,
-                    }
-                },
-            )
-            self._last_owner = owner
-            self._owner_since = now
-        return True
+    # -- wiring ----------------------------------------------------------------
 
-    def force(self, owner: str, reason: str = "") -> None:
-        """Record a movement post from a layer that is not arbitrated here.
+    def on_preempt(self, owner: str, hook: Any) -> None:
+        """Register what to cancel when `owner` loses the wheel.
 
-        The brain's own decision, the idle picker, the day plan, the activity
-        runner and the mission follower each already have their own stand-down
-        rules (`main._threat_has_the_wheel`, `MissionFollower
-        ._someone_else_has_the_wheel`, `ActivityRunner.bind_step_task`), and
-        those rules are older and better tested than this class. Rewriting
-        their precedence from here would be a silent behaviour change, so they
-        REGISTER instead of asking permission — and if that registration
-        collides with a claim already made this tick, it is logged as a
-        conflict at WARNING. That is the diagnosis the old single bool could
-        never produce: "two layers posted movement on the same tick, here is
-        which two".
+        The wheel cannot reach the roam engine or the activity runner from
+        here without an import cycle, and it should not try: "what does losing
+        the wheel mean for this layer" is that layer's business. `main` wires
+        the hooks in its constructor. The hook is called with
+        ``(by: str, reason: str)`` AFTER the new holder is installed, so a hook
+        that touches the wheel sees the new truth.
         """
-        if self._owner is not None and self._owner != owner:
+        _priority(owner)  # reject a typo at wiring time, not at 3 Hz
+        self._hooks[owner] = hook
+
+    # -- the tick --------------------------------------------------------------
+
+    def begin_tick(self, tick: int | None = None) -> None:
+        """Open a movement tick. Expires one-tick leases; nothing else."""
+        self._tick = self._tick + 1 if tick is None else tick
+        holder = self._holder
+        if holder is not None and self._lease_until is not None and self._tick > self._lease_until:
+            # Not a preemption: the owner simply stopped asking. No hook runs —
+            # nothing was taken from it.
+            log.debug(
+                "wheel lease expired",
+                extra={"kv": {"owner": holder.owner, "reason": holder.reason, "tick": self._tick}},
+            )
+            self._holder = None
+            self._lease_until = None
+            self._forced_idle = False
+            self._waiting.clear()
+
+    def end_tick(self) -> None:
+        """Close the movement tick. Records who ended it holding the wheel.
+
+        A tick that ends with nobody holding and nobody having posted is the
+        exact shape of the observed "he just stands there" failure, so it is
+        recorded rather than passed over in silence.
+        """
+        if self._holder is None:
+            if self._posted_tick != self._tick:
+                log.debug("wheel idle: nobody moved him this tick", extra={"kv": {"tick": self._tick}})
+            return
+        held_for = self.clock() - self._held_since
+        if (
+            self._lease_until is None
+            and held_for >= self.long_hold_warn_s
+            and self.clock() - self._warned_at >= self.long_hold_warn_s
+        ):
+            self._warned_at = self.clock()
             log.warning(
-                "two layers posted movement on the same tick",
+                "wheel held for a long time; nothing below this owner can move him",
                 extra={
                     "kv": {
-                        "held_by": self._owner,
-                        "held_reason": self._reason,
-                        "also_posted": owner,
-                        "reason": reason,
+                        "owner": self._holder.owner,
+                        "reason": self._holder.reason,
+                        "held_for_s": round(held_for, 1),
+                        "tick": self._tick,
+                        "waiting": ",".join(sorted(self._waiting)) or None,
                     }
                 },
             )
+
+    # -- acquire / release -----------------------------------------------------
+
+    def acquire(
+        self, owner: str, reason: str = "", *, lease_ticks: int | None = 1
+    ) -> MovementToken | None:
+        """Take (or renew) the wheel for `owner`. `None` means REFUSED.
+
+        A refusal is an instruction: post nothing, start no timer, pick no
+        goal, say nothing about it. `lease_ticks=None` is an open lease held
+        until `release()` or a preemption.
+        """
+        priority = _priority(owner)
+        holder = self._holder
+
+        if self._posted_tick == self._tick and self._posted_owner != owner:
+            # A bridge task is already on the wire this tick and it belongs to
+            # somebody else. Priority does not get to undo that: preempting it
+            # now would put two orders in front of the engine in one tick,
+            # which is the whole failure this class exists to stop.
+            return self._refuse(owner, reason, "a task is already posted this tick", holder)
+
+        if holder is not None and holder.owner == owner:
+            renewed = MovementToken(id=holder.id, owner=owner, reason=reason or holder.reason, tick=holder.tick)
+            self._holder = renewed
+            self._lease_until = None if lease_ticks is None else self._tick + lease_ticks - 1
+            self._waiting.pop(owner, None)
+            log.debug(
+                "wheel renewed",
+                extra={"kv": {"owner": owner, "reason": reason, "tick": self._tick, "token": renewed.id}},
+            )
+            return renewed
+
+        if holder is not None and priority < _priority(holder.owner):
+            return self._refuse(owner, reason, "outranked", holder)
+
+        preempted = holder
+        token = self._grant(owner, reason, lease_ticks)
+        if preempted is not None:
+            log.info(
+                "wheel preempted",
+                extra={
+                    "kv": {
+                        "owner": preempted.owner,
+                        "held_reason": preempted.reason,
+                        "by": owner,
+                        "reason": reason,
+                        "held_for_s": round(self.clock() - self._held_since, 1),
+                        "tick": self._tick,
+                    }
+                },
+            )
+            self._fire_hook(preempted.owner, owner, reason)
+        return token
+
+    def release(self, token: MovementToken | None) -> str | None:
+        """Give the wheel back. Returns the next-highest owner that was refused.
+
+        A stale token (the owner was preempted and did not notice) releases
+        nothing and is logged — that is a bug worth seeing, not a crash.
+        """
+        if token is None:
+            return None
+        if self._holder is None or self._holder.id != token.id:
+            log.debug(
+                "wheel release ignored: not the holder",
+                extra={
+                    "kv": {
+                        "owner": token.owner,
+                        "token": token.id,
+                        "held_by": None if self._holder is None else self._holder.owner,
+                        "tick": self._tick,
+                    }
+                },
+            )
+            return None
+        return self._free(token.owner, "released")
+
+    def release_owner(self, owner: str) -> str | None:
+        """Release whatever `owner` is holding, if it is holding anything."""
+        if self._holder is None or self._holder.owner != owner:
+            return None
+        return self._free(owner, "released")
+
+    def holds(self, token: MovementToken | None) -> bool:
+        """Is this token the current holder's? The check `_execute_action` makes."""
+        return token is not None and self._holder is not None and self._holder.id == token.id
+
+    def token_for(self, owner: str) -> MovementToken | None:
+        """The live token for `owner`, or None when it is not holding."""
+        if self._holder is not None and self._holder.owner == owner:
+            return self._holder
+        return None
+
+    # -- the two overrides -----------------------------------------------------
+
+    def mission_active(self, active: bool, reason: str = "mission.active") -> MovementToken | None:
+        """The mission flag drives the wheel directly (the operator's rule).
+
+        On false→true the wheel goes to `mission` UNCONDITIONALLY: a story
+        mission starting outranks anything free roam had in mind, and whatever
+        held the wheel is preempted and cancelled. While it stays true the
+        mission keeps the wheel whenever nothing above it wants it. On
+        true→false `mission` releases.
+        """
+        if active and not self._mission_active:
+            self._mission_active = True
+            preempted = self._holder
+            token = self._grant("mission", reason, None)
+            log.info(
+                "wheel: mission started, taking the wheel unconditionally",
+                extra={
+                    "kv": {
+                        "preempted": None if preempted is None else preempted.owner,
+                        "reason": reason,
+                        "tick": self._tick,
+                    }
+                },
+            )
+            if preempted is not None:
+                self._fire_hook(preempted.owner, "mission", reason)
+            return token
+        if active:
+            return self.acquire("mission", reason, lease_ticks=None)
+        if self._mission_active:
+            self._mission_active = False
+            self.release_owner("mission")
+        return None
+
+    def force_idle(self, reason: str) -> None:
+        """The game owns the controls: nobody drives, and what was running dies.
+
+        Death, arrest, a cutscene, a protagonist switch, a checkpoint reload
+        and `control_enabled == false` all mean the same thing — a task posted
+        now reaches nobody (`main._execute_action` refuses them for exactly
+        this reason). The holder is dropped to `idle` so that the ladder starts
+        from scratch the moment control comes back.
+        """
+        if self._forced_idle and self._holder is not None and self._holder.owner == "idle":
+            self._lease_until = None
             return
-        self.claim(owner, reason)
+        preempted = self._holder
+        self._grant("idle", reason, None)
+        self._forced_idle = True
+        log.info(
+            "wheel forced to idle",
+            extra={
+                "kv": {
+                    "reason": reason,
+                    "cancelled": None if preempted is None else preempted.owner,
+                    "tick": self._tick,
+                }
+            },
+        )
+        if preempted is not None and preempted.owner != "idle":
+            self._fire_hook(preempted.owner, "idle", reason)
+
+    # -- posting ---------------------------------------------------------------
+
+    def mark_posted(self, token: MovementToken, action_type: str) -> None:
+        """`main._execute_action` calls this the moment a bridge task goes out.
+
+        This is what makes "no two movement tasks from different owners in the
+        same tick" structural rather than a consequence of call order.
+        """
+        self._posted_tick = self._tick
+        self._posted_owner = token.owner
+        log.debug(
+            "wheel: task posted",
+            extra={"kv": {"owner": token.owner, "type": action_type, "tick": self._tick}},
+        )
+
+    def note(self, owner: str, reason: str) -> None:
+        """A reflex acted this tick WITHOUT posting a bridge task.
+
+        The stuck ladder's first rungs are `reverse_out` / `swerve` keypresses
+        and `POST /unstick`; none of them preempts a running task, so none of
+        them takes the wheel — but the planners that run later in the tick
+        still must not post navigation over a recovery in progress, and that is
+        what `taken_by_reflex()` tells them. Logged like an acquire so the two
+        are equally greppable.
+        """
+        if OWNERS_BY_NAME[owner].klass == WHEEL_REFLEX:
+            self._noted_reflex_tick = self._tick
+        log.debug(
+            "wheel note: reflex acted without a task",
+            extra={"kv": {"owner": owner, "reason": reason, "tick": self._tick}},
+        )
+
+    # -- reporting -------------------------------------------------------------
 
     @property
     def owner(self) -> str | None:
-        """Who claimed movement on the tick in progress, if anyone."""
-        return self._owner
+        """Who holds the wheel right now, if anyone."""
+        return None if self._holder is None else self._holder.owner
 
     @property
     def reason(self) -> str:
-        return self._reason
+        return "" if self._holder is None else self._holder.reason
+
+    @property
+    def tick(self) -> int:
+        return self._tick
+
+    @property
+    def next_in_line(self) -> str | None:
+        """The highest-priority owner refused while the current holder has held it.
+
+        Deliberately NOT reset per tick: "who is waiting on this holder" is a
+        property of the HOLD, and a refusal on the tick a mission started is
+        still the answer to "who gets it back" ninety seconds later when the
+        mission ends. Cleared when the wheel changes hands.
+        """
+        if not self._waiting:
+            return None
+        return max(self._waiting, key=_priority)
+
+    def waiting(self) -> dict[str, str]:
+        return dict(self._waiting)
 
     def taken(self) -> bool:
-        return self._owner is not None
+        return self._holder is not None
 
     def taken_by_reflex(self) -> bool:
-        """Did a reflex-layer owner take this tick?
-
-        This is the successor to `main._threat_has_the_wheel` and it means the
-        same thing to the planners that read it: a survival or vehicle-recovery
-        action was posted milliseconds ago and `state.last_task` cannot show it
-        yet, so do not post navigation over the top of it.
-        """
-        return self._owner in ("threat", "vehicle", "physical")
-
-    def end_tick(self) -> None:
-        """Called once per tick after the last layer has had its turn.
-
-        A tick where nobody claimed is the interesting one — it is the shape of
-        the observed failure — so it is recorded as a change to `idle_tick`
-        rather than silently leaving the previous owner on the board.
-        """
-        if self._owner is None and self._last_owner != "nobody":
-            log.debug(
-                "movement owner changed",
-                extra={"kv": {"from": self._last_owner, "to": "nobody"}},
-            )
-            self._last_owner = "nobody"
-            self._owner_since = self.clock()
+        """Did the reflex layer act this tick? The successor to
+        `main._threat_has_the_wheel`, and it means the same thing to the three
+        planners that read it: a survival or physical-recovery action was
+        issued milliseconds ago and `state.last_task` cannot show it yet, so do
+        not post navigation over the top of it."""
+        if self._noted_reflex_tick == self._tick:
+            return True
+        holder = self._holder
+        return holder is not None and OWNERS_BY_NAME[holder.owner].klass == WHEEL_REFLEX
 
     def reset(self) -> None:
-        self._owner = None
-        self._reason = ""
-        self._last_owner = None
-        self._owner_since = 0.0
+        self._holder = None
+        self._lease_until = None
+        self._waiting.clear()
+        self._posted_tick = -1
+        self._posted_owner = None
+        self._noted_reflex_tick = -1
+        self._mission_active = False
+        self._forced_idle = False
+        self._held_since = self.clock()
+        self._warned_at = 0.0
+
+    # -- internals -------------------------------------------------------------
+
+    def _grant(self, owner: str, reason: str, lease_ticks: int | None) -> MovementToken:
+        # A new holder starts with an empty queue: everyone refused by the
+        # previous one gets to ask this one on its own merits.
+        self._waiting.clear()
+        self._next_id += 1
+        token = MovementToken(id=self._next_id, owner=owner, reason=reason, tick=self._tick)
+        self._holder = token
+        self._lease_until = None if lease_ticks is None else self._tick + lease_ticks - 1
+        self._held_since = self.clock()
+        self._warned_at = 0.0
+        self._forced_idle = owner == "idle" and self._forced_idle
+        self._waiting.pop(owner, None)
+        log.info(
+            "wheel acquired",
+            extra={
+                "kv": {
+                    "owner": owner,
+                    "class": WHEEL_CLASS_NAMES[OWNERS_BY_NAME[owner].klass],
+                    "reason": reason,
+                    "tick": self._tick,
+                    "token": token.id,
+                    "lease": "open" if lease_ticks is None else lease_ticks,
+                }
+            },
+        )
+        return token
+
+    def _refuse(
+        self, owner: str, reason: str, why: str, holder: MovementToken | None
+    ) -> None:
+        self._waiting[owner] = reason
+        log.info(
+            "wheel refused",
+            extra={
+                "kv": {
+                    "owner": owner,
+                    "reason": reason,
+                    "why": why,
+                    "held_by": None if holder is None else holder.owner,
+                    "held_reason": None if holder is None else holder.reason,
+                    "posted_by": self._posted_owner if self._posted_tick == self._tick else None,
+                    "tick": self._tick,
+                }
+            },
+        )
+        return None
+
+    def _free(self, owner: str, why: str) -> str | None:
+        held_for = self.clock() - self._held_since
+        self._holder = None
+        self._lease_until = None
+        self._forced_idle = False
+        nxt = self.next_in_line
+        self._waiting.clear()
+        log.info(
+            "wheel released",
+            extra={
+                "kv": {
+                    "owner": owner,
+                    "why": why,
+                    "held_for_s": round(held_for, 1),
+                    "next_in_line": nxt,
+                    "tick": self._tick,
+                }
+            },
+        )
+        return nxt
+
+    def _fire_hook(self, owner: str, by: str, reason: str) -> None:
+        hook = self._hooks.get(owner)
+        if hook is None:
+            return
+        try:
+            hook(by, reason)
+        except Exception as exc:  # pragma: no cover - a hook must never take the loop
+            log.error(
+                "wheel preempt hook failed",
+                extra={"kv": {"owner": owner, "by": by, "error": f"{type(exc).__name__}: {exc}"[:160]}},
+            )

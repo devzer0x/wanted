@@ -56,7 +56,7 @@ from wasted_harness.behavior.roam import (
     as_activity,
 )
 from wasted_harness.behavior.vehicle import MovementWheel
-from wasted_harness.brain.schemas import ACTION_TYPES
+from wasted_harness.brain.schemas import ACTION_TYPES, BRIDGE_TASKS
 from wasted_harness.bridge_client import UNKNOWN_PROTAGONIST, GameState
 from wasted_harness.main import Harness
 
@@ -907,10 +907,21 @@ class _PlanStub:
         #: `_drive_day_plan` stands down when the survival ladder claimed the
         #: tick (main.Harness._threat_has_the_wheel); no threat in these tests.
         self._threat_has_the_wheel = False
-        #: Every movement post registers with the arbiter (main.wheel).
+        #: Every movement post is ARBITRATED by the wheel (main.wheel): the
+        #: day plan's navigation carries the holder's token or it never reaches
+        #: the game.
         self.wheel = MovementWheel()
+        self.wheel.begin_tick()
+        self.wheel.on_preempt("day_plan", self._day_plan_preempted)
+        self._day_plan_token = None
 
-    def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
+    _day_plan_preempted = Harness._day_plan_preempted
+
+    def _execute_action(
+        self, action_type: str, params: dict[str, Any], token: Any = None
+    ) -> str | None:
+        assert self.wheel.holds(token), f"{action_type} posted without the wheel"
+        self.wheel.mark_posted(token, action_type)
         self.posted.append((action_type, dict(params)))
         return "t-plan-77"
 
@@ -1023,16 +1034,29 @@ class _ActivityStub:
         self._quiet_until = 0.0
         self._threat_has_the_wheel = False
         self.wheel = MovementWheel()
+        self.wheel.begin_tick()
+        self.wheel.on_preempt("roam", self._roam_preempted)
+        self._roam_token = None
+        #: `(tick, owner, action_type)` for every task that reached the game.
+        self.posted_owners: list[tuple[int, str, str]] = []
         #: `_begin_roam_goal` reads the model's last goal line to see whether it
         #: named an offered id. Nothing has been said yet on this stub.
         self.current_goal = "see the city"
 
-    def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
+    _roam_preempted = Harness._roam_preempted
+
+    def _execute_action(
+        self, action_type: str, params: dict[str, Any], token: Any = None
+    ) -> str | None:
+        if action_type in BRIDGE_TASKS:
+            assert self.wheel.holds(token), f"{action_type} posted without the wheel"
+            self.wheel.mark_posted(token, action_type)
+            self.posted_owners.append((self.wheel.tick, token.owner, action_type))
         self.posted.append((action_type, dict(params)))
         return "t-act-1"
 
-    def _end_activity_if_running(self, outcome: str) -> None:
-        Harness._end_activity_if_running(self, outcome)
+    def _end_activity_if_running(self, outcome: str, *, by: str | None = None) -> None:
+        Harness._end_activity_if_running(self, outcome, by=by)
 
     def _issue_activity_step(self, step: dict[str, Any]) -> None:
         Harness._issue_activity_step(self, step)

@@ -172,6 +172,28 @@ class Vec3(BaseModel):
     z: float
 
 
+class InteriorState(BaseModel):
+    """CONTRACTS v1.12 ``player.interior``: the interior he is standing in.
+
+    ``id`` is the bridge's ``InteriorProxy`` handle — an opaque identity key,
+    stable while the proxy lives and comparable between ticks ("same room" vs
+    "new room"). It is deliberately NOT a curated map id: no verified
+    interior-id table exists (CLAUDE.md rule 6), so nothing here may look one
+    up by number.
+
+    ``since_s`` is measured BRIDGE-side from the tick the id last changed. The
+    harness polls at 2–4 Hz and would round the transition; the bridge sees
+    every tick.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    id: int
+    #: Defaulted rather than required for the same reason every other v1.x
+    #: widening is: a bridge that gains the object before the seconds must
+    #: still parse. 0.0 reads as "just now", which is the safe direction.
+    since_s: float = 0.0
+
+
 class PlayerState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     pos: Vec3
@@ -197,6 +219,34 @@ class PlayerState(BaseModel):
     #: the real signal behind that narration, which used to have no field to
     #: read. Optional so a pre-v1.11 bridge still parses.
     switch_in_progress: bool = False
+    #: v1.12: the interior he is inside, or None when he is OUTDOORS. This is
+    #: the GROUND TRUTH the house-escape path needed: until this field existed,
+    #: /state had no way to distinguish "he is indoors" from "he is merely
+    #: stuck", so the escape could only be reached through a heuristic that
+    #: fired late and on false positives. Optional so a pre-v1.12 bridge still
+    #: parses — but "absent" and "null" are NOT the same thing here, which is
+    #: what :attr:`interior_reported` exists to tell apart.
+    interior: InteriorState | None = None
+    #: v1.12: where he stood on the last outdoor→indoor transition, or None
+    #: when the bridge has never seen him cross one (a respawn or a character
+    #: switch drops him inside without a transition, which is exactly the case
+    #: that made this fix necessary). Optional so a pre-v1.12 bridge still
+    #: parses.
+    last_outdoor: Vec3 | None = None
+
+    @property
+    def interior_reported(self) -> bool:
+        """True when the bridge actually SENT ``interior`` (any value).
+
+        ``interior: None`` from a v1.12 bridge means "he is outdoors" and is
+        authoritative. A pre-v1.12 bridge omits the key entirely and the model
+        default also reads ``None`` — the two must not be confused, or a
+        1.4.0 bridge would silently be treated as "always outdoors" and the
+        pre-v1.12 fallback heuristic would never run. Pydantic records which
+        keys were actually present in the payload, so this is a fact about the
+        wire rather than a guess about the bridge version.
+        """
+        return "interior" in self.model_fields_set
 
 
 class VehicleState(BaseModel):

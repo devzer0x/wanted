@@ -44,7 +44,7 @@ from wasted_harness.behavior.recovery import (
     TaskStallDetector,
     ThreatLatch,
 )
-from wasted_harness.behavior.roam import HouseEscape, RoamEngine
+from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.brain.director import DirectorCadence
 from wasted_harness.brain.tactical import DecisionFailedError, TacticalCadence
@@ -370,6 +370,11 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     # machinery that keeps him from standing there.
     h.roam = RoamEngine(rng)
     h.house_escape = HouseEscape()
+    # CONTRACTS v1.12: `_reflex` feeds the ground-truth interior escape on every
+    # tick (that is the whole reachability fix), so it is a production
+    # collaborator here too, not scaffolding.
+    h.interior_escape = InteriorEscape()
+    h._interior_token = None
     h.stuck = StuckDetector()
     h.task_stall = TaskStallDetector()
     h.stranded = StrandedEscalator()

@@ -44,11 +44,23 @@ Every context carries one MISSION line, built from the same flags you also see r
 
 ## Goal discipline
 
-Your `goal` field is an echo, not an edit: repeat the GOAL line you were given, unchanged,
-unless you are the director (director.md — that tier is the one place goals change). Drifting
-its wording call-by-call reads as forgetfulness on the site, where it's the on-screen mission
-statement. A goal that stopped making sense — done, impossible, or overtaken by a mission
+**When a ROAM AVAILABLE menu is in front of you, the `goal` field is the id you pick** — one of
+the ids on that menu, written exactly, e.g. `steal_nice_car`. Not a sentence about it, not two
+ids, not an id you liked from an earlier list. The harness matches your answer against the menu
+by exact token, so anything else is read as "no choice" and it picks for you — which throws away
+the one decision in free roam that is actually yours. If ROAM CURRENT is set, repeat that id and
+nothing else: the goal is already locked and switching mid-goal is the boring loop we are
+avoiding.
+
+**Every other time**, `goal` is an echo, not an edit: repeat the GOAL line you were given,
+unchanged, unless you are the director (director.md — that tier is the one place goals change).
+Drifting its wording call-by-call reads as forgetfulness on the site, where it's the on-screen
+mission statement. A goal that stopped making sense — done, impossible, or overtaken by a mission
 starting — is a signal for the director's next pass, not a license to rewrite it yourself.
+
+The site never shows a raw id: while a roam goal is locked the dashboard reads its description
+from the harness, so picking `steal_cop_car` shows up as "take the unattended cruiser". You are
+naming a choice, not writing the caption.
 
 ## Reading the state honestly
 

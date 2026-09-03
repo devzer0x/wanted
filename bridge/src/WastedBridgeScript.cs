@@ -13,7 +13,7 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.4.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        public const string BridgeVersion = "1.5.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
         // v1.3.0: CONTRACTS v1.11 (part 1) - mission.entity_blips[] (entity-attached blips,
         // throttled ~4 Hz); driving overhaul: driveAgainstTraffic explicit false on the new
         // StartVehicleMission call, avoid_traffic retuned off the brake-free
@@ -27,6 +27,12 @@ namespace WastedBridge
         // ranged via TASK_COMBAT_PED - see TaskEngine.StartFightPed), CA_LEAVE_VEHICLES synced off
         // in-vehicle state every tick (the "gets out to fistfight" fix), mission.entity_blips[].name
         // (Blip.GetAppropriateName()), player.switch_in_progress, mission.retry_in_flight.
+        // v1.5.0: CONTRACTS v1.12 - player.interior {id, since_s} / player.last_outdoor {x,y,z},
+        // both measured on the game thread (SnapshotBuilder.TrackInterior) because only this thread
+        // sees every tick. Ground truth for "he is indoors", replacing the harness-side heuristic
+        // that made the house-escape path effectively unreachable in the live loop. Source is the
+        // Entity.CurrentInteriorProxy WRAPPER, not a raw native hash, so an SHVDN bump that removes
+        // it breaks this build rather than emitting a garbage id.
 
         private const float UnstickMinStoppedS = 20f;
         private const float UnstickNudgeBackM = 2.5f;   // total displacement stays ≤ 3 m (contract)

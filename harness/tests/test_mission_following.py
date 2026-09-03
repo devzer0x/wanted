@@ -49,7 +49,7 @@ from wasted_harness.behavior.recovery import (
     TaskStallDetector,
     ThreatLatch,
 )
-from wasted_harness.behavior.roam import HouseEscape, RoamEngine
+from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.brain.schemas import BRIDGE_TASKS
 from wasted_harness.brain.vision import MissionOutcome
@@ -91,6 +91,7 @@ def make_state(**over: Any) -> GameState:
         "active": over.pop("mission_active", False),
         "random_event_active": over.pop("random_event_active", False),
         "cutscene_active": over.pop("cutscene_active", False),
+        "retry_in_flight": over.pop("retry_in_flight", False),
         # CONTRACTS v1.7 mission-start markers: [((x, y, z), protagonist), ...]
         "starts": [
             {"pos": {"x": m[0][0], "y": m[0][1], "z": m[0][2]}, "protagonist": m[1]}
@@ -141,6 +142,20 @@ def make_state(**over: Any) -> GameState:
             "arrested": over.pop("arrested", False),
             "in_vehicle": in_vehicle,
             "control_enabled": over.pop("control_enabled", True),
+            "switch_in_progress": over.pop("switch_in_progress", False),
+            # CONTRACTS v1.12: `interior` is `(id, since_s)` or None; the key is
+            # ALWAYS present here because that is what a >= 1.5.0 bridge sends,
+            # and "key absent" is a different, separately tested case.
+            "interior": (
+                None
+                if (interior := over.pop("interior", None)) is None
+                else {"id": interior[0], "since_s": interior[1]}
+            ),
+            "last_outdoor": (
+                None
+                if (last_outdoor := over.pop("last_outdoor", None)) is None
+                else {"x": last_outdoor[0], "y": last_outdoor[1], "z": last_outdoor[2]}
+            ),
         },
         "vehicle": (vehicle_override or dict(VEHICLE)) if in_vehicle else None,
         "location": {"street": "Cavalry Blvd", "zone": "North Yankton"},
@@ -452,20 +467,55 @@ def _bare_harness(cutscene_active: bool, player_down: bool = False) -> Harness:
     #: `_execute_action` also refuses a task type the stall detector has just
     #: measured pinning him in place; nothing has stalled in these tests.
     h.task_stall = TaskStallDetector()
+    #: THE GATE. A §1 bridge task without the wheel's current token never
+    #: reaches the bridge, so a harness that can post one has to have a wheel.
+    h.wheel = MovementWheel()
     return h
+
+
+def _holding(h: Harness, owner: str = "brain") -> Any:
+    """Open a movement tick and give `owner` the wheel, as production does.
+
+    Every §1 bridge task in this harness carries a token and
+    `_execute_action` refuses it without one — so a test that posts a task
+    must hold the wheel exactly the way the real caller does, rather than
+    reaching past the gate it is meant to be exercising.
+    """
+    h.wheel.begin_tick()
+    token = h.wheel.acquire(owner, "test")
+    assert token is not None
+    return token
+
+
+def test_execute_action_refuses_any_bridge_task_without_the_wheel() -> None:
+    """The gate itself. The operator's spec put this assertion in the bridge;
+    it lives here instead because the harness is the bridge's only client and
+    this method is the only funnel — same guarantee, no wire change."""
+    h = _bare_harness(cutscene_active=False)
+    h.wheel.begin_tick()
+    for task_type in BRIDGE_TASKS:
+        assert Harness._execute_action(h, task_type, {}) is None
+    assert h.bridge.posted == [], "no task may reach the game without the wheel"
+
+    # A token that WAS valid and has since been preempted is no better than none.
+    stale = _holding(h, "roam")
+    h.wheel.acquire("threat", "being shot")
+    assert Harness._execute_action(h, "walk_to", {}, stale) is None
+    assert h.bridge.posted == []
 
 
 def test_execute_action_suppresses_every_bridge_task_during_a_cutscene() -> None:
     h = _bare_harness(cutscene_active=True)
+    token = _holding(h)
     for task_type in BRIDGE_TASKS:
-        result = Harness._execute_action(h, task_type, {})
+        result = Harness._execute_action(h, task_type, {}, token)
         assert result is None, f"{task_type} must not be posted mid-cutscene"
     assert h.bridge.posted == [], "no bridge task may reach the bridge during a cutscene"
 
 
 def test_execute_action_still_posts_bridge_tasks_outside_a_cutscene() -> None:
     h = _bare_harness(cutscene_active=False)
-    result = Harness._execute_action(h, "drive_to", {"x": 1.0, "y": 2.0, "z": 3.0})
+    result = Harness._execute_action(h, "drive_to", {"x": 1.0, "y": 2.0, "z": 3.0}, _holding(h))
     assert result == "t-fake-1"
     assert h.bridge.posted == [("drive_to", {"x": 1.0, "y": 2.0, "z": 3.0})]
 
@@ -492,7 +542,7 @@ def test_execute_action_ignores_unknown_bridge_errors_gracefully() -> None:
 
     h = _bare_harness(cutscene_active=False)
     h.bridge = _AngryBridge()
-    assert Harness._execute_action(h, "drive_to", {}) is None
+    assert Harness._execute_action(h, "drive_to", {}, _holding(h)) is None
 
 
 # --- wiring: `_drive_mission_objective` --------------------------------------
@@ -516,12 +566,19 @@ class _RecordingStub:
         self.mission_follower = _Follower(plan_result)
         self._quiet_until = 0.0
         self._threat_has_the_wheel = False
-        #: Every movement post registers with the arbiter (main.wheel), so the
-        #: log can answer "who was driving on that tick".
+        #: Every movement post is ARBITRATED by the wheel (main.wheel): the
+        #: follower's step carries the holder's token or it never reaches the
+        #: game, and the log can answer "who was driving on that tick".
         self.wheel = MovementWheel()
+        self.wheel.begin_tick()
+        self._mission_token = None
         self.posted: list[tuple[str, dict[str, Any]]] = []
 
-    def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
+    def _execute_action(
+        self, action_type: str, params: dict[str, Any], token: Any = None
+    ) -> str | None:
+        assert self.wheel.holds(token), f"{action_type} posted without the wheel"
+        self.wheel.mark_posted(token, action_type)
         self.posted.append((action_type, dict(params)))
         return "t-mission-99"
 
@@ -606,11 +663,31 @@ class _ReflexStub:
         #: than race the wall clock.
         self.vehicle = VehicleController(clock=self.clock)
         self.wheel = MovementWheel(clock=self.clock)
+        #: Production wiring: what losing the wheel MEANS for each owner.
+        self.wheel.on_preempt("roam", self._roam_preempted)
+        self.wheel.on_preempt("mission", self._mission_preempted)
+        self.wheel.on_preempt("day_plan", self._day_plan_preempted)
+        self.wheel.on_preempt("governor", self._governor_preempted)
+        self.wheel.on_preempt("exit_interior", self._interior_preempted)
+        self._roam_token = None
+        self._mission_token = None
+        self._day_plan_token = None
+        self._governor_token = None
+        self._park_task_id = None
+        self._park_deadline = 0.0
+        #: `(tick, owner, action_type)` for every bridge task that reached the
+        #: game. The acceptance check "no two movement tasks from different
+        #: owners in the same tick" reads this.
+        self.posted_owners: list[tuple[int, str, str]] = []
         #: Free roam's single owner. `_reflex` reads it for the "how long has he
         #: been standing still" measure the house-escape ladder gates on, and
         #: `_handle_mission_events` tells it when a job starts and ends.
         self.roam = RoamEngine(random.Random(1), clock=self.clock)
         self.house_escape = HouseEscape(clock=self.clock)
+        #: CONTRACTS v1.12's ground-truth escape. Real, on the stub's clock, so
+        #: the acceptance tests for "he is indoors" drive the production ladder.
+        self.interior_escape = InteriorEscape(clock=self.clock)
+        self._interior_token = None
 
         class _Breaks:
             on_break = False
@@ -642,7 +719,25 @@ class _ReflexStub:
         self.commentary = _Recorder()
         self.activities = _Recorder()
 
-    def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
+    #: The real movement arbitration. These ARE the behaviour under test — a
+    #: re-description of the ladder in the stub would drift from production the
+    #: first time the ladder changed.
+    _game_owns_controls = Harness._game_owns_controls
+    _game_control_reason = Harness._game_control_reason
+    _reflex_act = Harness._reflex_act
+    _roam_preempted = Harness._roam_preempted
+    _mission_preempted = Harness._mission_preempted
+    _day_plan_preempted = Harness._day_plan_preempted
+    _governor_preempted = Harness._governor_preempted
+    #: The v1.12 escape path, verbatim from production — these tests are the
+    #: reachability proof for it, so nothing about it may be re-described here.
+    _interior_preempted = Harness._interior_preempted
+    _release_interior_wheel = Harness._release_interior_wheel
+    _run_interior_escape = Harness._run_interior_escape
+
+    def _execute_action(
+        self, action_type: str, params: dict[str, Any], token: Any = None
+    ) -> str | None:
         # Mirrors production's routing: the real `_execute_action` is the single
         # choke point for BOTH bridge tasks and SendInput primitives, and the
         # reflex ladder now sends `reverse_out` through it rather than straight
@@ -651,7 +746,17 @@ class _ReflexStub:
         if action_type not in BRIDGE_TASKS:
             self.primitives.execute(action_type, dict(params))
             return None
+        # The production gate, reproduced exactly: a bridge task without the
+        # wheel's current token never reaches the game. Recording the owner is
+        # what lets a test assert "no two movement tasks from different owners
+        # in the same tick" structurally rather than by eyeballing a log.
+        assert self.wheel.holds(token), (
+            f"{action_type} posted without the movement wheel "
+            f"(token={token}, held_by={self.wheel.owner})"
+        )
+        self.wheel.mark_posted(token, action_type)
         self.posted.append((action_type, dict(params)))
+        self.posted_owners.append((self.wheel.tick, token.owner, action_type))
         return "t-reflex-1"
 
     def _vehicle_hold(self, state: GameState) -> str | None:
@@ -662,8 +767,11 @@ class _ReflexStub:
     def _say(self, text: str, mood: str | None = None) -> None:
         pass
 
-    def _end_activity_if_running(self, outcome: str) -> None:
-        pass
+    def _end_activity_if_running(self, outcome: str, *, by: str | None = None) -> None:
+        # The real one: releasing free roam's wheel token when its goal ends is
+        # half of the arbitration, and a stub that skipped it would leave a hold
+        # nothing gives back.
+        Harness._end_activity_if_running(self, outcome, by=by)
 
     def _capture_screenshot(self, hint: str):
         return None, None
@@ -1126,8 +1234,9 @@ def test_the_dead_path_still_short_circuits_with_no_vision_call() -> None:
 
 def test_execute_action_suppresses_every_bridge_task_while_player_is_down() -> None:
     h = _bare_harness(cutscene_active=False, player_down=True)
+    token = _holding(h)
     for task_type in BRIDGE_TASKS:
-        result = Harness._execute_action(h, task_type, {})
+        result = Harness._execute_action(h, task_type, {}, token)
         assert result is None, f"{task_type} must not be posted while dead/arrested"
     assert h.bridge.posted == []
 
@@ -1580,7 +1689,7 @@ def test_a_threat_post_that_never_reached_the_game_does_not_start_the_hold() -> 
     be free to ask again on the very next tick rather than sitting out the
     hold-down for a task the game never received."""
     stub = _ReflexStub()
-    stub._execute_action = lambda t, p: (stub.posted.append((t, dict(p))), None)[1]
+    stub._execute_action = lambda t, p, tok=None: (stub.posted.append((t, dict(p))), None)[1]
     _reflex(stub, _hostile_state(task_status="idle"))
     stub.clock.tick(0.3)  # deep inside the hold-down
     _reflex(stub, _hostile_state(task_status="idle"))
@@ -2132,8 +2241,9 @@ def test_execute_action_suppresses_every_bridge_task_on_a_blocking_screen() -> N
     command at all — and the caller would bind to a task that never starts."""
     h = _bare_harness(cutscene_active=False)
     h._screen_blocked = True
+    token = _holding(h)
     for task_type in BRIDGE_TASKS:
-        assert Harness._execute_action(h, task_type, {}) is None, task_type
+        assert Harness._execute_action(h, task_type, {}, token) is None, task_type
     assert h.bridge.posted == []
 
 
@@ -2142,8 +2252,9 @@ def test_execute_action_suppresses_every_bridge_task_during_a_protagonist_switch
     single choke point every bridge task goes through."""
     h = _bare_harness(cutscene_active=False)
     h._switch_in_progress = True
+    token = _holding(h)
     for task_type in BRIDGE_TASKS:
-        assert Harness._execute_action(h, task_type, {}) is None, task_type
+        assert Harness._execute_action(h, task_type, {}, token) is None, task_type
     assert h.bridge.posted == []
 
 
@@ -2151,8 +2262,9 @@ def test_execute_action_suppresses_every_bridge_task_during_a_mission_retry() ->
     """v1.11 `mission.retry_in_flight`."""
     h = _bare_harness(cutscene_active=False)
     h._retry_in_flight = True
+    token = _holding(h)
     for task_type in BRIDGE_TASKS:
-        assert Harness._execute_action(h, task_type, {}) is None, task_type
+        assert Harness._execute_action(h, task_type, {}, token) is None, task_type
     assert h.bridge.posted == []
 
 

@@ -32,6 +32,43 @@ namespace WastedBridge
         // v1.11: IS_PLAYER_SWITCH_IN_PROGRESS - true while the camera is mid-flight between
         // protagonists. The real signal behind "wrong body / waiting for the switch" commentary.
         [JsonProperty("switch_in_progress")] public bool SwitchInProgress;
+        // v1.12: the interior he is standing in, or null when he is outdoors. GROUND TRUTH, not a
+        // guess - see InteriorDto.
+        [JsonProperty("interior")] public InteriorDto Interior;
+        // v1.12: where he was the last time he crossed from outdoors to indoors, or null if this
+        // script has never seen him cross one. The escape's first move is "walk back to where you
+        // came in", and only the bridge sees the tick BEFORE the door.
+        [JsonProperty("last_outdoor")] public Vec3Dto LastOutdoor;
+    }
+
+    /// <summary>
+    /// CONTRACTS v1.12 <c>player.interior</c>: which interior the player ped is inside, and for how
+    /// long. Null (the whole object) when he is outdoors.
+    ///
+    /// WHY THIS FIELD EXISTS. After a mission ends, a respawn, or a character switch INSIDE a
+    /// safehouse, outdoor navigation tasks fail - the nav mesh is disconnected by doors - and the agent
+    /// stands in a living room doing nothing. The harness has had a house-escape ladder for a
+    /// while, but /state exposed no way to distinguish "he is indoors" from "he is merely stuck",
+    /// so the ladder could only be reached through a heuristic (a failed vehicle entry plus 20 s of
+    /// stillness) that fires late and also fires on false positives. This is the fact instead.
+    ///
+    /// SOURCE: <c>GTA.Entity.CurrentInteriorProxy</c> (SHVDN wrapper, verified in the pinned
+    /// nightly.189's own <c>lib/Docs/ScriptHookVDotNet3.xml</c>: "Gets the current interior proxy
+    /// associated with this entity ... if they are in an interior; otherwise null") plus
+    /// <c>GTA.InteriorProxy.Handle</c> for the id. A WRAPPER rather than a raw native hash on
+    /// purpose: a future SHVDN bump that renames or removes it breaks the BUILD instead of
+    /// silently returning a garbage id - the same reasoning <c>DrivingStyles</c> documents.
+    /// </summary>
+    internal sealed class InteriorDto
+    {
+        // The InteriorProxy handle. An opaque identity key: it is stable while the proxy lives and
+        // is comparable between ticks, which is all the harness needs ("same room" vs "new room").
+        // It is NOT a curated map id and must not be treated as one - no table of interior ids
+        // ships with this bridge, because none has been verified against the real game.
+        [JsonProperty("id")] public int Id;
+        // Seconds since the tick this id last CHANGED, measured bridge-side. The harness polls at
+        // 2-4 Hz and would round the transition; the bridge sees every tick.
+        [JsonProperty("since_s")] public float SinceS;
     }
 
     internal sealed class VehicleDto

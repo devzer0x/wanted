@@ -40,6 +40,20 @@ namespace WastedBridge
 
         private int _stoppedVehicleHandle;
         private int _stoppedSinceMs = -1;
+        // CONTRACTS v1.12 per-tick interior memory. Same shape as the stopped_for_s memory above,
+        // and here for the same reason: only the game thread sees every tick, so "how long has he
+        // been in this room" and "where was he standing the tick before the door" are measured
+        // here or not at all. 0 == outdoors (no InteriorProxy handle is 0).
+        private int _interiorHandle;
+        private int _interiorSinceMs = -1;
+        // The most recent position at which he was OUTDOORS. On the tick an outdoor->indoor
+        // transition is detected this still holds the PREVIOUS tick's position, which is the one
+        // outside the door - it is only refreshed on ticks where he is actually outdoors.
+        private Vector3 _outdoorPos;
+        private bool _haveOutdoorPos;
+        private Vector3 _lastOutdoor;
+        private bool _haveLastOutdoor;
+        private int _lastInteriorErrorAt = int.MinValue;
         private int _lastBlipErrorAt = int.MinValue;
         private int _lastStartsErrorAt = int.MinValue;
         private int _lastScriptErrorAt = int.MinValue;
@@ -111,7 +125,12 @@ namespace WastedBridge
                     // v1.11: IS_PLAYER_SWITCH_IN_PROGRESS(), no SHVDN wrapper (verified absent from
                     // lib/Docs/ScriptHookVDotNet3.xml; hash confirmed present in GTA.Native.Hash via
                     // MetadataLoadContext), no arguments - raw Function.Call.
-                    SwitchInProgress = Function.Call<bool>(Hash.IS_PLAYER_SWITCH_IN_PROGRESS)
+                    SwitchInProgress = Function.Call<bool>(Hash.IS_PLAYER_SWITCH_IN_PROGRESS),
+                    // v1.12. TrackInteriorSafe also maintains LastOutdoor, so it must run before
+                    // the field below reads it - object-initializer members are evaluated in
+                    // source order, which is what makes this safe.
+                    Interior = TrackInteriorSafe(ped, pos),
+                    LastOutdoor = _haveLastOutdoor ? ToDto(_lastOutdoor) : null
                 },
                 Vehicle = BuildVehicle(veh),
                 Location = new LocationDto
@@ -192,6 +211,87 @@ namespace WastedBridge
                 InWater = veh.IsInWater,
                 StoppedForS = CurrentStoppedForS
             };
+        }
+
+        /// <summary>
+        /// CONTRACTS v1.12 <c>player.interior</c> + <c>player.last_outdoor</c>, behind its own
+        /// guard.
+        ///
+        /// <c>Entity.CurrentInteriorProxy</c> is the SHVDN wrapper over the game's own
+        /// entity->CInteriorProxy lookup, and like every SHVDN wrapper that reaches into game
+        /// memory it is a candidate to break on a game update. Guarded exactly the way
+        /// <see cref="FindObjectiveBlipSafe"/> is: one field degrading is an acceptable loss,
+        /// freezing all of /state is not.
+        ///
+        /// WHAT IT SERVES ON FAILURE, and why it is not <c>null</c>: null on the wire means "he is
+        /// OUTDOORS", which is a positive claim this method cannot make when the lookup just
+        /// threw. So it repeats the last value it actually measured (the same thing
+        /// <see cref="FindEntityBlipsSafe"/> does on a throttled tick) and logs, throttled. A
+        /// persistent failure therefore degrades to "the last thing we knew" plus a loud log,
+        /// never to a confident lie in either direction.
+        /// </summary>
+        private InteriorDto TrackInteriorSafe(Ped ped, Vector3 pos)
+        {
+            try
+            {
+                return TrackInterior(ped, pos);
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastInteriorErrorAt) > 5000)
+                {
+                    _lastInteriorErrorAt = now;
+                    BridgeLog.Error("interior lookup failed (Entity.CurrentInteriorProxy); "
+                                    + "player.interior repeats its last measured value and "
+                                    + "player.last_outdoor stops updating", ex);
+                }
+                return _lastInterior;
+            }
+        }
+
+        private InteriorDto _lastInterior;
+
+        private InteriorDto TrackInterior(Ped ped, Vector3 pos)
+        {
+            // Null == not in an interior, per the pinned nightly's own doc XML. There is no
+            // "unknown" third state in the wrapper and the contract does not model one.
+            InteriorProxy proxy = ped.CurrentInteriorProxy;
+            int handle = proxy == null ? 0 : proxy.Handle;
+
+            if (handle != _interiorHandle)
+            {
+                // The id CHANGED - this is the tick since_s is measured from. Interior A straight
+                // into interior B (adjacent rooms with their own proxies) resets since_s and does
+                // NOT touch last_outdoor: the last outdoor->indoor crossing is still the one into
+                // A, which is where the door he came through is.
+                if (_interiorHandle == 0 && handle != 0 && _haveOutdoorPos)
+                {
+                    // Outdoors -> indoors. _outdoorPos is still the PREVIOUS tick's position (it is
+                    // only refreshed below, on outdoor ticks), i.e. the last place he stood outside
+                    // the door. That is the whole reason this is measured bridge-side: a 2-4 Hz
+                    // poll cannot see the tick before the transition.
+                    _lastOutdoor = _outdoorPos;
+                    _haveLastOutdoor = true;
+                }
+                _interiorHandle = handle;
+                _interiorSinceMs = Game.GameTime;
+            }
+
+            if (handle == 0)
+            {
+                _outdoorPos = pos;
+                _haveOutdoorPos = true;
+                _lastInterior = null;
+                return null;
+            }
+
+            _lastInterior = new InteriorDto
+            {
+                Id = handle,
+                SinceS = (Game.GameTime - _interiorSinceMs) / 1000f
+            };
+            return _lastInterior;
         }
 
         /// <summary>CONTRACTS v1.7: who the player currently is, from the ped model.</summary>

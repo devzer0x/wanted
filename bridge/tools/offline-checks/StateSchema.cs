@@ -74,6 +74,17 @@ namespace WastedBridge.OfflineChecks
             // CONTRACTS v1.11: IS_PLAYER_SWITCH_IN_PROGRESS - true only while the camera is
             // mid-flight between protagonists. Always present.
             new FieldSpec("player.switch_in_progress", Kind.Boolean),
+            // CONTRACTS v1.12: the interior he is standing in. The KEY is always present; the
+            // OBJECT is null when he is outdoors (same shape rule as "vehicle" above).
+            new FieldSpec("player.interior", Kind.Object, nullable: true),
+            new FieldSpec("player.interior.id", Kind.Integer),
+            new FieldSpec("player.interior.since_s", Kind.Number),
+            // CONTRACTS v1.12: where he stood on the last outdoor->indoor transition, or null when
+            // this script has never seen him cross one. Key always present.
+            new FieldSpec("player.last_outdoor", Kind.Object, nullable: true),
+            new FieldSpec("player.last_outdoor.x", Kind.Number),
+            new FieldSpec("player.last_outdoor.y", Kind.Number),
+            new FieldSpec("player.last_outdoor.z", Kind.Number),
 
             // null when on foot — the key is always present (contract example shows "vehicle": null)
             new FieldSpec("vehicle", Kind.Object, nullable: true),

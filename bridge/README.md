@@ -327,6 +327,40 @@ changing the field's shape.
   checked). `seek_cover`, `set_waypoint`, `stop`, and `exit_vehicle` get **no** liveness check —
   no researched/verified hash, and CONTRACTS v1.10 explicitly says not to guess one.
 
+### CONTRACTS v1.12: `player.interior`, `player.last_outdoor` (bridge **1.5.0**)
+
+- **`player.interior`** = `{"id": <int>, "since_s": <float>}`, or `null` when he is outdoors (the
+  key is always present). `id` is the **`InteriorProxy` handle** — an opaque identity key that is
+  stable while the proxy lives and comparable between ticks ("same room" vs "new room"). It is
+  **not** a curated map id and no table of interior ids ships with this bridge, because none has
+  been verified against the real game.
+- **`player.last_outdoor`** = `{x,y,z}` or `null` — where the player ped stood on the **last
+  outdoor→indoor transition**, i.e. the last position outside the door he came through. `null`
+  until this script has seen him cross one (so it is `null` after a reload that lands him already
+  inside).
+- **Source is the SHVDN wrapper `Entity.CurrentInteriorProxy`** (+ `InteriorProxy.Handle`), not a
+  raw native hash. Verified in the pinned nightly.189's own `lib/Docs/ScriptHookVDotNet3.xml`
+  (*"Gets the current interior proxy associated with this entity … if they are in an interior;
+  otherwise null"*) and by the fact that this project compiles against
+  `lib/ScriptHookVDotNet3.dll`. The wrapper is the point: a future SHVDN bump that renames or
+  removes it breaks the **build** instead of silently returning a garbage id — the same reasoning
+  `DrivingStyles` documents for driving-style flags.
+- **Both are measured on the game thread** (`SnapshotBuilder.TrackInterior`, the same per-tick
+  memory shape `stopped_for_s` uses). Only this thread sees every tick: a harness deriving
+  `since_s` from its 2–4 Hz poll would round the transition, and it can never see the tick
+  *before* the door, which is exactly the position `last_outdoor` carries.
+- Interior A straight into interior B (adjacent rooms with their own proxies) resets `since_s` and
+  does **not** touch `last_outdoor` — the last outdoor→indoor crossing is still the one into A.
+- **Guarded** (`TrackInteriorSafe`) the way `FindObjectiveBlipSafe` is. On an exception it repeats
+  the last value it actually measured and logs, throttled, rather than emitting `null`: `null` on
+  the wire is the positive claim *"he is outdoors"*, and a lookup that just threw cannot make it.
+- **Why it exists:** after a mission ends, a respawn, or a character switch inside a safehouse,
+  outdoor navigation fails because the nav mesh is disconnected by doors. The harness has had a
+  house-escape ladder for a while but could only reach it through a heuristic (a failed vehicle
+  entry plus 20 s of stillness) that fires late and on false positives. This is the fact instead
+  of the guess.
+
+
 ## Build
 
 ```

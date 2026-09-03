@@ -123,6 +123,19 @@ def make_state(**over: Any) -> GameState:
             "in_vehicle": in_vehicle,
             "control_enabled": True,
             "protagonist": over.pop("protagonist", "franklin"),
+            # CONTRACTS v1.12. Absent by DEFAULT here on purpose: most of this
+            # module tests behaviour that predates the field, and `HouseEscape`
+            # is now explicitly the PRE-v1.12 fallback — it must keep working on
+            # a snapshot that carries no `interior` key at all.
+            **(
+                {}
+                if (interior := over.pop("interior", "absent")) == "absent"
+                else {
+                    "interior": (
+                        None if interior is None else {"id": interior[0], "since_s": interior[1]}
+                    )
+                }
+            ),
         },
         "vehicle": (
             None
@@ -231,7 +244,31 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
     # own: `lose_the_cops` requires stars (which `start_nearest_mission` refuses
     # to be offered with), and `take_my_car_back` requires him to be ON FOOT
     # next to the car somebody took off him.
-    special = {"lose_the_cops": make_state(wanted=2), "take_my_car_back": on_foot}
+    # The two fight goals need him ON FOOT with someone to start on, which the
+    # rich in-vehicle state contradicts by construction — being in a car and out
+    # of it are not simultaneously satisfiable, so they get their own snapshots.
+    brawl = make_state(
+        in_vehicle=False, health=200,
+        nearby_peds=[
+            {"handle": 40, "model": "a_m_y_hipster_01", "distance": 6.0,
+             "relationship": "neutral", "pos": {"x": 6.0, "y": 0.0, "z": 0.0}},
+        ],
+    )
+    gang = make_state(
+        in_vehicle=False, health=200,
+        nearby_peds=[
+            {"handle": 60, "model": "g_m_y_ballasout_01", "distance": 15.0,
+             "relationship": "neutral", "pos": {"x": 15.0, "y": 0.0, "z": 0.0}},
+            {"handle": 61, "model": "g_m_y_famca_01", "distance": 18.0,
+             "relationship": "neutral", "pos": {"x": 18.0, "y": 0.0, "z": 0.0}},
+        ],
+    )
+    special = {
+        "lose_the_cops": make_state(wanted=2),
+        "take_my_car_back": on_foot,
+        "pick_a_fight": brawl,
+        "gang_trouble": gang,
+    }
     jacked_view = RoamView(rng=random.Random(1), stolen_from=(5, (6.0, 0.0, 0.0)))
     for goal in CATALOG:
         goal_state = special.get(goal.id, state)
@@ -1063,3 +1100,99 @@ def test_the_fallback_walks_when_there_is_no_car_to_take() -> None:
     assert picked is not None, "the floor must always produce an action"
     _locked, step = picked
     assert step["type"] == "walk_to", f"on foot with no car he walks; got {step}"
+
+
+def test_steal_cop_car_survives_the_star_it_earns() -> None:
+    """Sitting in a police car reliably earns a star, so the wanted-override would
+    kill this goal at the moment it starts working — the same never-completes bug
+    earn_two_stars had, in a goal where heat is a consequence rather than the aim."""
+    e, clock = engine()
+    cop = veh(1, "police", "Emergency", 6.0, "empty", pos=(6.0, 0.0, 0.0))
+    state = observed(e, make_state(in_vehicle=False, nearby_vehicles=[cop]))
+    e.pick(state, goal_id="steal_cop_car")
+    clock.tick(2.0)
+    hot = observed(e, make_state(in_vehicle=False, nearby_vehicles=[cop], wanted=1))
+    assert e.judge(hot) != "wanted_override", "the star it just earned is not a reason to quit"
+
+
+# --- pick_a_fight / gang_trouble ---------------------------------------------
+# Both were in UNBUILDABLE_GOALS until `fight_ped{handle}` landed: nothing could
+# start violence against a peaceful ped. TaskEngine.StartFightPed tasks combat
+# against any NAMED ped regardless of relationship, so both now ship.
+
+
+def _ped(handle: int, model: str, distance: float, rel: str = "neutral") -> dict[str, Any]:
+    return {
+        "handle": handle, "model": model, "distance": distance,
+        "relationship": rel, "pos": {"x": distance, "y": 0.0, "z": 0.0},
+    }
+
+
+def test_he_starts_on_the_nearest_stranger() -> None:
+    e, _ = engine()
+    state = observed(e, make_state(
+        in_vehicle=False, health=200,
+        nearby_peds=[_ped(40, "a_m_y_hipster_01", 6.0), _ped(41, "a_f_y_tourist_01", 18.0)],
+    ))
+    picked = e.pick(state, goal_id="pick_a_fight")
+    assert picked is not None
+    _locked, step = picked
+    assert step["type"] in ("walk_to", "fight_ped")
+
+
+def test_story_characters_and_cops_are_never_marks() -> None:
+    """Killing Lamar ends the story the channel is built on; starting on a cop
+    turns a bit of fun into a wanted level the engine then spends a goal escaping."""
+    e, _ = engine()
+    for model in ("ig_lamardavis", "s_m_y_cop_01", "player_zero", "ig_simeon"):
+        state = observed(e, make_state(
+            in_vehicle=False, health=200, nearby_peds=[_ped(50, model, 4.0)]
+        ))
+        assert "pick_a_fight" not in [o.id for o in e.available(state)], model
+
+
+def test_he_does_not_start_fights_on_low_health() -> None:
+    e, _ = engine()
+    state = observed(e, make_state(
+        in_vehicle=False, health=50,
+        nearby_peds=[_ped(40, "a_m_y_hipster_01", 5.0)],
+    ))
+    assert "pick_a_fight" not in [o.id for o in e.available(state)]
+
+
+def test_an_already_hostile_ped_is_retaliation_not_a_picked_fight() -> None:
+    """Fighting back is the threat reflex's job and it does it without a model
+    call. This goal is only ever about the agent starting it."""
+    e, _ = engine()
+    state = observed(e, make_state(
+        in_vehicle=False, health=200,
+        nearby_peds=[_ped(40, "a_m_y_hipster_01", 5.0, rel="hostile")],
+    ))
+    assert "pick_a_fight" not in [o.id for o in e.available(state)]
+
+
+def test_gang_trouble_needs_a_gang_not_one_man() -> None:
+    e, _ = engine()
+    one = observed(e, make_state(
+        in_vehicle=False, health=200, nearby_peds=[_ped(60, "g_m_y_ballasout_01", 15.0)]
+    ))
+    assert "gang_trouble" not in [o.id for o in e.available(one)]
+    crew = observed(e, make_state(
+        in_vehicle=False, health=200,
+        nearby_peds=[_ped(60, "g_m_y_ballasout_01", 15.0), _ped(61, "g_m_y_famca_01", 18.0)],
+    ))
+    assert "gang_trouble" in [o.id for o in e.available(crew)]
+
+
+def test_gang_trouble_ends_when_he_is_losing() -> None:
+    e, _ = engine()
+    state = observed(e, make_state(
+        in_vehicle=False, health=200,
+        nearby_peds=[_ped(60, "g_m_y_ballasout_01", 15.0), _ped(61, "g_m_y_famca_01", 18.0)],
+    ))
+    e.pick(state, goal_id="gang_trouble")
+    hurt = observed(e, make_state(
+        in_vehicle=False, health=30,
+        nearby_peds=[_ped(60, "g_m_y_ballasout_01", 8.0, rel="hostile")],
+    ))
+    assert e.judge(hurt) == "done", "he leaves before the survival ladder has to drag him out"

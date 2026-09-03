@@ -81,20 +81,15 @@ UNBUILDABLE_GOALS: dict[str, str] = {
         "'he landed it' needs a bridge-side airtime field — the same gap "
         "events.UNPRODUCED_EVENT_REASONS['stunt'] already documents."
     ),
-    "pick_a_fight": (
-        "nothing can START violence against a neutral ped. "
-        "`combat_hated_targets_around` engages only peds that already hate him or "
-        "are already in combat against him; there is no melee, no aim, no "
-        "fire-at-target. Needs a bridge task `attack_entity{handle}` wrapping "
-        "TASK_COMBAT_PED. The RETALIATION half already exists and is owned by the "
-        "threat reflex (behavior.recovery.threat_action), not by this engine."
-    ),
-    "gang_trouble": (
-        "two gaps. (1) same as pick_a_fight: nothing can initiate. (2) the offer "
-        "condition 'entered Davis/Strawberry ARMED' is not computable — the zone "
-        "half is (`location.zone`), the armed half is not: PlayerState carries no "
-        "weapon, no ammo, no weapon-wheel field. Needs `player.weapon`."
-    ),
+    # `pick_a_fight` and `gang_trouble` WERE here, ruled out because nothing could
+    # start violence against a peaceful ped. That was true of the 19-action
+    # catalog and is no longer true: CONTRACTS §1 gained `fight_ped{handle}`, and
+    # `TaskEngine.StartFightPed` tasks combat against any named ped regardless of
+    # relationship. Both now ship. The remaining half of the gang_trouble gap —
+    # "entered Davis/Strawberry ARMED" — is still not computable (PlayerState
+    # carries no weapon field), so the offer gates on the gang being present
+    # rather than on him being armed, and the goal ends on the health floor if
+    # that turns out to have been optimistic.
     "rob_store": (
         "a robbery is aim-a-weapon-and-hold. There is no aim, no fire, no weapon "
         "selection, no threaten; `press_prompt_key` is a single E press. A "
@@ -266,6 +261,12 @@ VEHICLE_STILL_S = 1.5
 #: distance from where the goal started is the honest proxy, and it is stated as
 #: a proxy in the goal's own description.
 FREEWAY_RUN_DISTANCE_M = 1500.0
+
+#: The `close()` outcome that means "a higher owner took the movement wheel".
+#: It is the one ending that does NOT cost him the between-goals gap, because
+#: it was not his decision to stop. `main.ROAM_PREEMPTED` is the same string;
+#: it is defined in both places because neither module may import the other.
+PREEMPTED_OUTCOME = "preempted"
 
 #: The one goal that is always offerable, exempt from cooldown, category
 #: alternation and the health gate. Named here so the forced-mission menu and
@@ -566,6 +567,136 @@ def _done_nicer_car(state: GameState, snap: dict[str, Any]) -> bool:
     return vehicle_rank(state.vehicle.vehicle_class) > snap["rank"]
 
 
+#: Peds the agent may never start on. Story characters are the show — killing Lamar
+#: ends the story arc the whole channel is built around — and cops turn a bit of
+#: fun into a wanted level the roam engine then has to spend a goal escaping.
+#: Matched as substrings because the bridge emits lowercased model names
+#: (`SnapshotBuilder.PedModelName`) and the family is what matters, not the variant.
+PROTECTED_PED_MODELS: tuple[str, ...] = (
+    # The three protagonists ship as `player_zero` (Michael), `player_one`
+    # (Franklin) and `player_two` (Trevor) — their in-fiction names appear
+    # nowhere in the model, so matching on "michael" protects nobody.
+    "player_zero", "player_one", "player_two",
+    "lamar", "franklin", "michael", "trevor", "simeon", "jimmy", "tracey",
+    "amanda", "lester", "devin", "stretch", "wade", "ron", "chop",
+    "cop", "police", "sheriff", "swat", "army", "security", "fbi", "prisguard",
+)
+
+#: Gang ped model families, by the neighbourhood they belong to. Curated from the
+#: model-name convention (`g_m_y_*`), NOT verified against the running game — the
+#: same honest status the landmark coordinates carry. A wrong name costs an offer;
+#: it can never make a goal complete falsely, because the same predicate gates
+#: `needs` and `done_when`.
+GANG_PED_PREFIXES: tuple[str, ...] = ("g_m_y_", "g_m_m_", "g_f_y_")
+
+#: How close a ped has to be before starting something is plausible rather than a
+#: cross-street sprint that ends with him losing interest.
+FIGHT_RADIUS_M = 20.0
+
+#: Below this he is not looking for a fight, he is looking for a hospital. The
+#: operator's own line: bad judgement is funny, dying every four minutes is not.
+FIGHT_MIN_HEALTH = 60.0
+
+#: A gang is worth taking on with a bit more in the tank than a single pedestrian.
+GANG_MIN_HEALTH = 100.0
+
+#: Gangs come in numbers; one man on a corner is a `pick_a_fight`, not a gang.
+GANG_MIN_PEDS = 2
+
+#: How far the gang has to be for "wrong neighbourhood" to mean anything.
+GANG_RADIUS_M = 40.0
+
+
+def _fightable(ped: Any) -> bool:
+    """A ped he is allowed to start on: not protected, not already hostile.
+
+    Already-hostile peds are excluded on purpose — that is retaliation, which the
+    threat reflex owns and does better (it fires without a model call). This goal
+    is only ever about the agent starting it.
+    """
+    model = (getattr(ped, "model", "") or "").lower()
+    if any(bad in model for bad in PROTECTED_PED_MODELS):
+        return False
+    return getattr(ped, "relationship", "neutral") != "hostile"
+
+
+def nearest_mark(state: GameState) -> Any | None:
+    peds = [
+        p for p in state.nearby.peds
+        if p.distance <= FIGHT_RADIUS_M and _fightable(p)
+    ]
+    return min(peds, key=lambda p: p.distance) if peds else None
+
+
+def gang_nearby(state: GameState) -> list[Any]:
+    return [
+        p for p in state.nearby.peds
+        if p.distance <= GANG_RADIUS_M
+        and any((p.model or "").lower().startswith(g) for g in GANG_PED_PREFIXES)
+        and not any(bad in (p.model or "").lower() for bad in PROTECTED_PED_MODELS)
+    ]
+
+
+def _needs_pick_a_fight(state: GameState, view: RoamView) -> bool:
+    return (
+        not state.player.in_vehicle
+        and state.player.wanted == 0
+        and state.player.health >= FIGHT_MIN_HEALTH
+        and nearest_mark(state) is not None
+    )
+
+
+def _plan_pick_a_fight(state, view):
+    mark = nearest_mark(state)
+    assert mark is not None
+    steps: list[dict[str, Any]] = []
+    if mark.distance > VEHICLE_APPROACH_M and getattr(mark, "pos", None) is not None:
+        steps.append(_walk_to((mark.pos.x, mark.pos.y, mark.pos.z), run=True))
+    steps.append({"type": "fight_ped", "params": {"handle": mark.handle}})
+    return steps, {"mark": mark.handle}
+
+
+def _done_pick_a_fight(state: GameState, snap: dict[str, Any]) -> bool:
+    """Over when the mark is no longer standing in front of him: dead, fled, or
+    streamed out. `nearby.peds` is top-8 by distance, so absence is the honest
+    proxy for "he is not a problem any more" — there is no ped-health field."""
+    handle = snap.get("mark")
+    return all(p.handle != handle for p in state.nearby.peds)
+
+
+def _needs_gang_trouble(state: GameState, view: RoamView) -> bool:
+    return (
+        state.player.health >= GANG_MIN_HEALTH
+        and state.player.wanted == 0
+        and len(gang_nearby(state)) >= GANG_MIN_PEDS
+    )
+
+
+def _plan_gang_trouble(state, view):
+    gang = gang_nearby(state)
+    assert gang
+    mark = min(gang, key=lambda p: p.distance)
+    # Start on the nearest one and let the engine's own combat AI take it from
+    # there: the rest of the set will join in without being told, which is the
+    # whole point of picking a fight with a gang rather than a pedestrian.
+    return (
+        [{"type": "fight_ped", "params": {"handle": mark.handle}}],
+        {"started_with": len(gang)},
+    )
+
+
+def _done_gang_trouble(state: GameState, snap: dict[str, Any]) -> bool:
+    """Over when nothing hostile is left near him, or he is in no state to carry
+    on. The health floor is the same one the survival ladder uses, so this goal
+    stands down before the reflex layer has to drag him out of it."""
+    if state.player.health < GANG_MIN_HEALTH * 0.4:
+        return True
+    return not any(
+        p.relationship == "hostile" and p.distance <= GANG_RADIUS_M
+        for p in state.nearby.peds
+    )
+
+
 def _needs_cop_car(state: GameState, view: RoamView) -> bool:
     return police_vehicle(state) is not None
 
@@ -861,6 +992,42 @@ CATALOG: tuple[Goal, ...] = (
         timeout_s=120.0,
         cooldown_s=20 * 60.0,
         chaos_cost=1.0,
+        # Getting into a police car is one of the most reliable ways in the game
+        # to earn a star, so without this the wanted-override kills the goal at
+        # the exact moment it starts working and `done_when` can never fire —
+        # the same never-completes bug `earn_two_stars` had. Heat is a
+        # CONSEQUENCE here rather than the objective, but the exemption is the
+        # same: the goal owns its own stars until it finishes or times out, and
+        # `lose_the_cops` takes over the moment it does.
+        wants_heat=True,
+    ),
+    Goal(
+        id="pick_a_fight",
+        category="trouble",
+        description="start something with the nearest man who is not a cop",
+        why="he looks like he has opinions",
+        needs=_needs_pick_a_fight,
+        plan=_plan_pick_a_fight,
+        done_when=_done_pick_a_fight,
+        timeout_s=60.0,
+        cooldown_s=4 * 60.0,
+        chaos_cost=1.0,
+    ),
+    Goal(
+        id="gang_trouble",
+        category="trouble",
+        description="find out whose corner this is",
+        why="wrong neighbourhood",
+        needs=_needs_gang_trouble,
+        plan=_plan_gang_trouble,
+        done_when=_done_gang_trouble,
+        timeout_s=120.0,
+        cooldown_s=15 * 60.0,
+        chaos_cost=2.0,
+        # A gang fight makes noise and noise makes stars. Same reasoning as
+        # `steal_cop_car`: heat is a consequence, not the aim, but the override
+        # must not kill the goal the moment it starts working.
+        wants_heat=True,
     ),
     Goal(
         id="hijack_bus",
@@ -1586,9 +1753,22 @@ class RoamEngine:
         outcome in the free-text payload — the same thing the day planner already
         does with `GO_START_A_JOB`. The brain still gets exactly one line per
         transition, from `note()`.
+
+        `outcome == PREEMPTED_OUTCOME` skips the between-goals gap. Every other
+        ending is his own: the goal finished, timed out or gave up, and a few
+        seconds of nothing before the next one is deliberate pacing. A
+        preemption is not his — a higher owner (a firefight, a mission, a
+        budget stop) took the wheel off him mid-goal — so charging him
+        :data:`ROAM_GAP_S` of standing in the street for it would turn every
+        three-second reflex into a twelve-second stall, which is the exact
+        failure this engine exists to prevent.
         """
         locked, self.current = self.current, None
-        self._next_allowed_at = self._clock() + self._rng.uniform(*ROAM_GAP_S)
+        self._next_allowed_at = (
+            self._clock()
+            if outcome == PREEMPTED_OUTCOME
+            else self._clock() + self._rng.uniform(*ROAM_GAP_S)
+        )
         if locked is None:
             return {}
         done = outcome == "completed"
@@ -1678,10 +1858,304 @@ class RoamEngine:
 
 # --- getting out of a building -------------------------------------------------
 #
-# There is no indoors flag and no ground-height field in /state, so being stuck
-# inside a house has to be inferred, and the way out has to be built from the
-# same 19 actions as everything else. There is no legal teleport (CLAUDE.md
-# rule 5) and `/unstick` is refused on foot, so this is the only route.
+# TWO paths live below, and which one runs is decided by the BRIDGE VERSION, not
+# by taste:
+#
+#   * :class:`InteriorEscape` — the v1.12 path. `player.interior` is the game's
+#     own answer to "is he indoors", so nothing has to be inferred at all. This
+#     is the one that runs against a bridge >= 1.5.0.
+#   * :class:`HouseEscape` — the PRE-v1.12 fallback, kept verbatim for a bridge
+#     that does not send `player.interior` (the box may still be on 1.4.0 when
+#     this ships). It infers being indoors from a failed vehicle entry plus 20 s
+#     of stillness — a heuristic that fires late, fires on false positives, and
+#     is why the escape was effectively unreachable in the live loop.
+#
+# Both build the way out from the same documented actions. There is no legal
+# teleport (CLAUDE.md rule 5) and `/unstick` is refused on foot, so a walk
+# through the door is the only route either of them has.
+
+
+#: How long `player.interior` must have been the SAME id before the escape
+#: starts. It exists only so that walking through a doorway, a lift, or the lip
+#: of a car park for a frame or two does not look like being trapped in a
+#: living room. Deliberately short — the whole complaint about the old
+#: heuristic was that 20 s of stillness fires far too late. Tunable; not yet
+#: measured against the real game.
+INTERIOR_SETTLE_S = 3.0
+
+#: How long one rung of the interior ladder gets before the next one is tried.
+#: The operator's spec: 30 s per step, each step with its own timeout, and the
+#: in-goal stuck watchdog stood down for the duration because this ladder does
+#: its own timing.
+INTERIOR_STEP_TIMEOUT_S = 30.0
+
+#: A sanity bound on the coordinates this ladder is willing to walk to.
+#: `player.last_outdoor` is whatever the bridge latched on the last
+#: outdoor->indoor transition, and a learned exit is keyed by an InteriorProxy
+#: HANDLE — a pool handle, whose reuse across a session is not something this
+#: harness can verify. Either could therefore name a door on the other side of
+#: the map. A door he actually walked through is metres away, not kilometres,
+#: so anything beyond this is discarded as stale rather than walked to.
+#: Tunable; not measured against the real game.
+INTERIOR_EXIT_MAX_M = 150.0
+
+
+@dataclass
+class InteriorEscape:
+    """CONTRACTS v1.12: walk him out of an interior, using the game's own fact.
+
+    WHY THIS EXISTS. After a mission ends, a respawn, or a character switch
+    INSIDE a safehouse, outdoor navigation tasks fail — the nav mesh is
+    disconnected by doors — and the agent stands in a living room doing nothing.
+    `HouseEscape` below has been able to answer that for a while, but `/state`
+    had no field that said "he is indoors", so it could only be reached through
+    a heuristic that needs 20 s of stillness AND a failed `enter_nearest_vehicle`
+    — a combination the live loop essentially never produced. `player.interior`
+    is the ground truth, so this runs off a fact.
+
+    THE LADDER (the operator's spec, implemented literally), each rung with its
+    own timeout of :data:`INTERIOR_STEP_TIMEOUT_S`:
+
+      1. `walk_to(player.last_outdoor)` — where the bridge saw him standing the
+         tick before he came through the door. `walk_to` is
+         TASK_FOLLOW_NAV_MESH_TO_COORD and interiors ARE nav-meshed (the ped AI
+         opens doors), so a nav-mesh request to an outdoor point is the one
+         action that routes back out.
+      2. `walk_to` a LEARNED exit for this interior id — the position at which
+         the game itself last reported him leaving this same interior. Real
+         observed data from this run, never a curated table: no verified
+         interior->exit-coord table exists, so none ships (CLAUDE.md rule 6).
+         This is the rung that matters for the failure this fix is about,
+         because a respawn or a character switch drops him inside WITHOUT an
+         outdoor->indoor transition, so rung 1 has nothing to walk to.
+      3. Give up, loudly, and hand the wheel back.
+
+    NOT IN THE LADDER, ON PURPOSE: `GET_SAFE_COORD_FOR_PED` + a teleport. It
+    would work, and it is a cheat under CLAUDE.md rule 5 — the narrow "unstick"
+    exception is a few metres when wedged, not relocating a body out of a
+    building. Giving up honestly and saying so on the log is the correct
+    failure.
+
+    WHY THE LEARNED TABLE IS NOT PERSISTED TO DISK: the key is an
+    `InteriorProxy` handle. CONTRACTS §1 already warns that the game's handles
+    are ephemeral, and nothing has verified that an interior-proxy handle means
+    the same building in the next process. So the table lives for the life of a
+    run, and every use is additionally distance-checked against
+    :data:`INTERIOR_EXIT_MAX_M`.
+    """
+
+    clock: Any = time.monotonic
+    #: 0 = rung 1 has not been posted yet.
+    step: int = 0
+    #: The interior id being escaped, or None when he is not being escaped from
+    #: anywhere. This is the whole "is the escape active" state.
+    interior_id: int | None = None
+    _step_started_at: float = 0.0
+    _step_posted: bool = False
+    _task_id: str | None = None
+    _gave_up: bool = False
+    #: interior id -> the position the game reported him at on the tick he came
+    #: OUT of it. Learned from this run only; see the class docstring.
+    _exits: dict[int, tuple[float, float, float]] = field(default_factory=dict)
+    #: Where he was on the previous tick, so an exit can be learned from the
+    #: transition itself.
+    _prev_interior_id: int | None = None
+
+    # -- observation -----------------------------------------------------------
+
+    def observe(self, state: GameState) -> int | None:
+        """Feed every tick. Returns the interior id he has just LEFT, or None.
+
+        Runs unconditionally, ahead of every gate, because "he came out" has to
+        be seen on the tick it happens whatever else the ladder is doing — and
+        because the position on that tick is the only honest source for a
+        learned exit coordinate.
+        """
+        interior = state.player.interior
+        now_id = None if interior is None else interior.id
+        left = None
+        if self._prev_interior_id is not None and now_id != self._prev_interior_id:
+            # He is out of THAT interior (either outdoors, or into another one).
+            left = self._prev_interior_id
+            if now_id is None:
+                # Outdoors: this position is a real, observed way out of it.
+                self._exits[left] = player_pos(state)
+        self._prev_interior_id = now_id
+        return left
+
+    def active(self) -> bool:
+        """True while this class is the reason he is being moved."""
+        return self.interior_id is not None and not self._gave_up
+
+    def reset(self) -> None:
+        """Forget the current escape. Learned exits are kept — they are facts."""
+        self.step = 0
+        self.interior_id = None
+        self._step_started_at = 0.0
+        self._step_posted = False
+        self._task_id = None
+        self._gave_up = False
+
+    def posted(self, task_id: str | None) -> None:
+        """The rung :meth:`check` just returned really did reach the game.
+
+        Called by `main` with `POST /task`'s own task id, which is what starts
+        this rung's 30 s clock. Split out from :meth:`check` because
+        `_execute_action` has several honest refusals of its own (a modal
+        screen, a task type the stall detector has just blocked); a rung that
+        never left the harness must not burn a timeout.
+        """
+        self._step_posted = True
+        self._step_started_at = self.clock()
+        self._task_id = task_id
+
+    def retry_step(self) -> None:
+        """This rung did not stick. Ask for the same one again on the next tick.
+
+        Two callers, one meaning: `_execute_action` refused the post before it
+        reached the game, or a higher wheel owner preempted the walk after it
+        did. Either way the rung has not had its chance, so its clock is torn
+        up rather than counted against it.
+        """
+        self.step = max(0, self.step - 1)
+        self._step_posted = False
+        self._step_started_at = 0.0
+        self._task_id = None
+
+    # -- the ladder ------------------------------------------------------------
+
+    def check(self, state: GameState) -> dict[str, Any] | None:
+        """The next action, or None when the ladder does not apply / is waiting.
+
+        Returning None does NOT mean "stand down" — :meth:`active` is the flag
+        for that. A rung that has been posted and is still inside its timeout
+        returns None every tick while the walk runs, and the caller keeps
+        holding the wheel for it.
+        """
+        if not self.applies(state):
+            self.reset()
+            return None
+        interior = state.player.interior
+        assert interior is not None  # applies() just checked it
+        if self.interior_id != interior.id:
+            # A new room (or the first detection). Start the ladder from the top:
+            # the way out of THIS interior is not the way out of the last one.
+            self.reset()
+            self.interior_id = interior.id
+        if self._gave_up:
+            return None
+
+        now = self.clock()
+        if self._step_posted:
+            task = state.last_task
+            ended = (
+                self._task_id is not None
+                and task.id == self._task_id
+                and task.status in ("done", "failed")
+            )
+            if not ended and now - self._step_started_at < INTERIOR_STEP_TIMEOUT_S:
+                return None  # the walk is running; give it its whole 30 s
+            # Either the engine finished/abandoned the walk or the rung ran out
+            # of time, and he is STILL inside (applies() said so above). Next
+            # rung. `walk_to` reaching its coordinate without the interior
+            # clearing means the coordinate was not actually a way out.
+            self._step_posted = False
+            self._task_id = None
+
+        while self.step < 2:
+            target = self._target(state, self.step)
+            self.step += 1
+            if target is None:
+                continue
+            return _walk_to(target, run=True)
+
+        self._gave_up = True
+        log.error(
+            "exit_interior GAVE UP: every legal way out of this interior has been "
+            "tried and he is still inside. There is no legal teleport (CLAUDE.md "
+            "rule 5), so the wheel goes back and the rest of the loop carries on",
+            extra={
+                "kv": {
+                    "interior_id": self.interior_id,
+                    "since_s": round(interior.since_s, 1),
+                    "had_last_outdoor": state.player.last_outdoor is not None,
+                    "had_learned_exit": interior.id in self._exits,
+                }
+            },
+        )
+        return None
+
+    def applies(self, state: GameState) -> bool:
+        """Is the ground-truth escape the right thing to be doing at all?
+
+        Every refusal here is also a refusal `main._execute_action` would make
+        anyway, which is the point: a rung that cannot possibly reach the game
+        must not start its 30 s clock, and the ladder must not chew through its
+        two rungs while the game owns the controls.
+        """
+        interior = state.player.interior
+        if interior is None:
+            return False
+        p = state.player
+        if p.in_vehicle or p.dead or p.arrested:
+            # In a car he can drive out of a garage, and a corpse walks nowhere.
+            return False
+        if p.switch_in_progress or not p.control_enabled:
+            # `main._game_owns_controls`: nothing posted now reaches the player.
+            # A character switch INTO a safehouse is one of the three ways he
+            # ends up stuck indoors, so this is a WAIT, not a stand-down —
+            # `since_s` keeps counting and the ladder starts once it lands.
+            return False
+        if state.mission.active or state.mission.cutscene_active or state.mission.retry_in_flight:
+            # Missions happen indoors on purpose. Walking him out of one would be
+            # the harness sabotaging the story, which is the opposite of the bug
+            # this fixes; the failure is being left inside AFTER it ends.
+            return False
+        return interior.since_s >= INTERIOR_SETTLE_S
+
+    def _target(self, state: GameState, step: int) -> tuple[float, float, float] | None:
+        here = player_pos(state)
+        if step == 0:
+            out = state.player.last_outdoor
+            if out is None:
+                return None
+            return self._sane((out.x, out.y, out.z), here, "last_outdoor")
+        learned = self._exits.get(self.interior_id or 0)
+        if learned is None:
+            return None
+        return self._sane(learned, here, "learned_exit")
+
+    def _sane(
+        self,
+        target: tuple[float, float, float],
+        here: tuple[float, float, float],
+        source: str,
+    ) -> tuple[float, float, float] | None:
+        distance = planar_distance(here, target)
+        if distance > INTERIOR_EXIT_MAX_M:
+            log.warning(
+                "exit_interior: discarding a way out that is too far to be this "
+                "building's door",
+                extra={
+                    "kv": {
+                        "source": source,
+                        "interior_id": self.interior_id,
+                        "distance_m": round(distance, 1),
+                        "max_m": INTERIOR_EXIT_MAX_M,
+                    }
+                },
+            )
+            return None
+        return target
+
+
+# --- the PRE-v1.12 fallback, from here to the end of `HouseEscape` -------------
+#
+# A bridge older than 1.5.0 sends no `player.interior`, so on that bridge being
+# stuck inside a house still has to be INFERRED, and the way out still has to be
+# built from the same 19 actions as everything else. Kept exactly as it was: it
+# is the only cover a pre-v1.12 bridge has. `InteriorEscape` above replaces it
+# the moment the field is present.
 
 #: The sharpest indoor tell available: the bridge picked a car it can SEE
 #: (`World.GetNearbyVehicles` is an 80 m sphere), fired TASK_ENTER_VEHICLE at it,
@@ -1734,13 +2208,27 @@ class HouseEscape:
         self._gave_up = False
 
     def looks_indoors(self, state: GameState, still_for_s: float) -> bool:
-        """Composite tell. Both halves are required; neither is sufficient alone.
+        """Composite tell — PRE-v1.12 ONLY. Both halves required, neither sufficient.
+
+        **This is the fallback, not the answer.** CONTRACTS v1.12 gives the
+        bridge's own `player.interior`, and when that field is on the wire it is
+        authoritative: :class:`InteriorEscape` owns the case and this class
+        stands down entirely, whatever the heuristic thinks. The heuristic
+        survives for exactly one reason — the game box may still be running a
+        pre-v1.12 bridge (1.4.0) when this ships, and on that bridge this is the
+        only cover there is.
 
         Deliberately NOT used: "no nearby vehicles at all". The scan is an 80 m
         sphere truncated to the 8 nearest, and cars parked outside a Los Santos
         house are well inside 80 m, so `nearby.vehicles` is usually NOT empty
         indoors — it only discriminates in a rural interior.
         """
+        if state.player.interior_reported:
+            # A v1.12 bridge answered the question already, in either direction.
+            # `interior: null` means OUTDOORS and is a fact; guessing "indoors"
+            # over the top of it from a failed vehicle entry is exactly the
+            # false-positive behaviour this contract change removed.
+            return False
         if state.player.in_vehicle or state.player.dead or state.player.arrested:
             return False
         last = state.last_task

@@ -39,7 +39,7 @@ from wasted_harness.behavior.recovery import (
     TaskStallDetector,
     ThreatLatch,
 )
-from wasted_harness.behavior.roam import HouseEscape, RoamEngine
+from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
 from wasted_harness.bridge_client import GameState
 from wasted_harness.main import Harness
@@ -128,10 +128,18 @@ class StubHarness:
         # real here — a stub would hide the ordering that is the point of them.
         self.roam = RoamEngine(random.Random(1))
         self.house_escape = HouseEscape()
+        self.interior_escape = InteriorEscape()
+        self._interior_token = None
         self.threat_latch = ThreatLatch()
         self.damage = DamageTracker()
         self.vehicle = VehicleController()
         self.wheel = MovementWheel()
+        self.wheel.begin_tick()
+        self.wheel.on_preempt("governor", self._governor_preempted)
+        self.wheel.on_preempt("exit_interior", self._interior_preempted)
+        self._governor_token = None
+        self._roam_token = None
+        self._pending_park = False
 
         class _Breaks:
             on_break = False
@@ -148,13 +156,29 @@ class StubHarness:
         self.memory = _Recorder()
         self.commentary = _Recorder()
 
+    #: The real movement arbitration: the L3 park holds the wheel from the
+    #: scenic drive until the `stop` at the end of it, and `_reflex`'s ladder
+    #: is what these tests are about.
+    _game_owns_controls = Harness._game_owns_controls
+    _game_control_reason = Harness._game_control_reason
+    _reflex_act = Harness._reflex_act
+    _governor_preempted = Harness._governor_preempted
+    _interior_preempted = Harness._interior_preempted
+    _release_interior_wheel = Harness._release_interior_wheel
+    _run_interior_escape = Harness._run_interior_escape
+
     # the two methods under test call these
-    def _execute_action(self, action_type: str, params: dict[str, Any]) -> str | None:
-        self.posted.append((action_type, dict(params)))
+    def _execute_action(
+        self, action_type: str, params: dict[str, Any], token: Any = None
+    ) -> str | None:
         from wasted_harness.brain.schemas import BRIDGE_TASKS
 
         if action_type in BRIDGE_TASKS:
+            assert self.wheel.holds(token), f"{action_type} posted without the wheel"
+            self.wheel.mark_posted(token, action_type)
+            self.posted.append((action_type, dict(params)))
             return self._next_task_id
+        self.posted.append((action_type, dict(params)))
         return None
 
     def _vehicle_hold(self, state: GameState) -> str | None:
@@ -166,7 +190,7 @@ class StubHarness:
     def _say(self, text: str, mood: str | None = None) -> None:
         self.said.append(text)
 
-    def _end_activity_if_running(self, outcome: str) -> None:
+    def _end_activity_if_running(self, outcome: str, *, by: str | None = None) -> None:
         self.ended.append(outcome)
 
     def _capture_screenshot(self, hint: str):

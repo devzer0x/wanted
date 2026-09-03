@@ -568,45 +568,69 @@ def test_a_write_off_gets_him_out_of_the_car() -> None:
 
 
 def test_exactly_one_layer_owns_movement_per_tick() -> None:
+    """The wheel GATES. A lower owner gets `None` back, not a bool it may ignore."""
     wheel = MovementWheel(clock=FakeClock())
     wheel.begin_tick()
-    assert wheel.claim("threat", "being shot") is True
-    assert wheel.claim("vehicle", "seated and idle") is False
+    survival = wheel.acquire("threat", "being shot")
+    assert survival is not None
+    assert wheel.acquire("vehicle", "seated and idle") is None
     assert wheel.owner == "threat"
     assert wheel.taken_by_reflex() is True
+    assert wheel.holds(survival) is True
 
+    # A one-tick lease: the reflex layer is re-evaluated from scratch every
+    # tick, so it simply asks again — and if it does not, the wheel is free.
     wheel.begin_tick()
     assert wheel.owner is None
-    assert wheel.claim("mission", "drive_to the objective") is True
+    objective = wheel.acquire("mission", "drive_to the objective")
+    assert objective is not None
     assert wheel.taken_by_reflex() is False
+    assert wheel.holds(survival) is False, "the old token stops working"
 
 
-def test_a_change_of_owner_is_logged(caplog: pytest.LogCaptureFixture) -> None:
+def test_every_acquire_release_and_refusal_is_logged(
+    caplog: pytest.LogCaptureFixture,
+) -> None:
     """"He does nothing" must be diagnosable from the log rather than by
-    guessing which layer declined the wheel."""
+    guessing which layer declined the wheel. Owner, reason and tick, every
+    time."""
     wheel = MovementWheel(clock=FakeClock())
     with caplog.at_level(logging.INFO, logger="wasted.vehicle"):
         wheel.begin_tick()
-        wheel.claim("mission", "drive_to")
+        token = wheel.acquire("mission", "drive_to", lease_ticks=None)
+        wheel.acquire("roam", "steal_nice_car")  # refused: outranked
         wheel.begin_tick()
-        wheel.claim("mission", "drive_to")  # unchanged: not logged again
-        wheel.begin_tick()
-        wheel.claim("threat", "being shot")
-    changes = [r.kv for r in caplog.records if getattr(r, "kv", {}).get("to")]
-    assert [(c["from"], c["to"]) for c in changes] == [(None, "mission"), ("mission", "threat")]
+        wheel.release(token)
+    lines = [(r.message, getattr(r, "kv", {})) for r in caplog.records]
+    kinds = [m for m, _ in lines]
+    assert kinds == ["wheel acquired", "wheel refused", "wheel released"]
+    assert all("tick" in kv for _, kv in lines), "every line names the tick"
+    acquired, refused, released = (kv for _, kv in lines)
+    assert (acquired["owner"], acquired["reason"]) == ("mission", "drive_to")
+    assert (refused["owner"], refused["held_by"], refused["why"]) == (
+        "roam",
+        "mission",
+        "outranked",
+    )
+    assert (released["owner"], released["next_in_line"]) == ("mission", "roam")
 
 
-def test_two_layers_posting_in_one_tick_is_reported_not_hidden(
-    caplog: pytest.LogCaptureFixture,
-) -> None:
+def test_a_task_already_posted_this_tick_refuses_even_a_higher_owner() -> None:
+    """The structural half of "no two movement tasks in one tick": priority
+    alone is not enough, because a high-priority layer that runs LATE in a tick
+    could otherwise preempt one that has already put an order on the wire."""
     wheel = MovementWheel(clock=FakeClock())
     wheel.begin_tick()
-    wheel.claim("vehicle", "drive away")
-    with caplog.at_level(logging.WARNING, logger="wasted.vehicle"):
-        wheel.force("day_plan", "drive_to the marker")
-    assert any(
-        r.kv.get("also_posted") == "day_plan" for r in caplog.records if hasattr(r, "kv")
-    ), "an un-arbitrated second movement post must be visible in the log"
+    roam = wheel.acquire("roam", "roam_the_block", lease_ticks=None)
+    assert roam is not None
+    wheel.mark_posted(roam, "walk_to")
+    assert wheel.acquire("threat", "being shot") is None, (
+        "survival outranks roam, but the tick already has an order on the wire"
+    )
+    assert wheel.acquire("roam", "next step") is not None, "its own owner may continue"
+    # Next tick the ladder works normally again.
+    wheel.begin_tick()
+    assert wheel.acquire("threat", "being shot") is not None
 
 
 def test_the_vehicle_reflex_never_outranks_survival() -> None:

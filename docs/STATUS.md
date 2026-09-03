@@ -1,7 +1,47 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-02 (night).
+run log, or URL) noted next to it. Last updated: 2026-09-03.
+
+## 2026-09-03 — movement ownership, goal ids, and the interior escape
+
+**Fix 1 — MovementWheel now GATES movement instead of recording it.** It was advisory: `claim()`
+returned a bool callers could ignore and `force()` only logged a WARNING when two layers posted in
+the same tick. That is the deadlock class behind "follow Lamar while standing next to the objective
+car". Now `acquire(owner, reason)` returns a token or `None` on a fixed ladder
+(reflex 3 > mission 2 > roam 1 > idle 0), and the gate sits at the single funnel every action
+already passed through — `main._execute_action` refuses any of the bridge tasks whose token is not
+the current holder's. The 8 primitives are exempt on purpose (`look_around` is a mouse sweep,
+`wait` is a quiet period; neither moves anyone). Preemption cancels roam's task, clears
+`roam.current` and emits `roam_goal_failed{preempted}`.
+Verified: refusal, exclusivity, release, preemption and `force_idle` (death/cutscene) all confirmed
+against the real class.
+**Deliberately NOT done:** the operator's spec asked for a token assertion in the bridge. The
+harness is the bridge's only client and `_execute_action` is its only path there, so the guarantee
+is identical without a contract change or a bridge deploy.
+
+**Fix 3 — the model can finally choose a roam goal.** The plugin side was already strict
+(`model_choice` exact-token matches against the ids actually offered, returns None on zero or two,
+never fuzzy-matches). The bug was that **two prompts contradicted each other**: `situations.md` said
+"Pick exactly ONE, by id" while `decision_guide.md` said "your `goal` field is an echo, not an edit,
+repeat the GOAL line unchanged". The echo rule won, `model_choice` almost never matched, the engine
+silently took `available[0]`, and every opportunistic trigger was decoration. The roam case is now
+stated first and the echo rule scoped to everything else. Added the two log lines the spec asked
+for: `goal_fallback` (named no offered id) and `goal_switch_ignored` (a goal is locked and it named
+another) — a RUN of either means prompt and menu have drifted, which is invisible from the stream.
+
+**`steal_cop_car` could never complete**, the same never-completes bug `earn_two_stars` had:
+sitting in a police car reliably earns a star, so the wanted-override killed the goal at the exact
+moment it started working. Exempted via `wants_heat`.
+
+**Withdrawn: `pick_a_fight` and `gang_trouble` are buildable after all.** I ruled them out because
+nothing could initiate violence against a peaceful ped. That was true of the 19-action catalog; it
+is not true now — **`fight_ped{handle}` exists** (the catalog is 20) and `TaskEngine.StartFightPed`
+attacks any named ped regardless of relationship. To be added.
+
+**679 tests passing, ruff clean.** Nothing deployed: the operator's API key is off and he deploys
+himself.
+
 
 ## 2026-09-02 (night) — CONTRACTS v1.11 / bridge 1.4.0: built and verified locally, NOT live-verified
 
