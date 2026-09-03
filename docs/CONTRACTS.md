@@ -1,9 +1,29 @@
 # WANTED — CONTRACTS
 
-**Version: 1.11 — FROZEN 2026-09-02.** Executors treat this file as read-only; changes go through
+**Version: 1.12 — FROZEN 2026-09-03.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
 Changelog:
+- v1.12 (additive): `player.interior` = `{"id": <int>, "since_s": <float>}` or **null** when he is
+  outdoors, and `player.last_outdoor` = `{x,y,z}` or null — the position captured on the last
+  outdoor→indoor transition.
+  **Why:** after a mission ends, a respawn, or a character switch INSIDE a safehouse, outdoor
+  navigation tasks fail because the nav mesh is disconnected by doors, and the agent stands in a
+  living room doing nothing. The harness has had a house-escape path for a while, but it was
+  unreachable in the live loop: `/state` exposed no way to distinguish "he is indoors" from "he is
+  merely stuck", so the escape could only be triggered by a heuristic (a failed
+  `enter_nearest_vehicle` plus 20 s of stillness) that fires late and also fires on false
+  positives. This is the ground truth instead of the guess.
+  Source is SHVDN's **`Entity.CurrentInteriorProxy`** (verified present in the pinned
+  nightly.189 `Docs/ScriptHookVDotNet3.xml`: "Gets the current [interior proxy] associated with
+  this [entity] ... if they are in an interior; otherwise [null]") plus `InteriorProxy.Handle` for
+  the id. A wrapper, not a raw native hash, so a future SHVDN bump that renames or removes it
+  breaks the BUILD rather than silently returning a garbage id — the same reasoning
+  `DrivingStyles` already applies.
+  `since_s` is measured bridge-side from the tick the id last changed, because only the bridge
+  sees every tick; a harness derived from a 2-4 Hz poll would round the transition. `last_outdoor`
+  is likewise bridge-side: the escape's first move is "walk back to where you came in", and only
+  the bridge sees the tick *before* the transition.
 - v1.11 (behavioural, from three sourced research passes after the operator asked "isn't there a
   mod that makes him a pro": docs/research/brief-driving-natives.json, brief-combat-natives.json,
   brief-mission-comprehension.json). The answer was that the "mod" is Script Hook V + SHVDN, which
