@@ -130,7 +130,11 @@ namespace WastedBridge
                     // the field below reads it - object-initializer members are evaluated in
                     // source order, which is what makes this safe.
                     Interior = TrackInteriorSafe(ped, pos),
-                    LastOutdoor = _haveLastOutdoor ? ToDto(_lastOutdoor) : null
+                    LastOutdoor = _haveLastOutdoor ? ToDto(_lastOutdoor) : null,
+                    // Bridge 1.7.0 (CONTRACTS proposal v1.14). WeaponState.Read never throws and
+                    // never returns null; on a failed native it serves "unarmed, owns nothing",
+                    // which is the state in which every weapon-gated roam goal refuses itself.
+                    Weapon = WeaponState.Read(ped)
                 },
                 Vehicle = BuildVehicle(veh),
                 Location = new LocationDto
@@ -211,8 +215,38 @@ namespace WastedBridge
                 Health = veh.HealthFloat,
                 UpsideDown = veh.IsUpsideDown,
                 InWater = veh.IsInWater,
-                StoppedForS = CurrentStoppedForS
+                StoppedForS = CurrentStoppedForS,
+                // Bridge 1.7.0: IS_ENTITY_IN_AIR via the SHVDN Entity.IsInAir wrapper, and
+                // "is somebody else driving" from one GET_PED_IN_VEHICLE_SEAT call.
+                InAir = veh.IsInAir,
+                Seat = SeatOf(veh)
             };
+        }
+
+        /// <summary>
+        /// Bridge 1.7.0 <c>vehicle.seat</c>: "driver" when the player ped is the one in seat -1,
+        /// "passenger" otherwise. GET_PED_IN_VEHICLE_SEAT (0xBB40DD2270B65366, present in the
+        /// pinned GTA.Native.Hash enum) rather than SHVDN's <c>Ped.SeatIndex</c>, which reads the
+        /// ped's memory at a hard-coded struct offset and would return a plausible wrong number
+        /// after a game patch instead of failing. Null on any native failure, which every consumer
+        /// reads as "the bridge cannot tell" rather than as either answer.
+        /// </summary>
+        private static string SeatOf(Vehicle veh)
+        {
+            try
+            {
+                Ped player = Game.Player.Character;
+                if (player == null || !player.Exists())
+                {
+                    return null;
+                }
+                int driver = Function.Call<int>(Hash.GET_PED_IN_VEHICLE_SEAT, veh.Handle, -1);
+                return driver == player.Handle ? "driver" : "passenger";
+            }
+            catch (System.Exception)
+            {
+                return null;
+            }
         }
 
         /// <summary>

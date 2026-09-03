@@ -35,13 +35,20 @@ from wasted_harness.behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    JackHandoffGate,
+    RoadDodge,
     StrandedEscalator,
     StuckDetector,
     TaskStallDetector,
     ThreatLatch,
+    WaterEscalator,
 )
 from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
-from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
+from wasted_harness.behavior.vehicle import (
+    ControlRegained,
+    MovementWheel,
+    VehicleController,
+)
 from wasted_harness.bridge_client import GameState
 from wasted_harness.main import Harness
 from wasted_harness.perception import Delta
@@ -124,6 +131,11 @@ class StubHarness:
         self.stuck = StuckDetector()
         self.task_stall = TaskStallDetector()
         self.stranded = StrandedEscalator()
+        # T9 (findings.md R1/R5): fed every tick by `_reflex`, same as every
+        # other stateful reflex tracker on this list.
+        self.water = WaterEscalator()
+        self.road_dodge = RoadDodge()
+        self.jack_handoff = JackHandoffGate()
         # `_reflex` tries the house-escape ladder BEFORE the stranded ladder and
         # measures how long he has stood still with the roam engine, so both are
         # real here — a stub would hide the ordering that is the point of them.
@@ -134,6 +146,10 @@ class StubHarness:
         self.threat_latch = ThreatLatch()
         self.damage = DamageTracker()
         self.vehicle = VehicleController()
+        #: F6's stopwatch (behavior/vehicle.ControlRegained). Real, because
+        #: `_reflex` feeds it every tick and its `resume` rung is part of the
+        #: ladder these governor tests assert the ORDER of.
+        self.control_regained = ControlRegained()
         self.wheel = MovementWheel()
         self.wheel.begin_tick()
         self.wheel.on_preempt("governor", self._governor_preempted)

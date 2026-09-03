@@ -62,6 +62,20 @@ STUNT_APPROACHES: tuple[dict[str, Any], ...] = (
     {"name": "elysian_dock_ramp", "pos": (155.0, -3067.0, 5.9), "speed_mps": 33.0},
 )
 
+#: Freeway approach points, for behavior.roam's "there's the on-ramp" trigger.
+#:
+#: **CURATED AND UNVERIFIED.** `/state` carries no road-type flag — `location.street`
+#: is a name string — so "he is near a freeway on-ramp" is authored data or it does
+#: not exist. Rather than invent coordinates, this REUSES the three
+#: :data:`STUNT_APPROACHES` points that are already curated as freeway/expressway
+#: approaches. None of them has been checked against the running game, and a wrong
+#: one costs a trigger promotion, never a false goal completion (`freeway_run` is
+#: graded on distance covered). Verifying them is live-tuning work.
+FREEWAY_ONRAMPS: tuple[dict[str, Any], ...] = tuple(
+    a for a in STUNT_APPROACHES if a["name"] in ("del_perro_fwy_ramp", "elysian_dock_ramp",
+                                                 "lsia_terminal_ramp")
+)
+
 CHAOS_BUDGET_PER_HOUR = 2.0
 
 #: Categories exist so the picker can enforce variety. Two scenic drives back to

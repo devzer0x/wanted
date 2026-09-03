@@ -37,7 +37,10 @@ def test_mood_enum_exact() -> None:
 
 
 def test_action_catalog_exact() -> None:
-    assert len(BRIDGE_TASKS) == 14  # v1.11 adds fight_ped; v1.13 adds answer_call + reject_call
+    # v1.11 adds fight_ped; v1.13 adds answer_call + reject_call; bridge 1.7.0
+    # (fix-opus-b, T6) adds shoot_at + drive_by + enter_vehicle_seat; bridge
+    # 1.7.0 (fix-opus-a, T1) adds flee_ped.
+    assert len(BRIDGE_TASKS) == 18
     assert PRIMITIVES == (
         "look_around",
         "brake_tap",
@@ -59,6 +62,11 @@ def test_action_catalog_exact() -> None:
         "set_waypoint": {"x": 1.0, "y": 2.0},
         "follow_entity": {"handle": 1},
         "fight_ped": {"handle": 1},
+        "flee_ped": {"handle": 1},
+        # bridge 1.7.0 (fix-opus-b, T6): all three are target-explicit.
+        "shoot_at": {"handle": 1},
+        "drive_by": {"handle": 1},
+        "enter_vehicle_seat": {"handle": 1},
     }
     for t in ACTION_TYPES:
         ActionModel.model_validate({"type": t, "params": minimal_params.get(t, {})})
@@ -75,17 +83,50 @@ def test_action_catalog_exact() -> None:
         ActionModel.model_validate({"type": "god_mode", "params": {}})
 
 
-def test_fight_ped_round_trips_with_only_a_handle() -> None:
-    """CONTRACTS v1.11 §1: `fight_ped {handle}`, nothing else."""
+def test_fight_ped_round_trips_with_a_handle_and_a_weapon() -> None:
+    """CONTRACTS v1.11 §1 `fight_ped {handle}` + bridge 1.7.0's `weapon`.
+
+    `weapon` is non-nullable with a default (the 15-union-param ceiling — see
+    ActionParamsModel), so it ALWAYS rides along on fight_ped and never on
+    anything else. `"auto"` is byte-for-byte the pre-1.7.0 behaviour, so a
+    caller that never heard of the field gets exactly what it used to.
+    """
     action = ActionModel.model_validate({"type": "fight_ped", "params": {"handle": 9012}})
-    assert action.wire_params() == {"handle": 9012}
+    assert action.wire_params() == {"handle": 9012, "weapon": "auto"}
+    fists = ActionModel.model_validate(
+        {"type": "fight_ped", "params": {"handle": 9012, "weapon": "unarmed"}}
+    )
+    assert fists.wire_params() == {"handle": 9012, "weapon": "unarmed"}
     with pytest.raises(ValidationError):
         ActionModel.model_validate({"type": "fight_ped", "params": {}})
+    with pytest.raises(ValidationError):
+        ActionModel.model_validate(
+            {"type": "fight_ped", "params": {"handle": 9012, "weapon": "rocket"}}
+        )
     # A param fight_ped does not take never rides along.
     stray = ActionModel.model_validate(
         {"type": "fight_ped", "params": {"handle": 9012, "radius_m": 25.0}}
     )
-    assert stray.wire_params() == {"handle": 9012}
+    assert stray.wire_params() == {"handle": 9012, "weapon": "auto"}
+
+
+def test_the_new_1_7_0_verbs_carry_only_their_own_keys() -> None:
+    """T6: three new bridge tasks, each target-explicit, no key bleed."""
+    shoot = ActionModel.model_validate(
+        {"type": "shoot_at", "params": {"handle": 11, "duration_s": 6.0, "radius_m": 30.0}}
+    )
+    assert shoot.wire_params() == {"handle": 11, "duration_s": 6.0}
+    drive_by = ActionModel.model_validate({"type": "drive_by", "params": {"handle": 12}})
+    assert drive_by.wire_params() == {"handle": 12}
+    # `seat` is non-nullable with a passenger default, so it is always present
+    # and the driver's seat is not expressible from this action at all.
+    seat = ActionModel.model_validate({"type": "enter_vehicle_seat", "params": {"handle": 13}})
+    assert seat.wire_params() == {"handle": 13, "seat": 2}
+    with pytest.raises(ValidationError):
+        ActionModel.model_validate({"type": "enter_vehicle_seat", "params": {"handle": 13, "seat": -1}})
+    for verb in ("shoot_at", "drive_by", "enter_vehicle_seat"):
+        with pytest.raises(ValidationError):
+            ActionModel.model_validate({"type": verb, "params": {}})
 
 
 def test_the_wire_schema_can_express_coordinates() -> None:

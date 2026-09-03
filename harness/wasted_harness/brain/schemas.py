@@ -8,11 +8,15 @@ layer keeps control (CONTRACTS §2).
 
 from __future__ import annotations
 
+import re
+from collections.abc import Callable, Iterable
+from dataclasses import dataclass
 from typing import Any, Literal
 
 from pydantic import BaseModel, ConfigDict, Field, field_validator, model_validator
 
 from ..logsetup import get_logger
+from .characters import absent_names_mentioned
 
 log = get_logger("wasted.brain.schemas")
 
@@ -32,6 +36,7 @@ BRIDGE_TASKS: tuple[str, ...] = (
     "seek_cover",
     "follow_entity",
     "fight_ped",
+    "flee_ped",
     "set_waypoint",
     "stop",
     # CONTRACTS v1.13, the phone. Bridge tasks like the rest — they go out as
@@ -39,6 +44,21 @@ BRIDGE_TASKS: tuple[str, ...] = (
     # for the one way they are handled differently.
     "answer_call",
     "reject_call",
+    # --- fix-opus-b (T6): bridge 1.7.0, CONTRACTS proposal v1.14 ------------
+    # Three new verbs, each verified against the PINNED SHVDN
+    # (bridge/lib/ScriptHookVDotNet3.dll, 3.7.0.189) before being written:
+    #   shoot_at{handle, duration_s}   TASK_SHOOT_AT_ENTITY  0x08DA95E8298AE772
+    #   drive_by{handle, duration_s}   TASK_DRIVE_BY         0x2F8AF0E82773A171
+    #   enter_vehicle_seat{handle,seat} TASK_ENTER_VEHICLE   0xC20E50AA46D09CA8
+    # `attack_ped` is deliberately NOT here: the ticket's
+    # `attack_ped{handle}` = TASK_COMBAT_PED(player, target, 0, 16) is exactly
+    # what `fight_ped`'s ranged arm already issues, so the only real difference
+    # (which weapon he holds) ships as `fight_ped`'s new `weapon` param rather
+    # than as a second task type with the same native, the same param and no
+    # way for the model to tell them apart.
+    "shoot_at",
+    "drive_by",
+    "enter_vehicle_seat",
 )
 
 #: CONTRACTS v1.13. The two bridge tasks that MOVE NOBODY: they inject one
@@ -84,10 +104,15 @@ ActionType = Literal[
     "seek_cover",
     "follow_entity",
     "fight_ped",
+    "flee_ped",
     "set_waypoint",
     "stop",
     "answer_call",
     "reject_call",
+    # fix-opus-b (T6), bridge 1.7.0 — see BRIDGE_TASKS above.
+    "shoot_at",
+    "drive_by",
+    "enter_vehicle_seat",
     "look_around",
     "brake_tap",
     "swerve",
@@ -119,6 +144,14 @@ REQUIRED_NUMERIC_PARAMS: dict[str, tuple[str, ...]] = {
 REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
     "follow_entity": ("handle",),
     "fight_ped": ("handle",),
+    "flee_ped": ("handle",),
+    # fix-opus-b (T6): all three 1.7.0 verbs are target-explicit. A handle-less
+    # `shoot_at` is not "shoot at nothing", it is a 400 from the bridge after
+    # the decision was already accepted — the exact silent dead-end this table
+    # exists to turn into a schema error the retry path can feed back.
+    "shoot_at": ("handle",),
+    "drive_by": ("handle",),
+    "enter_vehicle_seat": ("handle",),
 }
 
 
@@ -294,6 +327,41 @@ class ActionParamsModel(BaseModel):
     direction: Literal["left", "right"] = Field(
         default="left", description="swerve: which way to flinch."
     )
+    # --- fix-opus-b (T6), bridge 1.7.0 ---------------------------------------
+    #
+    # BOTH ARE NON-NULLABLE ON PURPOSE, and it is not a style choice: the API's
+    # working ceiling is 15 union-typed params (see this class's docstring —
+    # 16 hangs and dies at 60 s, 17 is a hard 400) and the schema already
+    # carries 14. Spending the last slot here would leave none for the movement
+    # tickets landing in the same round, so these two take the `style`/`run`/
+    # `direction` treatment instead. They qualify on that rule's own test —
+    # "the model said nothing" and "the model said the default" are the same
+    # thing:
+    #
+    #   `weapon="auto"`  IS the pre-1.7.0 `fight_ped` behaviour, byte for byte
+    #                    (melee vs ranged chosen from the TARGET's weapon
+    #                    class), so an omitted value changes nothing.
+    #   `seat=2`         `enter_vehicle_seat` exists ONLY to ride as a
+    #                    passenger; the driver's seat is `enter_nearest_vehicle`
+    #                    and is not reachable from this enum at all. Rear-right
+    #                    is where the game's own cab AI puts the player.
+    #
+    # `ACTION_PARAM_KEYS` keeps both out of the actions they mean nothing to,
+    # exactly as it does for the other three.
+    weapon: Literal["auto", "unarmed", "armed"] = Field(
+        default="auto",
+        description=(
+            "fight_ped: 'auto' picks melee or gun from the target's weapon; "
+            "'unarmed' forces fists; 'armed' forces the loadout gun."
+        ),
+    )
+    seat: Literal[0, 1, 2] = Field(
+        default=2,
+        description=(
+            "enter_vehicle_seat: passenger seat — 0 front, 1 rear-left, "
+            "2 rear-right. The driver's seat is enter_nearest_vehicle."
+        ),
+    )
 
 
 class ActionModel(BaseModel):
@@ -364,7 +432,10 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "follow_entity": ("handle", "in_vehicle", "speed_mps"),
     # v1.11: fight ONE named ped, no relationship setup needed (unlike
     # combat_hated_targets_around). Only `handle` — see CONTRACTS §1.
-    "fight_ped": ("handle",),
+    # v1.11 gave it `handle`; bridge 1.7.0 adds `weapon`, which is what makes
+    # `pick_a_fight` a FIST fight on a the agent who is carrying a pistol.
+    "fight_ped": ("handle", "weapon"),
+    "flee_ped": ("handle",),
     "set_waypoint": ("x", "y"),
     "stop": (),
     # CONTRACTS v1.13: no params at all. Which call is ringing is not something
@@ -372,6 +443,13 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     # there is nothing to pass and no key to invent.
     "answer_call": (),
     "reject_call": (),
+    # fix-opus-b (T6), bridge 1.7.0. `duration_s` is REUSED from seek_cover
+    # rather than a new key: it is already nullable, it means the same thing
+    # (how long the engine task runs), and a new nullable key would have spent
+    # the last of the 15-union-param budget.
+    "shoot_at": ("handle", "duration_s"),
+    "drive_by": ("handle", "duration_s"),
+    "enter_vehicle_seat": ("handle", "seat"),
     "look_around": (),
     "brake_tap": (),
     "swerve": ("direction",),
@@ -438,3 +516,187 @@ class DecisionModel(BaseModel):
         if _word_count(v) > 12:
             raise ValueError(f"goal is {_word_count(v)} words; contract max is 12")
         return v
+
+
+# --- T4: the output validator ---------------------------------------------
+#
+# findings.md R4: nothing checked whether the model's OWN output — a name it
+# used, a mission title, a banned phrase, a repeated line, a roam goal id —
+# was actually true of the world it was just shown. Pydantic's field
+# validators above can only see the decision object; these need a snapshot of
+# the world/roam/commentary state alongside it, so they are plain functions
+# the caller (brain.tactical / brain.director) runs AFTER a decision parses,
+# not `@field_validator`s. `absent_names_mentioned` is reused, not
+# reimplemented — this module adds the mission-name, banned-phrase, dedupe and
+# roam-goal-id rules that sit beside it.
+
+
+def normalize_line(text: str) -> str:
+    """Case/punctuation-insensitive form, so "Fine." and "fine" count as one.
+
+    The single implementation `commentary.py`'s dedupe gate and this module's
+    dedupe rule both use — moved here so schemas.py (imported BY commentary.py
+    already) never has to import back the other way.
+    """
+    kept = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in text.lower())
+    return " ".join(kept.split())
+
+
+def jaccard_similarity(a: str, b: str) -> float:
+    """Normalized-token-overlap similarity: |shared words| / |all words|.
+
+    Cheap, no model call. Two empty (post-normalization) strings are not
+    similar to each other; there is nothing shared to measure.
+    """
+    wa = set(normalize_line(a).split())
+    wb = set(normalize_line(b).split())
+    if not wa or not wb:
+        return 0.0
+    return len(wa & wb) / len(wa | wb)
+
+
+#: Jaccard overlap at/above which a `say` line counts as "basically the last
+#: line again" for the VALIDATOR's dedupe rule (T4). Deliberately tighter than
+#: `commentary.Commentary.gate_say`'s own 0.8 backstop: this one gets a
+#: regenerate before the line is ever shown, so it can afford to be stricter.
+DEDUPE_OVERLAP_THRESHOLD = 0.6
+#: How many of the caller's most-recently-shown lines the dedupe rule checks.
+DEDUPE_RECENT_WINDOW = 5
+
+
+@dataclass(frozen=True)
+class DecisionValidationContext:
+    """Everything :func:`validate_decision_content` needs, gathered by the
+    caller (main._think) from world/roam/commentary state. Deliberately plain
+    data — no `GameState` import here, so this module stays state-shape
+    agnostic like the rest of it.
+    """
+
+    #: Story character names legitimately on screen right now (brain.characters.present_names).
+    present_names: frozenset[str] = frozenset()
+    #: brain.characters.has_unidentified_friendly(state) — an unnamed friendly
+    #: ped nearby means the names check cannot prove anybody is absent, so it
+    #: stays silent rather than risk dropping a true line.
+    names_check_suspended: bool = False
+    #: The identified active mission's own name, or None (mission not active
+    #: / not identified) — the mission-name rule is a no-op without it.
+    mission_name: str | None = None
+    #: The full catalogued mission-name vocabulary MINUS the current mission's
+    #: own name and minus anything that collides with a character name (so
+    #: "Chop" the dog is never read as "Chop" the mission).
+    known_mission_names: frozenset[str] = frozenset()
+    #: The last few lines actually shown (oldest first), for the dedupe rule.
+    recent_lines: tuple[str, ...] = ()
+    #: Hard-banned phrases, loaded from commentary_style.md (brain.prompts.banned_phrases()).
+    banned_phrases: tuple[str, ...] = ()
+    #: The roam ids actually on offer THIS tick, or empty when no menu is
+    #: showing (a goal is locked, or free roam is not in play at all).
+    roam_offered_ids: tuple[str, ...] = ()
+    #: `RoamEngine.model_choice`, bound — reused, not reimplemented, per T4.
+    #: None when `roam_offered_ids` is empty (nothing to validate against).
+    roam_model_choice: Callable[[str | None], str | None] | None = None
+
+
+@dataclass(frozen=True)
+class DecisionViolation:
+    """What :func:`validate_decision_content` found wrong, if anything.
+
+    The two halves are independent on purpose: a bad `say` and a bad `goal`
+    are different problems with different fixes (drop the line vs. let the
+    roam engine's own `available[0]` fallback take over), so the caller needs
+    to know which one(s) fired, not just that something did.
+    """
+
+    say_reason: str | None = None
+    goal_reason: str | None = None
+
+    def __bool__(self) -> bool:
+        return self.say_reason is not None or self.goal_reason is not None
+
+    def describe(self) -> str:
+        parts = [r for r in (self.say_reason, self.goal_reason) if r]
+        return "; ".join(parts)
+
+
+def _mismatched_mission_names(
+    text: str, mission_name: str, known_mission_names: Iterable[str]
+) -> list[str]:
+    """Other catalogued mission names spoken while `mission_name` is the one
+    actually identified. Word-boundary, case-insensitive; the caller has
+    already excluded `mission_name` itself (however it's cased) from
+    `known_mission_names`, so nothing here has to special-case it."""
+    lowered_current = mission_name.strip().lower()
+    offenders: list[str] = []
+    for name in known_mission_names:
+        n = name.strip()
+        if not n or n.lower() == lowered_current:
+            continue
+        if re.search(rf"\b{re.escape(n)}\b", text, flags=re.IGNORECASE):
+            offenders.append(n)
+    return sorted(set(offenders))
+
+
+def _say_violation(decision: DecisionModel, ctx: DecisionValidationContext) -> str | None:
+    haystack = f"{decision.say}\n{decision.thought}".lower()
+    for phrase in ctx.banned_phrases:
+        if phrase and phrase in haystack:
+            return f"banned phrase {phrase!r}"
+    if not ctx.names_check_suspended:
+        # `present_names` empty is not a reason to skip this: nobody being on
+        # screen yet still means no CHECKED_NAMES character may be spoken.
+        absent = absent_names_mentioned(
+            decision.say, ctx.present_names
+        ) or absent_names_mentioned(decision.thought, ctx.present_names)
+        if absent:
+            return f"names not present right now: {', '.join(absent)}"
+    if ctx.mission_name:
+        mismatched = _mismatched_mission_names(
+            decision.say, ctx.mission_name, ctx.known_mission_names
+        ) or _mismatched_mission_names(decision.thought, ctx.mission_name, ctx.known_mission_names)
+        if mismatched:
+            return f"named a different mission ({', '.join(mismatched)}); actual: {ctx.mission_name}"
+    for prior in ctx.recent_lines[-DEDUPE_RECENT_WINDOW:]:
+        overlap = jaccard_similarity(decision.say, prior)
+        if overlap >= DEDUPE_OVERLAP_THRESHOLD:
+            return f"say overlaps a recent line ({overlap:.2f} >= {DEDUPE_OVERLAP_THRESHOLD}): {prior!r}"
+    return None
+
+
+def _goal_violation(decision: DecisionModel, ctx: DecisionValidationContext) -> str | None:
+    if not ctx.roam_offered_ids or ctx.roam_model_choice is None:
+        return None
+    if ctx.roam_model_choice(decision.goal) is not None:
+        return None
+    return (
+        f"goal {decision.goal!r} names no offered roam id "
+        f"({', '.join(ctx.roam_offered_ids)})"
+    )
+
+
+def validate_decision_content(
+    decision: DecisionModel, ctx: DecisionValidationContext
+) -> DecisionViolation:
+    """T4: names ⊂ STATE, mission name == identified mission, banned phrases,
+    dedupe >= 0.6, and (when a roam menu is on offer) `goal` ∈ available.
+
+    Pure function — no I/O, no mutation — so the caller (brain.tactical /
+    brain.director) owns the one-regenerate-then-drop policy.
+    """
+    return DecisionViolation(
+        say_reason=_say_violation(decision, ctx),
+        goal_reason=_goal_violation(decision, ctx),
+    )
+
+
+def sanitize_decision(decision: DecisionModel, violation: DecisionViolation) -> DecisionModel:
+    """Applied only when the single regenerate ALSO still violates: drop the
+    offending line, never the action.
+
+    `goal_reason` needs no sanitizing here — an unmatched roam id is the roam
+    engine's own `available[0]` fallback to make (main._begin_roam_goal,
+    logged as `goal_fallback`), and mutating `goal` here would just be a
+    second, competing fallback for the same problem.
+    """
+    if violation.say_reason is None:
+        return decision
+    return decision.model_copy(update={"say": ""})

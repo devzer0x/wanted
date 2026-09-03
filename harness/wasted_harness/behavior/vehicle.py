@@ -167,6 +167,56 @@ VEHICLE_NOT_MOVING = "VEHICLE_NOT_MOVING"
 RECOVERY_LADDER: tuple[str, ...] = ("reverse_out", "swerve", "repost_drive", "exit_vehicle")
 
 
+#: F6, the operator's own acceptance number: after control comes back, SOMETHING has
+#: to move him within this long. Three seconds is roughly ten poll ticks at 3 Hz —
+#: long enough for the ordinary owners (the reflex ladder, the mission follower, the
+#: day plan, a roam goal, a brain decision) to claim the wheel on their own terms, and
+#: short enough that a viewer watching a respawn or the end of a cutscene never sees
+#: the agent stand still long enough to wonder whether the stream has frozen.
+#:
+#: This is the number the acceptance check MEASURES. It is not the number the
+#: fallback fires on — see :data:`CONTROL_REGAINED_FALLBACK_S`.
+CONTROL_REGAINED_DEADLINE_S = 3.0
+
+#: When the `resume` rung actually fires, and it is deliberately INSIDE the
+#: deadline above rather than equal to it.
+#:
+#: A fallback that fires AT the deadline can never satisfy it: `tools/funcheck.py`
+#: counts an edge answered only when a movement task is posted in the closed
+#: window `[edge, edge + 3s]`, so a post at 3.0 s + one poll interval is late by
+#: construction — measured, on a 2 h synthetic replay, as 16 edges "missed" that
+#: the fallback had in fact answered a fraction of a second too late. Two seconds
+#: leaves a full second of margin for the poll interval (2-4 Hz), the wheel
+#: arbitration and the HTTP round trip, and still gives every ordinary owner
+#: six-to-eight ticks to claim the wheel first.
+CONTROL_REGAINED_FALLBACK_S = 2.0
+
+#: How wide the F6 fallback looks for a car. Matches `navigation.VEHICLE_SEARCH_RADIUS_M`
+#: rather than the contract's 30 m default: this fires precisely when nothing else
+#: wanted the wheel, so a slightly wider look costs nothing and fails less often.
+RESUME_SEARCH_RADIUS_M = 40.0
+
+#: The control-regained edges F6 is measured across. Named rather than boolean so the
+#: log and the funcheck can say WHICH edge went unanswered — "he stands still after a
+#: respawn" and "he stands still when a cutscene ends" are different bugs.
+#: Movement-class bridge tasks that do not, in fact, move him — so they never
+#: answer an F6 deadline. `stop` is CONTRACTS §1's "clear current task → idle"
+#: (the threat rung's answer to a task that has him pinned, and what a break
+#: posts on its way out) and `set_waypoint` is a map marker that completes in
+#: the same tick without touching the ped. Both belong to the wheel, because
+#: both preempt whatever is running; neither is evidence that anybody moved.
+NON_MOVING_TASKS: frozenset[str] = frozenset({"stop", "set_waypoint"})
+
+CONTROL_REGAINED_EDGES: tuple[str, ...] = (
+    "respawn",
+    "interior_exit",
+    "cutscene_end",
+    "mission_end",
+    "switch_end",
+    "control_restored",
+)
+
+
 class VehiclePhase(StrEnum):
     """Where he is in the get-in-and-drive sequence.
 
@@ -248,6 +298,190 @@ def vehicle_is_moving(state: GameState) -> bool:
     if not state.player.in_vehicle or v is None:
         return False
     return v.speed >= MOVING_SPEED_MPS or (v.speed > SEATED_SPEED_MPS and v.stopped_for_s <= 0.0)
+
+
+def resume_action(state: GameState, style: str) -> dict[str, Any] | None:
+    """F6's fallback: the cheapest honest way to be moving again, or None.
+
+    Deliberately not a plan and not a destination — those belong to the layers
+    that were supposed to claim the wheel and did not. This is one task that
+    makes the next three seconds not-standing-still:
+
+    * seated in a car that could plausibly leave → `wander_drive`, the one drive
+      task in CONTRACTS §1 that needs no coordinates;
+    * on foot outdoors → `enter_nearest_vehicle`, because on foot with no car is
+      the state every other layer wants him out of anyway.
+
+    Returns None — on purpose, and it is not a failure — in the two cases where
+    no honest fallback exists:
+
+    * **indoors** (`player.interior` is not null, CONTRACTS v1.12). Widening a
+      vehicle search from inside a building picks a car behind more walls; that
+      is the exact failure `exit_interior` was built to stop, and walking him out
+      is that owner's job, not this one's. Firing here would re-open it.
+    * **in a car that cannot drive away** (upside down, in the water, a burnt-out
+      shell). `flip` outranks this rung and owns getting him out.
+    """
+    if state.player.interior is not None:
+        return None
+    if state.player.in_vehicle:
+        if not vehicle_can_drive_away(state):
+            return None
+        # `rushed`, not the mood: this fires because nothing moved him for two
+        # seconds, and a driver who has just got the wheel back pulls out — he
+        # does not ease into traffic. The mood style is for the layers that
+        # were meant to claim the wheel and did not.
+        return {"type": "wander_drive", "params": {"style": "rushed"}}
+    return {
+        "type": "enter_nearest_vehicle",
+        "params": {"prefer": "any", "search_radius_m": RESUME_SEARCH_RADIUS_M},
+    }
+
+
+@dataclass
+class ControlRegained:
+    """F6: the game just handed the controls back — did anybody use them?
+
+    WHY THIS EXISTS. Every one of these edges is a moment the harness already
+    notices and already reacts to, and none of them was ever *measured*. The
+    respawn handler clears stale mission state; the interior watcher logs
+    `left_interior` and releases the wheel; the cutscene/switch/mission flags
+    gate `_execute_action`. What none of them did was ask the next question:
+    **and then did he move?** The 2 h of logs behind docs/findings.md are full
+    of goals that ended `duration_s=0.3` and ticks where nobody held the wheel
+    at all, which is the same failure seen from the other end.
+
+    So this is a stopwatch, not a policy. `feed()` watches the five contract
+    fields that mean "the game had the controls and now it does not", arms a
+    deadline on the transition, and `moved()` — called from the ONE place a
+    movement task actually reaches the bridge — stops it. `overdue()` answers
+    once per arming, so a missed deadline is one fallback and one log line, not
+    a rung that re-fires at the poll rate.
+
+    The edges, all from `/state`:
+
+    * ``respawn`` — the caller's own `DeathRecovery` verdict, which is stronger
+      than `dead` going false (it knows an arrest release from a respawn).
+    * ``interior_exit`` — `player.interior` non-null → null (CONTRACTS v1.12).
+    * ``cutscene_end`` — `mission.cutscene_active` true → false.
+    * ``mission_end`` — `mission.active` true → false.
+    * ``switch_end`` — `player.switch_in_progress` true → false (v1.11).
+    * ``control_restored`` — `player.control_enabled` false → true.
+
+    A second edge while one is already armed simply re-arms: the deadline is
+    measured from the LATEST moment the game gave the controls back, because
+    that is the moment a viewer starts waiting.
+    """
+
+    clock: Any = time.monotonic
+    #: When `overdue()` starts answering — the FALLBACK time, not F6's own bar.
+    deadline_s: float = CONTROL_REGAINED_FALLBACK_S
+
+    #: Previous-tick values of the five flags. Seeded to "the game is not holding
+    #: anything", so the first tick of a session cannot manufacture an edge out of
+    #: a field that has simply never been read before.
+    _prev_cutscene: bool = False
+    _prev_mission: bool = False
+    _prev_switch: bool = False
+    _prev_control: bool = True
+    _prev_interior: bool = False
+
+    _edge: str | None = None
+    _armed_at: float = 0.0
+    _answered: bool = True
+    _reported: bool = False
+
+    def feed(self, state: GameState, *, respawned: bool = False) -> str | None:
+        """One tick. Returns the edge name when one fired, else None."""
+        edge: str | None = None
+        if respawned:
+            edge = "respawn"
+        interior = state.player.interior is not None
+        if self._prev_interior and not interior:
+            edge = "interior_exit"
+        if self._prev_cutscene and not state.mission.cutscene_active:
+            edge = "cutscene_end"
+        if self._prev_mission and not state.mission.active:
+            edge = "mission_end"
+        if self._prev_switch and not state.player.switch_in_progress:
+            edge = "switch_end"
+        if not self._prev_control and state.player.control_enabled:
+            edge = "control_restored"
+
+        self._prev_interior = interior
+        self._prev_cutscene = state.mission.cutscene_active
+        self._prev_mission = state.mission.active
+        self._prev_switch = state.player.switch_in_progress
+        self._prev_control = state.player.control_enabled
+
+        if edge is None:
+            return None
+        self._edge = edge
+        self._armed_at = self.clock()
+        self._answered = False
+        self._reported = False
+        log.info(
+            "control regained",
+            extra={"kv": {"edge": edge, "deadline_s": self.deadline_s}},
+        )
+        return edge
+
+    def moved(self, action_type: str) -> None:
+        """A movement task actually went out. The deadline is met.
+
+        :data:`NON_MOVING_TASKS` do not count: `stop` and `set_waypoint` are
+        movement-CLASS tasks (they preempt, so they belong to the wheel) that
+        move nobody, and letting a `stop` answer F6 would make the measurement
+        agree that a man standing still is moving.
+        """
+        if self._answered or self._edge is None or action_type in NON_MOVING_TASKS:
+            return
+        self._answered = True
+        log.info(
+            "control regained: answered",
+            extra={
+                "kv": {
+                    "edge": self._edge,
+                    "action": action_type,
+                    "after_s": round(self.clock() - self._armed_at, 2),
+                }
+            },
+        )
+
+    def overdue(self) -> str | None:
+        """The edge nobody answered, once. None while inside the deadline."""
+        if self._answered or self._edge is None or self._reported:
+            return None
+        if self.clock() - self._armed_at < self.deadline_s:
+            return None
+        self._reported = True
+        log.warning(
+            "control regained and nothing moved him",
+            extra={
+                "kv": {
+                    "edge": self._edge,
+                    "deadline_s": self.deadline_s,
+                    "waited_s": round(self.clock() - self._armed_at, 2),
+                }
+            },
+        )
+        return self._edge
+
+    @property
+    def pending(self) -> str | None:
+        """The armed, still-unanswered edge, for logs and the funcheck."""
+        return None if self._answered else self._edge
+
+    def reset(self) -> None:
+        self._edge = None
+        self._armed_at = 0.0
+        self._answered = True
+        self._reported = False
+        self._prev_cutscene = False
+        self._prev_mission = False
+        self._prev_switch = False
+        self._prev_control = True
+        self._prev_interior = False
 
 
 @dataclass
@@ -465,7 +699,9 @@ class VehicleController:
         self._last_drive_away_at = now
         return VehicleIntent(
             kind="drive_away",
-            action={"type": "wander_drive", "params": {"style": style}},
+            # Same reasoning as `resume_action`: sat still with nothing running
+            # is the failure this exists to end, so leave like you mean it.
+            action={"type": "wander_drive", "params": {"style": "rushed"}},
             reason=(
                 f"seated and stationary for {idle_for:.1f}s with nothing running "
                 f"(in the seat {now - (self._seated_since or now):.1f}s)"
@@ -736,11 +972,20 @@ class MovementOwner:
 #: of this table is the specification: a tick must reach these layers in this
 #: order, because the first bridge task posted in a tick is the only one.
 MOVEMENT_OWNER_TABLE: tuple[MovementOwner, ...] = (
-    MovementOwner("flip", WHEEL_REFLEX, 7, "upside down / in the water: get out"),
-    MovementOwner("threat", WHEEL_REFLEX, 6, "survival, and clearing a task that has him pinned"),
-    MovementOwner("vehicle", WHEEL_REFLEX, 5, "drive away / get the car moving"),
-    MovementOwner("physical", WHEEL_REFLEX, 4, "wedged: reverse_out / swerve / unstick"),
-    MovementOwner("governor", WHEEL_REFLEX, 3, "budget override: L2 wander, L3 scenic park"),
+    MovementOwner("flip", WHEEL_REFLEX, 10, "upside down / in the water: get out"),
+    # T9 (findings.md R1/R5), owned by the reflex package but ranked here
+    # because this table is the ladder: a car sunk in the water is the same
+    # class of physical emergency as one on its roof, and strictly less urgent
+    # than the roof (you get out of the thing that is upside down first).
+    MovementOwner("water", WHEEL_REFLEX, 9, "in the water past the timeout: get out and swim"),
+    # T9: on foot with a vehicle closing fast. Above the ordinary survival
+    # rungs on purpose — a car is seconds from a hit and stepping off costs
+    # nothing that `threat_action` cannot ask for again on the next tick.
+    MovementOwner("road_dodge", WHEEL_REFLEX, 8, "on foot, a vehicle closing fast: step off"),
+    MovementOwner("threat", WHEEL_REFLEX, 7, "survival, and clearing a task that has him pinned"),
+    MovementOwner("vehicle", WHEEL_REFLEX, 6, "drive away / get the car moving"),
+    MovementOwner("physical", WHEEL_REFLEX, 5, "wedged: reverse_out / swerve / unstick"),
+    MovementOwner("governor", WHEEL_REFLEX, 4, "budget override: L2 wander, L3 scenic park"),
     # CONTRACTS v1.12: `player.interior` says he is indoors, so he is. Above
     # `house_escape` (which is the pre-v1.12 GUESS at the same thing) and above
     # `stranded` (whose whole answer is to widen a vehicle search, which from
@@ -749,9 +994,17 @@ MOVEMENT_OWNER_TABLE: tuple[MovementOwner, ...] = (
     # being indoors. It holds an OPEN lease — the ladder runs across many ticks
     # with its own per-step timeouts — which is also what stops free roam
     # picking a goal it could not possibly walk to while he is in a living room.
-    MovementOwner("exit_interior", WHEEL_REFLEX, 2, "indoors (player.interior): walk out"),
-    MovementOwner("house_escape", WHEEL_REFLEX, 1, "apparently indoors: walk out"),
-    MovementOwner("stranded", WHEEL_REFLEX, 0, "on foot with no car"),
+    MovementOwner("exit_interior", WHEEL_REFLEX, 3, "indoors (player.interior): walk out"),
+    MovementOwner("house_escape", WHEEL_REFLEX, 2, "apparently indoors: walk out"),
+    MovementOwner("stranded", WHEEL_REFLEX, 1, "on foot with no car"),
+    # F6. The LAST reflex rung, and the only one whose trigger is the absence of
+    # everything else: control came back, three seconds passed, and not one layer
+    # in this table posted a movement task. It is bottom of the reflex class
+    # rather than a class of its own because it must never outrank a real reason
+    # to be standing still (a firefight, a wedged car, a walk out of a building),
+    # and must always outrank the planners, which are exactly the layers that
+    # just failed to act. See `ControlRegained` and `resume_action`.
+    MovementOwner("resume", WHEEL_REFLEX, 0, "F6: control came back and nobody moved him"),
     MovementOwner("brain", WHEEL_MISSION, 2, "a tactical/director decision"),
     MovementOwner("mission", WHEEL_MISSION, 1, "MissionFollower's objective navigation"),
     MovementOwner("day_plan", WHEEL_MISSION, 0, "DayPlanner's trip to a mission-start marker"),

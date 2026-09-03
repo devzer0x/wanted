@@ -64,6 +64,7 @@ from ..bridge_client import UNKNOWN_PROTAGONIST, GameState, MissionStart
 from ..logsetup import get_logger
 from .navigation import WALK_ARRIVE_RADIUS_M, navigate_to, planar_distance
 from .recovery import HOSTILE_CLOSE_RADIUS_M
+from .roam import ROAM_BEFORE_MISSION_S
 
 log = get_logger("wasted.planner")
 
@@ -84,14 +85,20 @@ ROAM_BLOCK_S = (6 * 60.0, 12 * 60.0)
 #: decoration.
 ROAM_MIN_BLOCK_S = 120.0
 
-#: Prefer a mission when the last one started longer ago than this. The show is
-#: story missions with free roam between them, not the other way round.
-#: LOWERED from 20 min to 15 to match behavior.roam.ROAM_BEFORE_MISSION_S, which
-#: is the hard deadline after which `start_nearest_mission` is the ONLY goal the
-#: roam engine will offer. Two numbers for the same idea meant the planner still
-#: thought there were five minutes of roam left at the moment the roam engine had
-#: already stopped offering anything else to do with them.
-MISSION_OVERDUE_S = 15 * 60.0
+#: Prefer a mission when the last one started longer ago than this.
+#:
+#: IMPORTED, not chosen: it is `behavior.roam.RoamCadence.force_after_s`'s default,
+#: which is the hard deadline after which `start_nearest_mission` is the ONLY goal
+#: the roam engine will offer. Two numbers for the same idea meant the planner
+#: still thought there were minutes of roam left at the moment the roam engine had
+#: already stopped offering anything to do with them — so there is now one number
+#: and this name is an alias for it.
+#:
+#: Retuned in T7 from 15 min to 40 along with the roam side. The old pair (3
+#: completed goals OR 15 minutes, both FORCING) turned a free-roam stream into a
+#: mission queue; the goal counter is now an OFFER (`RoamEngine.mission_offered`)
+#: and only this clock forces anything.
+MISSION_OVERDUE_S = ROAM_BEFORE_MISSION_S
 
 #: Roam blocks owed after any mission ends: one. Win or lose, a person does not
 #: walk straight back into the next job — he drives off, and that beat is where

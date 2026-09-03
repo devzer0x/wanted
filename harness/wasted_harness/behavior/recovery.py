@@ -33,6 +33,20 @@ finishes                      to re-post that same task type. Confirmed live:
                               never completed — 20 s of RUNNING, 0.2 m of
                               movement, full health, a story mission waiting
 flipped                       flipped_action → exit_vehicle
+stuck in the water             WaterEscalator (T9, findings.md R1/R5) → exit_vehicle
+(vehicle.in_water > 10 s)      once the timeout clears, then one walk toward
+                               player.last_outdoor as the best available "land"
+                               bearing - /state has no shoreline data at all
+car incoming while on foot     RoadDodge (T9) → walk_to a point stepped away from
+                               a closing NPC vehicle, derived from two ticks of
+                               nearby.vehicles[].pos (no lane geometry, no
+                               per-vehicle velocity in /state either)
+jacked out of his car          threat_action's fight_ped rung answers the fight
+                               (threat.being_jacked_by); JackHandoffGate (T9)
+                               then holds `stranded` off of the SAME tick so
+                               roam's own take_my_car_back (behavior.roam.py)
+                               gets first refusal at the same car instead of
+                               `stranded` grabbing whatever "any" car is nearest
 stranded on foot              StrandedEscalator → widening vehicle search
 attacked / shot at / cornered DamageTracker (effective HP falling inside a
                               short window ⇒ he is being hit RIGHT NOW,
@@ -452,11 +466,301 @@ class TaskStallDetector:
 
 
 def flipped_action(state: GameState) -> dict[str, Any] | None:
-    """Upside-down and not moving → get out (the engine rights nothing for us)."""
+    """Upside-down and not moving → get out (the engine rights nothing for us).
+
+    T9 (findings.md R1/R5) asked this to "right it if the bridge has a lever,
+    else exit". CONTRACTS v1.13 §1's task table is the whole set of things
+    this bridge can be asked to do (`drive_to`, `walk_to`,
+    `enter_nearest_vehicle`, `exit_vehicle`, `wander_drive`, `flee_police`,
+    `combat_hated_targets_around`, `seek_cover`, `follow_entity`, `fight_ped`,
+    `set_waypoint`, `stop`, `answer_call`, `reject_call`) and none of them
+    rights a vehicle — there is no lever. Coordinated with fix-opus-a (who
+    owns `bridge/src/TaskEngine.cs`'s driving cases): a `right_vehicle` verb
+    over a native such as `SET_VEHICLE_ON_GROUND_PROPERLY` would need a new
+    §1 task type, which is a CONTRACTS change this package cannot make
+    unilaterally (frozen at v1.13) — proposed as a changelog entry in this
+    ticket's report rather than built here. `exit_vehicle` stays the only
+    honest answer until that lands.
+    """
     v = state.vehicle
     if v and v.upside_down and v.speed < 0.5:
         return {"type": "exit_vehicle", "params": {}}
     return None
+
+
+#: How long `vehicle.in_water` has to read continuously true before
+#: :class:`WaterEscalator` gets him out of it. Long enough that fording a
+#: shallow crossing or a bridge's edge is not misread as "stuck"; the
+#: contract's `in_water` is measured on the game thread every tick, so this
+#: window only needs to absorb the 2-4 Hz poll gap, not the flag's own noise.
+WATER_TIMEOUT_S = 10.0
+
+#: After `exit_vehicle` is issued for being stuck in the water, how long the
+#: "walk toward known land" rung stays armed even though `/state` can no
+#: longer confirm anything (there is no on-foot water flag — CONTRACTS §1
+#: only exposes `vehicle.in_water`, and `state.vehicle` itself goes null the
+#: moment he is on foot). Generous on purpose: this fires at most once per
+#: bout, so a stale arm costs one walk order, never a loop.
+WATER_ESCAPE_WINDOW_S = 30.0
+
+
+@dataclass
+class WaterEscalator:
+    """Stuck in the water past the timeout: get out, then head for known land.
+
+    WHAT THIS HONESTLY CANNOT DO: CONTRACTS §1 exposes no shoreline, no
+    waterline and no per-tile terrain of any kind — "walk to the nearest
+    shore point" is not a computation `/state` supports, and this class does
+    not pretend otherwise. The best available substitute, once
+    `vehicle.in_water` has read true for more than :data:`WATER_TIMEOUT_S`:
+    exit the vehicle (a boat/car sitting in the water is not going anywhere
+    useful on its own), then — if `player.last_outdoor` (CONTRACTS v1.12: the
+    position on the last outdoor→indoor transition, which is dry land almost
+    everywhere it is ever set) has been recorded this session — walk toward
+    it as a "probably land" bearing. When `last_outdoor` is unknown there is
+    genuinely nothing to aim at; this logs that honestly, once, rather than
+    guessing a direction, and the gap is called out in this ticket's NOT
+    VERIFIED list.
+
+    :meth:`check` is fed every tick, whether or not it fires (the same idiom
+    :class:`StuckDetector`/:class:`TaskStallDetector` use), so its own timers
+    stay accurate regardless of what else claims the wheel that tick.
+    """
+
+    timeout_s: float = WATER_TIMEOUT_S
+    escape_window_s: float = WATER_ESCAPE_WINDOW_S
+    clock: Any = time.monotonic
+    _in_water_since: float | None = None
+    _exit_issued_at: float | None = None
+    _walk_issued: bool = False
+
+    def check(self, state: GameState) -> dict[str, Any] | None:
+        now = self.clock()
+        v = state.vehicle
+        if v is not None and v.in_water:
+            if self._in_water_since is None:
+                self._in_water_since = now
+            elapsed = now - self._in_water_since
+            if elapsed < self.timeout_s or not state.player.in_vehicle:
+                return None
+            log.info(
+                "in the water past the timeout; getting out",
+                extra={"kv": {"elapsed_s": round(elapsed, 1)}},
+            )
+            self._exit_issued_at = now
+            self._walk_issued = False
+            return {"type": "exit_vehicle", "params": {}}
+
+        # Not currently reading as in the water (on foot, dry, or no vehicle
+        # to read the flag from at all).
+        self._in_water_since = None
+        if self._exit_issued_at is None:
+            return None
+        if now - self._exit_issued_at > self.escape_window_s:
+            # Grace window closed: assume he made it out, and let the
+            # ordinary reflexes/roam take it from here.
+            self._exit_issued_at = None
+            return None
+        if self._walk_issued or state.player.in_vehicle:
+            return None
+        last_land = state.player.last_outdoor
+        if last_land is None:
+            log.warning(
+                "climbed out of the water with nowhere known to walk to — "
+                "/state has no shore data and last_outdoor was never "
+                "recorded this session (see WaterEscalator's own docstring)"
+            )
+            self._walk_issued = True  # do not repeat the warning every tick
+            return None
+        self._walk_issued = True
+        log.info(
+            "walking toward the last known outdoor position as the best "
+            "available 'land' bearing",
+            extra={"kv": {"target": [round(last_land.x, 1), round(last_land.y, 1)]}},
+        )
+        return {
+            "type": "walk_to",
+            "params": {"x": last_land.x, "y": last_land.y, "z": last_land.z, "run": True},
+        }
+
+    def reset(self) -> None:
+        """Forget the bout (new game process, or a fresh respawn's clean slate)."""
+        self._in_water_since = None
+        self._exit_issued_at = None
+        self._walk_issued = False
+
+
+#: A vehicle inside this many metres counts as close enough for
+#: :class:`RoadDodge` to take seriously. `nearby.vehicles` (CONTRACTS §1)
+#: truncates at the 8 nearest, so anything inside this radius is already one
+#: of the closest vehicles around him — narrower than
+#: :data:`HOSTILE_CLOSE_RADIUS_M` on purpose: a car this close and closing is
+#: seconds from a hit, not background traffic.
+ROAD_DODGE_RADIUS_M = 12.0
+
+#: Relative closing speed that counts as "coming at him" rather than
+#: "drifting past" or "parked". Derived from two ticks of
+#: `nearby.vehicles[].pos` (CONTRACTS §1 v1.6 — there is no per-vehicle
+#: velocity field) because that is the only honest way to tell the two apart;
+#: an ordinary driving-style car in this game closes well above this when it
+#: is actually headed for him.
+ROAD_DODGE_CLOSING_MPS = 5.0
+
+#: How far he steps when this fires.
+ROAD_DODGE_STEP_M = 5.0
+
+#: Minimum gap between two step-offs — long enough for one `walk_to` to
+#: actually cover :data:`ROAD_DODGE_STEP_M`, short enough that a second car a
+#: few seconds later gets its own dodge rather than waiting out a long cooldown.
+ROAD_DODGE_COOLDOWN_S = 6.0
+
+
+@dataclass
+class RoadDodge:
+    """On foot, an NPC vehicle closing fast nearby: step off, at reflex speed.
+
+    `/state` has no lane geometry, no "on a road" flag, and no per-vehicle
+    velocity — CONTRACTS §1 `nearby.vehicles[]` is `{handle, model,
+    display_name, class, distance, driver, pos}`, position only (v1.6). So
+    "on a road" is inferred the only honest way available: an NPC-driven
+    vehicle being nearby AT ALL, in this game, means he is standing somewhere
+    traffic reaches — there is no better signal to gate on. "Closing fast" is
+    the DERIVATIVE of that vehicle's own `pos` between this tick and the
+    last, which is exactly what the brief asks for ("derive from two ticks of
+    pos").
+
+    There is also no lane centreline to step perpendicular to, so the escape
+    direction is the honest substitute available: straight away from the
+    vehicle's CURRENT position, extended :data:`ROAD_DODGE_STEP_M` past where
+    he is already standing. That increases the miss distance in every case
+    except a vehicle already bearing down a line that passes exactly through
+    him, where it is still strictly better than standing still — and it is
+    what "step off" can honestly mean without a nav-mesh query this class
+    does not have.
+
+    :meth:`check` is fed every tick regardless of whether it fires: the
+    two-tick derivative needs last tick's positions cached even on ticks that
+    do not fire (the same idiom :class:`WaterEscalator` uses).
+    """
+
+    danger_radius_m: float = ROAD_DODGE_RADIUS_M
+    closing_mps: float = ROAD_DODGE_CLOSING_MPS
+    step_m: float = ROAD_DODGE_STEP_M
+    cooldown_s: float = ROAD_DODGE_COOLDOWN_S
+    clock: Any = time.monotonic
+    #: handle -> (observed_at, x, y)
+    _prev: dict[int, tuple[float, float, float]] = field(default_factory=dict)
+    _last_fired_at: float = -1e9
+
+    def check(self, state: GameState) -> dict[str, Any] | None:
+        now = self.clock()
+        prev = self._prev
+        self._prev = {
+            v.handle: (now, v.pos.x, v.pos.y)
+            for v in state.nearby.vehicles
+            if v.pos is not None
+        }
+        if state.player.in_vehicle:
+            return None
+        if now - self._last_fired_at < self.cooldown_s:
+            return None
+
+        px, py = state.player.pos.x, state.player.pos.y
+        worst: tuple[float, Any] | None = None
+        for v in state.nearby.vehicles:
+            if v.driver != "npc" or v.pos is None or v.distance > self.danger_radius_m:
+                continue
+            last = prev.get(v.handle)
+            if last is None:
+                continue
+            last_t, lx, ly = last
+            dt = now - last_t
+            if dt <= 0.0:
+                continue
+            prev_dist = math.hypot(lx - px, ly - py)
+            closing = (prev_dist - v.distance) / dt
+            if closing < self.closing_mps:
+                continue
+            if worst is None or closing > worst[0]:
+                worst = (closing, v)
+        if worst is None:
+            return None
+        closing, v = worst
+
+        away_x, away_y = px - v.pos.x, py - v.pos.y
+        length = math.hypot(away_x, away_y)
+        if length < 0.1:
+            # Standing on top of it: no direction to derive honestly.
+            return None
+        ux, uy = away_x / length, away_y / length
+        target_x, target_y = px + ux * self.step_m, py + uy * self.step_m
+        self._last_fired_at = now
+        log.info(
+            "vehicle closing fast on foot; stepping off",
+            extra={
+                "kv": {
+                    "vehicle": v.handle,
+                    "closing_mps": round(closing, 1),
+                    "distance_m": round(v.distance, 1),
+                }
+            },
+        )
+        return {
+            "type": "walk_to",
+            "params": {"x": target_x, "y": target_y, "z": state.player.pos.z, "run": True},
+        }
+
+    def reset(self) -> None:
+        """Forget cached vehicle positions (new game process, ephemeral handles)."""
+        self._prev.clear()
+        self._last_fired_at = -1e9
+
+
+#: How long after `threat.being_jacked_by` clears (the fight over one way or
+#: another) :class:`JackHandoffGate` keeps `stranded` standing down, so
+#: roam's own `take_my_car_back` goal (behavior.roam.py — triggered off
+#: `RoamView.stolen_from`, offered at the TOP of the menu by its own
+#: `TRIGGERS` entry) gets first refusal at the SAME car. `main._reflex` runs
+#: before `main._drive_activities` in the tick order (see `Harness.run`), so
+#: on the exact tick the jacker is dealt with, roam has not picked anything
+#: yet from THIS snapshot — this grace window is what stops that one-tick gap
+#: from letting `stranded` grab the first "any" car in its own widening
+#: search instead of the one that was actually his.
+JACK_HANDOFF_GRACE_S = 6.0
+
+
+@dataclass
+class JackHandoffGate:
+    """Was he being jacked recently? If so, let roam's `take_my_car_back` answer it.
+
+    Deliberately does nothing to the actual jacker — `threat_action`'s own
+    `fight_ped` rung already answers `threat.being_jacked_by` (v1.11) at
+    reflex speed, preferring the named handle over a relationship guess. This
+    class is the OTHER half T9 asks for: once that fight is over, "then
+    re-enter the car" is `take_my_car_back`'s job (it already exists in
+    `behavior/roam.py`, complete with its own `done_when` graded on the exact
+    vehicle HANDLE, not merely "some car") — this class's only job is to keep
+    `stranded` (which runs first, in `_reflex`, and would otherwise widen a
+    vehicle search for whatever "any" car is nearest) from beating roam to
+    the post in that one-tick gap.
+    """
+
+    grace_s: float = JACK_HANDOFF_GRACE_S
+    clock: Any = time.monotonic
+    _cleared_at: float | None = None
+
+    def feed(self, state: GameState) -> bool:
+        """Call once per tick. True while `stranded` should stand down for roam."""
+        if state.threat.being_jacked_by is not None:
+            self._cleared_at = self.clock()
+            return True
+        if self._cleared_at is None:
+            return False
+        return (self.clock() - self._cleared_at) < self.grace_s
+
+    def reset(self) -> None:
+        """Forget the jacking (new game process, or a clean respawn)."""
+        self._cleared_at = None
 
 
 # --- combat / threat reflex (observed live: no reflex drove combat, so a
@@ -604,8 +908,16 @@ def threat_action(
     under_attack: bool = False,
     *,
     vehicle_blocked: bool = False,
+    heat_wanted: bool = False,
 ) -> dict[str, Any] | None:
     """Immediate combat/threat response — NO model call.
+
+    `heat_wanted`: the locked free-roam goal exists to attract the police
+    (`Goal.wants_heat` — `earn_two_stars`, `three_star_survival`, ...). Rung 6
+    stands down for it: measured in the soak, the drive-by earned exactly the
+    star the goal wanted and this rung fled from it on the next poll,
+    preempting the goal. Every rung above — being shot, being beaten, a
+    hostile in reach, low health — still fires; only "stars alone" yields.
 
     This is the reflex layer's whole reason to exist: a brain call costs
     1-2 s, which is fatal under fire — confirmed live as the top-priority gap:
@@ -887,7 +1199,7 @@ def threat_action(
         return break_contact()
 
     # 6. Stars, outside a mission, nothing engageable: the ordinary chase.
-    if player.wanted > 0 and not state.mission.active:
+    if player.wanted > 0 and not state.mission.active and not heat_wanted:
         return {"type": "flee_police", "params": {}}
 
     return None

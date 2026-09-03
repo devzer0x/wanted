@@ -21,6 +21,7 @@ OFFLINE against a fake brain and recorded/synthesised `/state` streams — no li
   R7 **401 — the key on the box and on the dev machine are both invalid**; R8 weapons/aimed
   fire/drive-by/airtime/taxi not expressible. Tickets T1–T11.
 - **PHASE 2 — fix-opus-b DONE** (T6 weapons/shoot_at/drive_by/in_air/seat, T7 chaos ladder L1–L3 with F5 step-down, cadence config, 95 roam tests; bridge 1.7.0; CONTRACTS v1.14 written by Fable, loadout default `ammunation` as an operator-requested, bounded exception). It also found the live bug behind "it can't cut the call": the phone tasks were missing from `bridge_client.BRIDGE_TASK_TYPES`, so `post_task` raised before I/O — routed to fix-sonnet-d.
+- **PHASE 2 — fix-sonnet-c DONE** (T3 say only on an event, forced "" in code; T4 validator — names ⊂ STATE, mission-name mismatch, banned phrases from `commentary_style.md`, dedupe ≥ 0.6, ONE regenerate then drop, action always kept; T5 dashboard goal plugin-written, mood tracked not model-written; 51 tests; found and fixed `gate_say("")` letting an empty line through on an empty history).
 - **PHASE 2 running:** fix-opus-a (T1 drive-start + verify, T2 wheel-only movement),
   fix-opus-b (T6 weapons + attack/shoot/drive-by/airtime/taxi tasks, T7 chaos ladder L1–L3 with
   F5 step-down + mission cadence config), fix-sonnet-c (T3 line-only-on-event in code, T4
@@ -599,3 +600,28 @@ supabase-js pinned 2.109.0 until Node ≥22 baseline; drive/walk arrival = plana
   **v3.7.0-nightly.189 pinned** (recorded in bridge/README); .NET Framework 4.8; `-nobattleye`.
 - Paste-corruption note: master brief arrived with minor copy damage; reconstructed spots flagged
   in CONTRACTS.md §2 (mood enum — `scared` restored).
+
+
+## Fun-to-watch program — PHASE 3/4 done, PHASE 5 written (2026-09-03, HEAD)
+
+Five subagents' work integrated in one tree; my follow-ups on top (see `docs/findings.md`,
+"Integration findings" I1–I9). Verification, all real output on this machine:
+
+- `cd harness && .venv/bin/python -m pytest -p no:warnings` → **893 passed** (was 728 at the
+  start of the program); `ruff check .` → clean.
+- `~/.dotnet/dotnet build bridge/WastedBridge.csproj -c Release` → **0 warnings, 0 errors**
+  (bridge **1.7.0**); `bridge/tools/offline-checks/run.sh` → 187/187.
+- `verify` (read-only whole-tree audit): one movement owner per tick PASS; goal box
+  plugin-written PASS; no live brain call from tests/tools PASS; two event-less lines found and
+  removed.
+- `harness/tools/soak.py` (fake brain, real tick, `docs/FUNCHECK.md`): **F1–F6 all PASS** on 12 min
+  seed 3, 12 min seed 7 and 20 min seed 3 — idle 3.6–3.9 %, longest gap 46–51 s, 0 commentary
+  offenders, 95–97 % goals completed, 3–5 deaths/h (the one scripted death), 2/2 F6 edges in 3 s.
+
+**NOT VERIFIED — needs the game (listed in `docs/go-live.md`):** every native the five reports
+list (drive-start seat/engine/cruise timing, one bridge-side re-issue surviving a story call,
+`TASK_SMART_FLEE_PED`/`TASK_DRIVE_BY`/`TASK_SHOOT_AT_ENTITY` on the player ped, phone control group
+0 vs 2, `DESTROY_MOBILE_PHONE`, `IS_ENTITY_IN_AIR` on a real ramp, the `ammunation` loadout), F1
+on a real `/state` stream (the fake brain cannot echo a task back), and every soak grant the real
+game may refuse. **Nothing in this program has been deployed to the box** — the harness there
+dies on the 401 (T11) and the operator has not supplied the key.

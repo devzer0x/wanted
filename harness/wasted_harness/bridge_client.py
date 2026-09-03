@@ -27,7 +27,7 @@ from .logsetup import get_logger
 
 log = get_logger("wasted.bridge")
 
-# The 11 bridge task types (CONTRACTS §1). Harness-side primitives are NOT here:
+# The bridge task types (CONTRACTS §1). Harness-side primitives are NOT here:
 # the bridge rejects them; they are executed via SendInput (see primitives.py).
 BRIDGE_TASK_TYPES: tuple[str, ...] = (
     "drive_to",
@@ -42,6 +42,32 @@ BRIDGE_TASK_TYPES: tuple[str, ...] = (
     "fight_ped",
     "set_waypoint",
     "stop",
+    # --- fix-opus-b (T6), bridge 1.7.0 --------------------------------------
+    # The three genuinely NEW verbs. `attack_ped` is deliberately absent: the
+    # ticket's `attack_ped{handle}` = TASK_COMBAT_PED(player, target, 0, 16) is
+    # byte-for-byte what `fight_ped`'s ranged arm already issues, so it ships as
+    # a `weapon` parameter on `fight_ped` instead of a second task type with the
+    # same native and the same param. Rationale in the report.
+    "shoot_at",
+    "drive_by",
+    "enter_vehicle_seat",
+    # --- T8 (findings.md R6), bridge 1.6.0 (CONTRACTS v1.13) ----------------
+    # Both were in `brain.schemas.BRIDGE_TASKS` and issued by `main._phone_reflex`
+    # from the day this file's task table was first written, but never added
+    # HERE — so every `post_task("answer_call"/"reject_call", {})` raised
+    # `ValueError("not a bridge task")` client-side before any I/O ever
+    # happened. That is the literal bug behind the operator's "it cant cut the
+    # call": the reflex was posting the right verb and it was being thrown away
+    # one line later. Found by fix-opus-b while wiring T6's own new verbs
+    # (test_bridge_client.py's `test_bridge_task_types_match_contract` had
+    # documented the gap as a known, not-yet-fixed assertion).
+    "answer_call",
+    "reject_call",
+    # --- fix-opus-a (T1), bridge 1.7.0 (CONTRACTS v1.14) --------------------
+    # `TASK_SMART_FLEE_PED`, the on-foot counterpart of `fight_ped`. Added here
+    # the same day it was added to `brain.schemas.BRIDGE_TASKS`, because the
+    # phone bug above was exactly this tuple being forgotten.
+    "flee_ped",
 )
 
 DrivingStyle = Literal["normal", "rushed", "ignore_lights", "avoid_traffic"]
@@ -194,6 +220,37 @@ class InteriorState(BaseModel):
     since_s: float = 0.0
 
 
+class PlayerWeapon(BaseModel):
+    """CONTRACTS proposal v1.14 ``player.weapon`` (bridge 1.7.0) — fix-opus-b.
+
+    What he is HOLDING, plus how many rounds he has for each of the three
+    weapons the bridge tracks. Two things in free roam are impossible to decide
+    without it: whether `pick_a_fight` is a fist fight or an execution, and
+    whether a `drive_by_run` actually fired (`owned` deltas are the only
+    observable evidence a shot was taken — see behavior.roam).
+
+    ``owned`` is HAS_PED_GOT_WEAPON over the tracked loadout ONLY, so a name
+    that is missing means "not one of the three", never "he is unarmed".
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    #: `WeaponHash` member name for the weapon in his hands (`Unarmed`, `Pistol`,
+    #: ...), or a `0x…` string when the pinned SHVDN enum has no name for it.
+    name: str = "Unarmed"
+    #: Same four-value vocabulary `nearby.peds[].weapon_class` already uses.
+    weapon_class: Literal["unarmed", "melee", "gun", "projectile", "unknown"] = Field(
+        default="unarmed", alias="class"
+    )
+    #: Rounds carried for the CURRENT weapon.
+    ammo: int = 0
+    #: `WeaponHash` member name -> rounds carried, for the tracked loadout only.
+    owned: dict[str, int] = {}
+    #: Which loadout mode the bridge is running: ``"off"`` (he keeps only what
+    #: he earned in-game) or ``"ammunation"``. Reported so the site and the
+    #: commentary can be honest about where the gun came from.
+    loadout: str = "off"
+
+
 class PlayerState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     pos: Vec3
@@ -233,6 +290,13 @@ class PlayerState(BaseModel):
     #: that made this fix necessary). Optional so a pre-v1.12 bridge still
     #: parses.
     last_outdoor: Vec3 | None = None
+    #: Bridge 1.7.0 (CONTRACTS proposal v1.14, fix-opus-b). Optional with a
+    #: safe default so a bridge <= 1.6.0 still parses; `weapon` being ABSENT
+    #: from `model_fields_set` is what `behavior.roam.supports_v17` reads to
+    #: decide whether the 1.7.0-only goals may be offered at all. The default
+    #: reads "unarmed, owns nothing", which is the state in which every one of
+    #: those goals is refused — the safe direction.
+    weapon: PlayerWeapon | None = None
 
     @property
     def interior_reported(self) -> bool:
@@ -260,6 +324,16 @@ class VehicleState(BaseModel):
     upside_down: bool
     in_water: bool
     stopped_for_s: float
+    #: Bridge 1.7.0 (CONTRACTS proposal v1.14, fix-opus-b). IS_ENTITY_IN_AIR on
+    #: the vehicle: the game's own answer to "are the wheels off the ground",
+    #: which is what turns `big_jump` from an UNBUILDABLE goal (a z-delta at
+    #: 2-4 Hz is equally a jump, a hill or a lift) into a field read.
+    in_air: bool = False
+    #: Bridge 1.7.0. ``"driver"`` or ``"passenger"`` — GET_PED_IN_VEHICLE_SEAT
+    #: (veh, -1) == player. `None` from a bridge that does not send it. Without
+    #: it, "he is in the taxi" is equally true of having jacked it, which is a
+    #: different goal and a different line on air.
+    seat: Literal["driver", "passenger"] | None = None
 
 
 class LocationState(BaseModel):

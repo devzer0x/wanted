@@ -49,11 +49,14 @@ from .behavior.recovery import (
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
+    JackHandoffGate,
     OffLoopGrab,
+    RoadDodge,
     StrandedEscalator,
     StuckDetector,
     TaskStallDetector,
     ThreatLatch,
+    WaterEscalator,
     classify_api_failure,
     flipped_action,
     threat_action,
@@ -63,12 +66,15 @@ from .behavior.roam import (
 )
 from .behavior.roam import HouseEscape, InteriorEscape, RoamEngine, as_activity
 from .behavior.vehicle import (
+    ControlRegained,
     MovementToken,
     MovementWheel,
     VehicleController,
     VehiclePhase,
+    resume_action,
 )
 from .brain.characters import (
+    CHECKED_NAMES,
     absent_names_mentioned,
     has_unidentified_friendly,
     present_names,
@@ -76,13 +82,21 @@ from .brain.characters import (
 from .brain.director import VISION_TRIGGERS, DirectorBrain, DirectorCadence
 from .brain.knowledge_base import mission_state_hint, render, select
 from .brain.memory import Memory
-from .brain.mission_knowledge import LearnedScripts, identify_mission_with_source, mission_card
-from .brain.prompts import director_static_prefix, tactical_static_prefix
+from .brain.mission_knowledge import (
+    LearnedScripts,
+    identify_mission_with_source,
+    load_missions,
+    mission_card,
+)
+from .brain.prompts import banned_phrases, director_static_prefix, tactical_static_prefix
 from .brain.schemas import (
     ACTION_TYPES,
     BRIDGE_TASKS,
+    DEDUPE_RECENT_WINDOW,
     MOVEMENT_TASKS,
+    PHONE_TASKS,
     DecisionModel,
+    DecisionValidationContext,
 )
 from .brain.tactical import (
     BrainUnavailableError,
@@ -165,6 +179,77 @@ FLUSH_INTERVAL_S = 2.0
 KNOWLEDGE_BUDGET_CHARS = 1800
 
 INITIAL_GOAL = "wake up, find wheels, see what the day wants"
+
+#: T5 (findings.md R3): the dashboard CURRENT GOAL when neither a roam goal is
+#: locked nor a mission is tracked — the plugin's own fixed, honest fallback.
+#: Never the model's free-text `goal`; see `Harness.goal_text`.
+NEUTRAL_GOAL_TEXT = "seeing what Los Santos throws at him next"
+
+#: T3 (findings.md R2): action types that mean "he is fighting" for the
+#: purposes of gating `say` on an event — the decision itself choosing one of
+#: these is the event, independent of whatever `nearby.peds`/`threat` said a
+#: tick ago (this module has no cross-tick memory of THAT beyond `delta`).
+FIGHT_ACTION_TYPES: frozenset[str] = frozenset({"fight_ped", "combat_hated_targets_around"})
+
+#: T8 (findings.md R6): with missions off, how long an auto-answered call is
+#: left connected before `_phone_reflex` hangs it up on its own — long enough
+#: to actually be entertaining (the operator's own word), short enough that a
+#: call cannot silently own the wheel for the rest of the session the way a
+#: connected story call did before T8 (R1's own evidence: "a story call was
+#: CONNECTED the whole time; the game takes the ped's task for the phone
+#: UI"). Overridden to 0 s effectively by the fight/chase check in
+#: `_phone_reflex`, which hangs up immediately regardless of this budget.
+PHONE_HANGUP_AFTER_S = 25.0
+
+#: T4 (findings.md R4): the catalogued mission-name vocabulary MINUS anything
+#: that collides with a character name (`CHECKED_NAMES`) — computed once, not
+#: per decision. A mission called "Chop" would otherwise fight the ped named
+#: Chop for the same word, and the two checks would contradict each other.
+_KNOWN_MISSION_NAMES: frozenset[str] = frozenset(
+    m["name"]
+    for m in load_missions()
+    if m.get("name") and m["name"].strip().lower() not in {n.lower() for n in CHECKED_NAMES}
+)
+
+
+def _tick_event_reason(
+    delta: Delta,
+    big_event: str | None,
+    roam_transition: bool,
+    action_type: str,
+) -> str | None:
+    """T3: why this tick's `say` may be published, or None when nothing did.
+
+    findings.md R2 — tactical decisions fire on every poll (8-25 s), and every
+    one of them used to publish `d.say` unconditionally, so a stationary the agent
+    narrated a fresh line each cycle with nothing behind it. The fix is in
+    code: `say` only goes out when THIS tick carries one of the events T3
+    names — a CONTRACTS §4 event (`big_event`, popped once per tick from
+    `_pending_big_event`), a roam goal pick/done/fail (the transition line
+    `RoamEngine.note()` just drained, sniffed in `_dynamic_context`), a
+    vehicle change, a wanted change, a fight (the decision's own action is one
+    of `FIGHT_ACTION_TYPES`), a death, or control regained (a respawn or a
+    cutscene ending). Deliberately NOT here: `task_finished`/`danger`/
+    `objective_change` — the tactical cadence's own trigger reasons — because
+    `danger` alone is true on every poll for the whole length of a chase
+    (brain.tactical's own docs), which is exactly the "narrating nothing"
+    failure this exists to stop being possible in code.
+    """
+    if big_event is not None:
+        return f"event:{big_event}"
+    if roam_transition:
+        return "roam_goal_transition"
+    if delta.entered_vehicle or delta.exited_vehicle:
+        return "vehicle_change"
+    if delta.wanted_changed:
+        return "wanted_change"
+    if delta.died:
+        return "death"
+    if delta.respawned or delta.cutscene_ended:
+        return "control_regained"
+    if action_type in FIGHT_ACTION_TYPES:
+        return "fight"
+    return None
 
 # `ROAM_PREEMPTED` (= `behavior.roam.PREEMPTED_OUTCOME`) is the
 # `activity_end.outcome` that means "a higher owner took the movement wheel off
@@ -648,17 +733,19 @@ def _threat_and_blips_line(state: GameState) -> str:
 def _phone_line(state: GameState, missions_enabled: bool) -> str:
     """CONTRACTS v1.13 `phone`, as one line — empty when the phone is quiet.
 
-    Two different lines because there are two different situations, and
-    telling the model the wrong one is worse than telling it nothing:
+    T8 (findings.md R6): "it cant cut the call, check or accept whatever" plus
+    "calls are entertaining and can start story" — the reflex layer
+    (`_phone_reflex`) now ANSWERS every ring itself, missions on or off, so
+    this is no longer a live choice offered to the model the way it was
+    pre-T8. It only ever reports the FACT of what the reflex is doing or has
+    done, which is good material and cannot contradict what the viewer sees
+    on screen:
 
-    * **Jobs on.** The decision really is his, so he is told the two verbs and
-      what answering costs. The reflex layer does nothing at all.
-    * **Jobs off.** The harness has already refused it (answering a story call
-      starts a mission). Offering him `answer_call` here would invite an
-      action the reflex has just overruled, and inviting a model to do
-      something that will be undone is how a stream produces narration that
-      does not match the screen. He gets the FACT — it rang, it was refused —
-      which is good material and cannot contradict what the viewer sees.
+    * **Jobs on.** Answering may start a mission — that is the point. Nothing
+      here ever hangs up on him.
+    * **Jobs off.** He is not taking jobs, but the call is still answered (it
+      is entertaining); the reflex hangs it up on its own after
+      `PHONE_HANGUP_AFTER_S`, sooner if a fight or a chase is on.
 
     A free function, not a method, for the same reason
     :func:`_threat_and_blips_line` is one: it needs nothing from `self`, and
@@ -666,17 +753,27 @@ def _phone_line(state: GameState, missions_enabled: bool) -> str:
     """
     phone = state.phone
     if phone.in_call:
-        return "PHONE: a call is connected. You cannot see who it is and you did not pick the words."
+        if missions_enabled:
+            return (
+                "PHONE: a call is connected. You cannot see who it is and you did not pick "
+                "the words. Play whatever it leads to."
+            )
+        return (
+            "PHONE: a call is connected. Jobs are switched off, so the harness will hang up "
+            "on its own soon (sooner if a fight or a chase is on) — you did not pick the "
+            "words and there is nothing for you to do about the call itself."
+        )
     if not phone.ringing:
         return ""
     if missions_enabled:
         return (
-            "PHONE: ringing — answer_call or reject_call. Answering a story call STARTS THAT "
-            "JOB. You cannot see who is calling, so do not name them."
+            "PHONE: ringing — the harness is answering it for you. Answering a story call "
+            "STARTS THAT JOB. You cannot see who is calling, so do not name them."
         )
     return (
-        "PHONE: ringing — jobs are switched off, so the harness is refusing it for you. You "
-        "did not answer it and you cannot see who it was."
+        "PHONE: ringing — jobs are switched off, but the harness answers anyway (calls are "
+        "entertaining and can start story); it will hang up on its own soon. You cannot see "
+        "who it was."
     )
 
 
@@ -758,6 +855,13 @@ class Harness:
         self.task_stall = TaskStallDetector()
         self.cleared_backoff = ClearedByGameBackoff()
         self.stranded = StrandedEscalator()
+        #: T9 (findings.md R1/R5): `vehicle.in_water` past 10 s → exit, then
+        #: one walk toward known land; an NPC vehicle closing fast while he is
+        #: on foot → step off; recently jacked → hold `stranded` off so
+        #: roam's own `take_my_car_back` gets first refusal at the same car.
+        self.water = WaterEscalator()
+        self.road_dodge = RoadDodge()
+        self.jack_handoff = JackHandoffGate()
         self.threat_latch = ThreatLatch()
         #: Health across ticks. The relationship field in `nearby.peds` says
         #: what the engine's relationship GROUPS are, not who is currently
@@ -768,6 +872,14 @@ class Harness:
         #: actually moving, which is how he sat in a stolen convertible and let
         #: the owner beat him to death through the open door (2026-09-02).
         self.vehicle = VehicleController()
+        #: F6. Every moment the game hands the controls back — a respawn, the
+        #: end of a cutscene or a mission, a protagonist switch finishing, a
+        #: door out of an interior, `control_enabled` coming back — starts a
+        #: three-second stopwatch. If no layer in the whole ladder posts a
+        #: movement task before it runs out, the `resume` rung does. Measured,
+        #: not assumed: the whole point is that "somebody will handle it" is
+        #: exactly what the 2 h of logs behind docs/findings.md disproved.
+        self.control_regained = ControlRegained()
         #: One owner of bridge-task movement at a time, ENFORCED. Every
         #: `_execute_action` that posts a CONTRACTS §1 task carries the
         #: holder's token and is refused without it, which is where the
@@ -847,6 +959,12 @@ class Harness:
         self._pending_big_event: str | None = None
         self._pending_screenshot_trigger: str | None = None
         self._pending_park = False
+        #: T3: did THIS tick's dynamic context carry a roam goal pick/done/fail
+        #: transition line? Set in `_dynamic_context` (from `RoamEngine.note()`,
+        #: which drains it), read once by the paired `_apply_decision` call —
+        #: both happen back to back on the same tick, single-threaded, so there
+        #: is no staleness window between the two.
+        self._tick_roam_transition = False
         #: Governor L3 park-somewhere-scenic state: the task id of the drive to
         #: the scenic spot, and its deadline. None when not parking.
         self._park_task_id: str | None = None
@@ -854,6 +972,9 @@ class Harness:
         #: Deliberate stillness (the `wait` action) as a deadline rather than a
         #: blocking sleep, so perception keeps running through it.
         self._quiet_until = 0.0
+        #: Per-tick `/state` facts a `wait` may be waiting for (`_wait_has_a_reason`).
+        self._mission_active = False
+        self._wanted_now = 0
         #: Set from the latest /state each tick (`run()`); the single choke
         #: point `_execute_action` reads before posting ANY bridge task, from
         #: whichever source (reflex, activity, mission-follow, or the brain's
@@ -890,14 +1011,26 @@ class Harness:
         #: exists to stop depending on.
         self._threat_has_the_wheel = False
         self._under_attack = False
-        #: CONTRACTS v1.13: has this RING already been refused? Latched by
-        #: `_phone_reflex` on a `reject_call` that actually reached the game,
-        #: cleared the moment `phone.ringing` goes false. One attempt per ring:
-        #: every POST /task preempts the running task, so re-posting a refusal
-        #: at the 2-4 Hz poll rate would cancel whatever he was doing several
-        #: times a second for the length of the ring.
-        self._phone_rejected_this_ring = False
+        #: T8 (findings.md R6): has THIS ring already been answered? Latched
+        #: by `_phone_reflex` on an `answer_call` that actually reached the
+        #: game, cleared the moment `phone.ringing` goes false. One attempt
+        #: per ring: every POST /task preempts the running task, so
+        #: re-posting at the 2-4 Hz poll rate would cancel whatever he was
+        #: doing several times a second for the length of the ring.
+        self._phone_answered_this_ring = False
+        #: T8: has the CURRENT connected call already been hung up (missions
+        #: off only)? Latched on a `reject_call` that actually reached the
+        #: game while `phone.in_call`, cleared the moment the call ends.
         self._phone_hung_up_this_call = False
+        #: T8: wall-clock time (`time.monotonic()`) the current call
+        #: connected, or None while nothing is connected. Used to grade the
+        #: `PHONE_HANGUP_AFTER_S` budget; reset every time `phone.in_call`
+        #: goes false so a NEW call gets its own fresh budget.
+        self._phone_call_connected_at: float | None = None
+        #: T8: the hang-up budget while missions are off, and a plain
+        #: attribute (not a bare module constant) so a test can shrink it
+        #: without waiting out the real 25 s.
+        self.phone_hangup_after_s = PHONE_HANGUP_AFTER_S
         #: Set each tick from `BlockingScreenWatchdog.blocked`: the game is on
         #: a modal screen (MISSION FAILED / a menu), the SHVDN script thread is
         #: not ticking, and therefore every field in `state` is a frozen lie.
@@ -1321,6 +1454,16 @@ class Harness:
             self._release_interior_wheel("left_interior")
             self.interior_escape.reset()
 
+        # F6, and it is a MEASUREMENT, not a rung: every edge where the game
+        # gives the controls back arms a three-second stopwatch, and the only
+        # thing that stops it is a movement task actually reaching the bridge
+        # (`_execute_action` calls `moved()` on the one line that posts). The
+        # `resume` rung at the bottom of the ladder below is what answers a
+        # stopwatch that ran out. `respawned` is passed in rather than derived
+        # because `DeathArrestRecovery` can tell a respawn from an arrest
+        # release and a raw `dead` false-edge cannot.
+        self.control_regained.feed(state, respawned=bool(recovery["respawned"]))
+
         if state.player.dead or state.player.arrested:
             # Nothing physical to do but wait: every reflex below would
             # either be a no-op on a corpse (StuckDetector's reverse_out) or
@@ -1353,6 +1496,22 @@ class Harness:
             # inside one; the old shape let a task-stall `stop` AND an
             # `exit_vehicle` both go out on the same tick.
             flip = flipped_action(state)
+            # T9 (findings.md R1/R5): fed every tick regardless of `flip`
+            # (its own timers need to stay warm even on a tick `flip`
+            # preempts), graded just below it in the ladder — a car sitting
+            # in the water is a physical emergency, same tier as one upside
+            # down, but "get out and swim" is strictly less urgent than "get
+            # out of the thing that is currently upside down".
+            water_action = self.water.check(state)
+            # T9: fed every tick too, for the same reason — the two-tick
+            # closing-speed derivative needs last tick's vehicle positions
+            # cached even on a tick this does not fire.
+            road_dodge_action = self.road_dodge.check(state)
+            # T9: fed every tick, whether or not `threat.being_jacked_by` is
+            # live this tick — its own grace window is measured from the LAST
+            # tick it saw the handle, so a gap in feeding it would understate
+            # how recently the jacking actually happened.
+            recently_jacked = self.jack_handoff.feed(state)
             # One call per tick, here and nowhere else: the tracker's window is
             # keyed on wall-clock time, and feeding it twice in a tick would
             # put two samples of the same HP reading in it.
@@ -1407,7 +1566,8 @@ class Harness:
             )
 
             threat = threat_action(
-                state, delta, under_attack, vehicle_blocked=vehicle_blocked
+                state, delta, under_attack, vehicle_blocked=vehicle_blocked,
+                heat_wanted=self.roam.heat_is_the_goal(),
             )
             if threat is not None and self.task_stall.blocked(threat["type"]):
                 # This exact task type just pinned him. Dropping it here (and
@@ -1429,6 +1589,28 @@ class Harness:
                 token = self.wheel.acquire("flip", f"upside down / in water: {flip['type']}")
                 if token is not None:
                     self._execute_action(flip["type"], flip["params"], token)
+            elif water_action is not None:
+                # T9: stuck in the water past the timeout (right-way-up, or
+                # `flip` would already have claimed the tick). Still a
+                # physical-emergency tier, still above survival — trading
+                # punches or aiming from a car going nowhere in the water is
+                # not a plan either.
+                token = self.wheel.acquire("water", f"in the water: {water_action['type']}")
+                if token is not None:
+                    self._execute_action(water_action["type"], water_action["params"], token)
+            elif road_dodge_action is not None:
+                # T9: on foot with a vehicle closing fast. Above the ordinary
+                # threat ladder — a car is seconds from a hit, and stepping
+                # off does not cost him whatever fight is also happening;
+                # `threat_action` gets another look next tick with the same
+                # snapshot's worth of urgency it had before.
+                token = self.wheel.acquire(
+                    "road_dodge", f"vehicle closing on foot: {road_dodge_action['type']}"
+                )
+                if token is not None:
+                    self._execute_action(
+                        road_dodge_action["type"], road_dodge_action["params"], token
+                    )
             elif stalled_type is not None:
                 # `stop` only: CONTRACTS §1's own "clear current task -> idle".
                 # What to do INSTEAD is the day plan's / the activity runner's
@@ -1549,6 +1731,19 @@ class Harness:
                     # getting him there, and it has its own stuck watchdog
                     # (GOAL_STUCK_S, two strikes) for when it genuinely cannot.
                     self.stranded.reset()
+                elif recently_jacked:
+                    # T9 (findings.md R1/R5): he was just pulled out of his
+                    # own car (`threat.being_jacked_by`, fought off a few
+                    # ticks ago by the threat ladder above). `_drive_activities`
+                    # runs right after this method on this SAME snapshot and
+                    # is where roam's own `take_my_car_back` actually gets
+                    # picked (`RoamView.stolen_from` / the `take_my_car_back`
+                    # trigger in behavior/roam.py) — standing `stranded` down
+                    # for `JACK_HANDOFF_GRACE_S` is what stops it from
+                    # widening a vehicle search for whatever "any" car is
+                    # nearest and grabbing a stranger's car instead of his own
+                    # in that gap.
+                    self.stranded.reset()
                 else:
                     # BEFORE the stranded ladder, and it resets it: from inside
                     # a building, widening a vehicle search (50 -> 90 -> 140 m)
@@ -1589,6 +1784,40 @@ class Harness:
                         "L2: reflex drives",
                     )
 
+            # F6, the LAST rung: control came back, three seconds went by, and
+            # not one layer above posted a movement task. Outside the
+            # `threat is None and vehicle_intent is None` block above on
+            # purpose — the wheel is the gate, not an `if`: `resume` sits at the
+            # bottom of the reflex class, so a live survival or vehicle rung
+            # refuses it, and a task already posted this tick refuses it too.
+            # Asking and being refused costs one log line and is the honest
+            # shape; deciding for the wheel here is how ladders drift apart.
+            overdue_edge = self.control_regained.overdue()
+            if overdue_edge is not None:
+                fallback = resume_action(state, self.mood.driving_style())
+                if fallback is None:
+                    # Indoors, or in a car that cannot go anywhere. Both have a
+                    # higher owner whose whole job this is (`exit_interior`,
+                    # `flip`); inventing a second answer here is what put a
+                    # widening vehicle search inside a living room.
+                    log.info(
+                        "f6: nothing moved him and no fallback applies here",
+                        extra={
+                            "kv": {
+                                "edge": overdue_edge,
+                                "interior": state.player.interior,
+                                "in_vehicle": state.player.in_vehicle,
+                            }
+                        },
+                    )
+                else:
+                    self._reflex_act(
+                        "resume",
+                        fallback,
+                        f"F6: {overdue_edge} and nobody moved him in "
+                        f"{self.control_regained.deadline_s:.0f}s",
+                    )
+
         # CONTRACTS v1.13 — the phone, LAST in the tick on purpose (see
         # `_phone_reflex`). It runs even while he is dead or arrested: the only
         # thing it does in that state is notice the ring ending and re-arm,
@@ -1609,78 +1838,124 @@ class Harness:
         self._threat_has_the_wheel = self.wheel.taken_by_reflex() or phone_acted
 
     def _phone_reflex(self, state: GameState) -> bool:
-        """CONTRACTS v1.13: the missions-off answer to a ringing phone.
+        """T8 (findings.md R6): answer every ring; hang up on a budget while missions are off.
 
-        THE POLICY, and it is the operator's: **answering a story call starts a
-        mission.** While `Settings.missions_enabled` is false he is not taking
-        jobs, so a ringing phone gets `reject_call` — no model call, no
-        deliberation, at reflex speed. While missions ARE enabled this does
-        nothing at all: the choice goes to the brain, which is told about it by
-        :func:`_phone_line`.
+        THE POLICY, and it is the operator's: "it cant cut the call, check or
+        accept whatever" plus "calls are entertaining and can start story".
+        So the phone is always ANSWERED — `answer_call` (`Control.PhoneSelect`)
+        — whether or not `Settings.missions_enabled` is true:
 
-        RATE LIMIT: **one attempt per ring**, latched until the ring ends.
-        `POST /task` preempts the running task (CONTRACTS §1), so re-posting a
-        refusal at the poll rate would cancel whatever he was doing three times
-        a second for the length of the ring — the same failure `ThreatLatch`
-        exists to prevent for combat. The bridge's own `reject_call` re-injects
-        the control every frame for up to ~6 s, so one post IS the whole
-        attempt; there is nothing for a second one to add.
+        * **Jobs on.** Answering may start a mission; that is the point, and
+          nothing here ever hangs up on him once connected.
+        * **Jobs off.** He is not taking jobs, but the call is still answered
+          (it is entertaining) — then hung up on its own after
+          :data:`PHONE_HANGUP_AFTER_S`, or IMMEDIATELY if a fight or a police
+          chase is live (`threat.attacker_handle`, `player.wanted > 0`, or the
+          wheel already running one of :data:`FIGHT_ACTION_TYPES`) — a phone
+          conversation is not the bit while he is being shot at.
 
-        The latch is only spent on a post that actually reached the game. A
+        RATE LIMIT: one attempt to ANSWER per ring, and (jobs off only) one
+        attempt to HANG UP per connected call — the same shape `ThreatLatch`
+        uses for combat and the pre-T8 reflex used for `reject_call`. `POST
+        /task` preempts the running task (CONTRACTS §1), so re-posting either
+        verb at the poll rate would tear down and restart the engine's own
+        control-injection loop several times a second. The bridge's own
+        `answer_call`/`reject_call` already re-inject the control every frame
+        for up to ~6 s on their own, so one post per ring or per call IS the
+        whole attempt — CONTRACTS's own "unanswered"/"unrejectable" after that
+        bound is the honest end state, never a loop.
+
+        Each latch is only spent on a post that actually reached the game. A
         task suppressed mid-cutscene or lost to a bridge blip never happened,
-        and he must be free to ask again on the next tick.
+        and the next tick must be free to try again.
 
         Returns True when it posted, which is what makes the planners running
         later in this tick stand down for it.
         """
         phone = state.phone
-        if phone.in_call and not self.settings.missions_enabled:
-            # A call that is already CONNECTED — some story calls auto-answer, and the
-            # research is explicit that the reject soft key is hidden for a few of
-            # them — is hung up the same way: Control.PhoneCancel (177) is END CALL
-            # during an ongoing call. Once per call, latched on the in_call edge.
-            if not self._phone_hung_up_this_call and not self.wheel.posted_this_tick:
-                self._phone_hung_up_this_call = True
-                log.info("phone: a call is connected and missions are off; hanging up")
-                self._execute_action("reject_call", {})
-                return True
-            return False
+        if phone.in_call:
+            # Connected — re-arm the ANSWER latch for the next ring regardless
+            # of the missions switch, so a second call right after this one
+            # gets its own attempt.
+            self._phone_answered_this_ring = False
+            if self.settings.missions_enabled:
+                # Jobs on: the story owns this call. Nothing here ends it.
+                self._phone_call_connected_at = None
+                self._phone_hung_up_this_call = False
+                return False
+            if self._phone_call_connected_at is None:
+                self._phone_call_connected_at = time.monotonic()
+            if self._phone_hung_up_this_call:
+                return False
+            fighting = (
+                state.threat.attacker_handle is not None
+                or state.player.wanted > 0
+                or (
+                    state.last_task.status == "running"
+                    and state.last_task.type in FIGHT_ACTION_TYPES
+                )
+            )
+            elapsed = time.monotonic() - self._phone_call_connected_at
+            if not fighting and elapsed < self.phone_hangup_after_s:
+                return False
+            if self.wheel.posted_this_tick:
+                # Bridge-side it is still one task at a time; the call stays
+                # connected next tick and this latch is untouched, so the
+                # hang-up is simply retried on the next tick that is free.
+                log.debug(
+                    "phone: connected call due for a hang-up, deferring — a task "
+                    "is already posted this tick"
+                )
+                return False
+            task_id = self._execute_action("reject_call", {})
+            if task_id is None:
+                return False
+            self._phone_hung_up_this_call = True
+            log.info(
+                "phone: hanging up the connected call",
+                extra={
+                    "kv": {
+                        "task_id": task_id,
+                        "reason": "fight_or_chase" if fighting else "budget",
+                        "elapsed_s": round(elapsed, 1),
+                    }
+                },
+            )
+            return True
+
+        # Not connected — forget the hang-up bookkeeping for the next call.
+        self._phone_call_connected_at = None
         self._phone_hung_up_this_call = False
-        if not phone.ringing or phone.in_call:
-            # The ring is over — answered, refused, or the caller gave up — or
-            # a call is connected, in which case there is nothing to refuse
-            # (and `in_call` is checked explicitly rather than trusted to be
-            # excluded by the bridge's own AND, because "do nothing while he
-            # is on a call" is the rule, not an accident of the derivation).
-            # Re-arm for the next ring.
-            self._phone_rejected_this_ring = False
+
+        if not phone.ringing:
+            # The ring is over — answered, or the caller gave up. Re-arm.
+            self._phone_answered_this_ring = False
             return False
-        if self.settings.missions_enabled:
-            return False
-        if self._phone_rejected_this_ring:
+        if self._phone_answered_this_ring:
             return False
         if self.wheel.posted_this_tick:
-            # The survival ladder (or the vehicle reflex) already put a task on
-            # the wire this tick. `reject_call` takes no wheel, so nothing
-            # would refuse it — but bridge-side it is still one task at a time,
-            # and posting now would preempt the action that was chosen over it.
-            # The phone is still ringing next tick; the latch is untouched.
+            # The survival ladder (or the vehicle reflex) already put a task
+            # on the wire this tick. `answer_call` takes no wheel, so nothing
+            # would refuse it — but bridge-side it is still one task at a
+            # time, and posting now would preempt the action that was chosen
+            # over it. The phone is still ringing next tick; the latch is
+            # untouched.
             log.debug(
-                "phone: ringing, deferring the refusal — a task is already posted this tick"
+                "phone: ringing, deferring the answer — a task is already posted this tick"
             )
             return False
-        task_id = self._execute_action("reject_call", {})
+        task_id = self._execute_action("answer_call", {})
         if task_id is None:
             return False
-        self._phone_rejected_this_ring = True
+        self._phone_answered_this_ring = True
         log.info(
-            "phone: ringing and jobs are switched off — refusing the call",
+            "phone: ringing — answering (calls are entertaining and can start story)",
             extra={"kv": {"task_id": task_id, "tick": self.wheel.tick}},
         )
         # No canned line here on purpose. `_phone_line` puts the FACT in the
-        # brain's next context ("it rang, the harness refused it") and he
-        # narrates it in his own words on his own cadence; a fixed string
-        # fired from the reflex would be the same sentence every single call.
+        # brain's next context and he narrates it in his own words on his own
+        # cadence; a fixed string fired from the reflex would be the same
+        # sentence every single call.
         return True
 
     # -- movement arbitration --------------------------------------------------
@@ -2132,6 +2407,17 @@ class Harness:
         self._mission_tokens = 0
 
     def _dynamic_context(self, state: GameState, delta: Delta, trigger: str, layer: str) -> str:
+        # T3: `note()` DRAINS the pending transition line (RoamEngine.note's own
+        # docstring), so it is read exactly once here and the result reused
+        # below rather than calling `note()` twice. The prefix is the only
+        # signal `RoamEngine.pick`/`close` leave behind for "a goal was just
+        # decided this tick" — see `_tick_event_reason`, which `_apply_decision`
+        # (called right after this, same tick, single-threaded) consults via
+        # `self._tick_roam_transition`.
+        roam_note = self.roam.note()
+        self._tick_roam_transition = roam_note.startswith(
+            ("ROAM GOAL PICKED:", "ROAM GOAL DONE:", "ROAM GOAL FAILED:")
+        )
         parts = [
             f"TRIGGER: {trigger}",
             f"GOAL: {self.goal_text}",
@@ -2161,7 +2447,7 @@ class Harness:
             # the menu changes every tick, so caching it would invalidate the
             # prefix cache on every call (the same reasoning as the knowledge
             # block below).
-            self.roam.note(),
+            roam_note,
             (mission_card(self.current_mission) if self.current_mission else ""),
             # Retrieved GTA V knowledge for THIS situation, not the whole encyclopedia:
             # 651 researched items live on disk and `select` returns the handful that match
@@ -2219,6 +2505,31 @@ class Harness:
             )
         return "\n\n".join(p for p in parts if p)
 
+    def _validation_context(self, state: GameState) -> DecisionValidationContext:
+        """T4 (findings.md R4): the plain-data snapshot `validate_decision_content`
+        checks a decision against, gathered fresh every call — state, the roam
+        menu and the commentary's recent-line window all change every tick.
+
+        `roam_offered_ids`/`roam_model_choice` are populated only while
+        `self.roam.current is None`: exactly the condition under which
+        `RoamEngine.note()` shows a "ROAM AVAILABLE" menu rather than "ROAM
+        CURRENT" (a locked goal is echoed, not chosen, and validating an echo
+        against the menu that was on offer BEFORE it locked would be checking
+        the wrong thing).
+        """
+        mission_name = (self.current_mission or {}).get("name") if self.current_mission else None
+        roam_offered = () if self.roam.current is not None else self.roam.offered_ids()
+        return DecisionValidationContext(
+            present_names=frozenset(present_names(state)),
+            names_check_suspended=has_unidentified_friendly(state),
+            mission_name=mission_name,
+            known_mission_names=_KNOWN_MISSION_NAMES,
+            recent_lines=tuple(self.commentary.recent.recent(DEDUPE_RECENT_WINDOW) or ()),
+            banned_phrases=banned_phrases(),
+            roam_offered_ids=tuple(roam_offered),
+            roam_model_choice=self.roam.model_choice if roam_offered else None,
+        )
+
     def _think(self, layer: str, state: GameState, delta: Delta, trigger: str) -> DecisionResult | None:
         """One decision with the timescale dip; None when the call failed."""
         if not self.api_backoff.ready():
@@ -2240,8 +2551,14 @@ class Harness:
                     # allowed, the world just won't slow down for it.
                     pass
             context = self._dynamic_context(state, delta, trigger, layer)
+            # T4: the same snapshot `roam.note()` just described to the model,
+            # turned into plain data the validator can check the RESPONSE
+            # against once it comes back.
+            validation_ctx = self._validation_context(state)
             if layer == "tactical":
-                result = self.tactical.decide(context, mission_active=state.mission.active)
+                result = self.tactical.decide(
+                    context, mission_active=state.mission.active, validation_ctx=validation_ctx
+                )
             else:
                 shot, shot_trigger = None, None
                 if (
@@ -2251,7 +2568,7 @@ class Harness:
                     shot, _ = self._capture_screenshot(f"director-{self._pending_screenshot_trigger}")
                     shot_trigger = self._pending_screenshot_trigger
                 self._pending_screenshot_trigger = None
-                result = self.director.decide(context, shot, shot_trigger)
+                result = self.director.decide(context, shot, shot_trigger, validation_ctx)
             self.api_backoff.record_success()
             return result
         except DecisionFailedError as exc:
@@ -2289,17 +2606,43 @@ class Harness:
 
     @property
     def goal_text(self) -> str:
-        """CURRENT GOAL, for the site and for the prompt.
+        """CURRENT GOAL, for the site and for the prompt — written by the
+        PLUGIN, never by the model (T5, findings.md R3).
 
-        While a roam goal is locked the goal is `roam.current`'s, not the
-        model's: the dashboard has to show what the harness is actually doing,
-        and the model narrating a different intention while the engine drives a
-        locked goal is precisely the disagreement that made "CURRENT GOAL" on the
-        site untrustworthy. Outside a locked goal the director still owns it.
+        Three fixed sources, in priority order, and nothing else:
+          1. a locked roam goal's own description (`roam.dashboard_goal()`);
+          2. the tracked mission's name (+ its first documented objective,
+             when the walkthrough card has one) while a mission is active —
+             `self.current_mission` is set at `mission_start` and cleared at
+             `mission_end`/`mission_fail`, so its presence already tracks
+             `state.mission.active` without needing `state` here;
+          3. :data:`NEUTRAL_GOAL_TEXT`.
+        `self.current_goal` (the director's free-text `goal` field) is
+        deliberately NOT read here any more: a model narrating a different
+        intention while the engine drives a locked goal — or while no goal is
+        locked at all — is exactly the disagreement that made "CURRENT GOAL"
+        on the site untrustworthy. It is still recorded to the `decisions`
+        table (`_apply_decision`) and still read back into the NEXT prompt as
+        context; it just never reaches this box or `stats.current_goal`.
         """
-        return self.roam.dashboard_goal() or self.current_goal
+        locked = self.roam.dashboard_goal()
+        if locked is not None:
+            return locked
+        if self.current_mission is not None:
+            name = str(self.current_mission.get("name") or "").strip() or "the job"
+            objectives = self.current_mission.get("objectives") or []
+            first = str(objectives[0]).strip() if objectives else ""
+            return f"{name} — {first}" if first else name
+        return NEUTRAL_GOAL_TEXT
 
-    def _apply_decision(self, layer: str, result: DecisionResult, state: GameState) -> None:
+    def _apply_decision(
+        self,
+        layer: str,
+        result: DecisionResult,
+        state: GameState,
+        delta: Delta,
+        big_event: str | None,
+    ) -> None:
         d: DecisionModel = result.decision
         if layer == "director":
             # Still recorded — but a locked roam goal OUTRANKS it everywhere it
@@ -2329,12 +2672,33 @@ class Harness:
                 "cost_usd": round(result.cost_usd, 6),
             }
         )
+        # T3 (findings.md R2): a line only on an EVENT. Tactical decisions
+        # fire on every poll (8-25 s); without this a stationary the agent with
+        # nothing happening narrated a fresh line every cycle. `say` is forced
+        # to "" in CODE — before publish AND before the no-repeat memory sees
+        # it — whenever this tick carries none of `_tick_event_reason`'s
+        # event set, even if the model wrote one. The `decisions` table row
+        # above already has the model's raw, unforced `say`; only the
+        # published/remembered copy is touched here.
+        event_reason = _tick_event_reason(
+            delta, big_event, self._tick_roam_transition, d.action.type
+        )
+        say = d.say
+        if event_reason is None:
+            log.debug(
+                "commentary suppressed: no event this tick",
+                extra={"kv": {"layer": layer, "would_have_said": d.say[:120]}},
+            )
+            say = ""
         # GROUNDING (live 2026-09-02): he narrated "keep Dave alive" and
         # "Trevor's got the rifle" through a whole mission in which neither man
         # existed. Naming somebody who is not there is the most damaging thing
         # he can say on a live stream, so a line that does it is not published.
         # Only names the game's own ped models can produce are ever challenged,
-        # so streets, zones and car names pass untouched.
+        # so streets, zones and car names pass untouched. T4's output
+        # validator (brain.tactical/brain.director) already runs this same
+        # check before the decision comes back here — this stays as a second,
+        # cheap backstop, not the only line of defense any more.
         # An unnamed FRIENDLY nearby means we cannot prove anybody is absent —
         # a mission crewmate whose model we have no entry for could be exactly
         # who the line is about. Staying quiet then is the honest default:
@@ -2342,20 +2706,30 @@ class Harness:
         absent = (
             []
             if has_unidentified_friendly(state)
-            else absent_names_mentioned(d.say, present_names(state))
+            else absent_names_mentioned(say, present_names(state))
         )
         if absent:
             log.warning(
                 "commentary names somebody who is not here; dropping the line",
-                extra={"kv": {"say": d.say[:120], "absent": ",".join(absent)}},
+                extra={"kv": {"say": say[:120], "absent": ",".join(absent)}},
             )
-        elif self.commentary.gate_say(d.say):
-            self.bus.publish("say", {"text": d.say, "mood": d.mood})
+        elif say and self.commentary.gate_say(say):
+            # `say` truthy first: T3's forced "" (no event) or an
+            # honestly empty model line must never reach the bus just
+            # because `gate_say` has nothing recent to compare an empty
+            # string against.
+            # T5 (findings.md R3): the published mood is the TRACKED mood
+            # (`humanizer.MoodModel`, computed from health/wanted/recent
+            # events — see `_reflex`'s `self.mood.observe(...)` calls), never
+            # `d.mood`. The model's own mood is advisory at most: it is still
+            # recorded verbatim on the `decisions` row above for audit, but it
+            # does not drive what the overlay/feed shows.
+            self.bus.publish("say", {"text": say, "mood": self.mood.mood})
         # Feeds the no-repeat list the prompt promises him back into the prompt
         # — always, even a gated-out line, so the model's own memory of what it
         # said stays accurate (see Commentary.gate_say's docstring).
-        self.commentary.record_say(d.say)
-        self.memory.log_day("decision", f"[{layer}] {d.say} -> {d.action.type}")
+        self.commentary.record_say(say)
+        self.memory.log_day("decision", f"[{layer}] {say} -> {d.action.type}")
         # THE LOCK. This conditional is the whole "the model may not choose to
         # stand still" mechanism; the prompt text is decoration around it.
         #
@@ -2423,6 +2797,23 @@ class Harness:
         self._end_activity_if_running("preempted_by_decision")
         time.sleep(reaction_delay(self.rng))  # humanizer: 300-900 ms reaction
         self._execute_action(d.action.type, d.action.wire_params(), token)
+
+    def _wait_has_a_reason(self) -> bool:
+        """Is there anything a `wait` could be waiting FOR this tick?
+
+        Read from the per-tick flags `run()` caches from `/state`: the game
+        owns the moment (cutscene, switch, retry, dead/arrested), a mission is
+        running (the objective may be a wait), or the police are interested
+        (hiding is a plan). Free roam with control in hand is none of these.
+        """
+        return bool(
+            self._cutscene_active
+            or self._switch_in_progress
+            or self._retry_in_flight
+            or self._player_down
+            or self._mission_active
+            or self._wanted_now > 0
+        )
 
     def _execute_action(
         self,
@@ -2544,7 +2935,18 @@ class Harness:
                 # running at 2-4 Hz or a death mid-wait goes unseen and the
                 # site's heartbeat goes stale (>60 s reads as offline, §5).
                 # The loop honours the quiet period instead.
-                seconds = max(0.0, min(60.0, float(params.get("seconds", 5))))
+                seconds = max(0.0, min(30.0, float(params.get("seconds", 5))))
+                if not self._wait_has_a_reason():
+                    # Free roam, control in hand, nothing running: a `wait` here
+                    # is the "he's just thinking, not playing" loop seen on
+                    # stream — the quiet period held the drive-away AND the next
+                    # goal pick, and the next think said `wait` again. Standing
+                    # still is not a plan; the roam engine gets the tick.
+                    log.info(
+                        "wait ignored: free roam with control, nothing to wait for",
+                        extra={"kv": {"seconds": round(seconds, 1)}},
+                    )
+                    return None
                 self._quiet_until = time.monotonic() + seconds
                 log.info("quiet period", extra={"kv": {"seconds": round(seconds, 1)}})
                 return None
@@ -2570,7 +2972,17 @@ class Harness:
                 # the gate at the top guaranteed a live token.
                 if token is not None:
                     self.wheel.mark_posted(token, action_type)
-                return self.bridge.post_task(action_type, params)
+                task_id = self.bridge.post_task(action_type, params)
+                if token is not None:
+                    # F6's stopwatch stops HERE and nowhere else: this is the one
+                    # line in the harness where a movement task actually reaches
+                    # the game, and it is reached only after a 202. "The wheel
+                    # was acquired" is not movement and neither is "the post was
+                    # attempted" — a task lost to a bridge blip left him exactly
+                    # as still as no task at all, which is the whole lesson of
+                    # `VehicleController`'s motion verification.
+                    self.control_regained.moved(action_type)
+                return task_id
             elif action_type == "radio":
                 self.bridge.set_radio(str(params.get("station", "off")))
             elif action_type == "horn":
@@ -2706,7 +3118,11 @@ class Harness:
             return
         if state.player.dead or state.player.arrested:
             return
-        if self.missions.in_mission or state.player.wanted > 0:
+        if self.missions.in_mission or (state.player.wanted > 0 and not self.roam.heat_is_the_goal()):
+            # Stars end a goal — unless stars were the goal. `judge()` already
+            # exempts `wants_heat` goals from its wanted override; this gate
+            # did not, and closed `earn_two_stars` as "wanted" one poll after
+            # its drive-by earned the star (soak trace, 2026-09-03).
             if self.activity_runner.current is not None:
                 self._end_activity_if_running(
                     "mission" if self.missions.in_mission else "wanted"
@@ -2725,7 +3141,12 @@ class Harness:
         if time.monotonic() < self._quiet_until:
             return  # a `wait` step is still running its course
 
-        if self.activity_runner.current is not None:
+        if self.roam.current is not None:
+            # Routed on the LOCK, not on the step machine: the runner can be
+            # abandoned under a goal that is still locked (see
+            # `_advance_roam_goal`), and reaching `_begin_roam_goal` in that
+            # state made it release roam's own lease on a `pick()` that had
+            # nothing to pick.
             self._advance_roam_goal(state)
             return
 
@@ -2758,6 +3179,8 @@ class Harness:
                 self._end_activity_if_running("stuck")
                 return True
             step = self.activity_runner.replace_plan(self.roam.current.plan)
+            if step is None:
+                step = self._restart_locked_plan()
             if step is not None:
                 self._issue_activity_step(step)
             return True
@@ -2782,7 +3205,36 @@ class Harness:
             self._issue_activity_step(step)
             return
         running = self.activity_runner.current
-        if running is None or not running.finished:
+        if running is None:
+            # The step machine was abandoned under a goal that is still locked.
+            # `ActivityRunner.next_step` treats any foreign RUNNING task as
+            # preemption, but only the wheel's preempt hook closes the goal —
+            # and a task that never touches the wheel can still replace the
+            # step's bridge task: `answer_call`/`reject_call` (CONTRACTS v1.13
+            # phone tasks are not movement tasks). Observed as the goal sitting
+            # locked with nothing running until the stuck watchdog failed it
+            # ~20 s later. The goal is not over: rebuild its plan from where he
+            # is and carry on, exactly as the escalate arm does.
+            if state.last_task.type in PHONE_TASKS and state.last_task.status == "running":
+                # The phone task is still pressing its key (it waits up to a
+                # few seconds for `in_call` to flip). A movement task posted now
+                # would preempt it and the call would never be answered or hung
+                # up — the goal waits one more poll, locked, and restarts on the
+                # tick the phone task is done.
+                return
+            if self.roam.replan(state) is None:
+                self._end_activity_if_running("preempted", by="bridge_task")
+                return
+            log.info(
+                "roam step machine was abandoned under a locked goal; restarting its plan",
+                extra={"kv": {"goal": self.roam.current.goal.id,
+                              "last_task": state.last_task.type}},
+            )
+            restarted = self._restart_locked_plan()
+            if restarted is not None:
+                self._issue_activity_step(restarted)
+            return
+        if not running.finished:
             return
         fresh = self.roam.replan(state)
         if fresh is None:
@@ -2791,6 +3243,18 @@ class Harness:
         replaced = self.activity_runner.replace_plan(self.roam.current.plan)
         if replaced is not None:
             self._issue_activity_step(replaced)
+
+    def _restart_locked_plan(self) -> dict[str, Any] | None:
+        """Start the locked goal's (re-planned) steps on an EMPTY step machine.
+
+        `replace_plan` refuses when nothing is running, which is exactly the
+        abandoned case; `start_plan` opens a fresh record. The goal's own timer
+        lives in `roam.current`, so a restart cannot buy it more time.
+        """
+        locked = self.roam.current
+        if locked is None:
+            return None
+        return self.activity_runner.start_plan(as_activity(locked.goal), locked.plan)
 
     def _begin_roam_goal(self, state: GameState) -> None:
         """Pick one goal off the offered menu and post its first action.
@@ -3111,15 +3575,10 @@ class Harness:
                 "(a pass is only ever counted off a real MISSION PASSED banner)",
                 extra={"kv": {"reason": self.grab_pump.last_reason[:200]}},
             )
-            # Said out loud, once, for the same reason the L3 park says its own
-            # honest note: from here on the mission counter can only under-count,
-            # and a counter that quietly stops moving looks exactly like a
-            # counter that has nothing to count.
-            self._say(
-                "Lost the screen feed. I can still play — I just can't prove a "
-                "mission passed any more.",
-                "bored",
-            )
+            # Not said out loud: there is no CONTRACTS §4 event for "capture
+            # device died", and a line without an event is exactly the noise
+            # T3 removed. The overlay's mission counter simply stops moving,
+            # and the log line above is the record of why.
             self.grabber = None
             self._frame = None
             return None
@@ -3201,11 +3660,18 @@ class Harness:
         self._end_activity_if_running("game_restarted")
         self.perceptor = Perceptor()
         self.stuck = StuckDetector()
-        self._phone_rejected_this_ring = False
+        self._phone_answered_this_ring = False
         self._phone_hung_up_this_call = False
+        self._phone_call_connected_at = None
         self.task_stall = TaskStallDetector()
         self.cleared_backoff = ClearedByGameBackoff()
         self.stranded = StrandedEscalator()
+        # T9: every timer here is keyed on wall-clock time or an ephemeral
+        # vehicle handle, void behind a new game process — same rule as
+        # every other stateful observer on this list.
+        self.water.reset()
+        self.road_dodge.reset()
+        self.jack_handoff.reset()
         # Same rule as every other stateful observer here: a fresh instance.
         # The roam engine's memory is all cross-tick derivations about a world
         # that no longer exists — vehicle handles are ephemeral by contract, so
@@ -3229,6 +3695,10 @@ class Harness:
         # is void. Same reason the trackers above are rebuilt.
         self.vehicle.reset()
         self.wheel.reset()
+        # Same rule: every flag F6 diffs against belongs to the dead process, so
+        # a relaunch must not manufacture a "cutscene ended" edge out of one
+        # snapshot from before the crash and one from after it.
+        self.control_regained.reset()
         self.current_mission = None
         self.current_goal = INITIAL_GOAL
         # A mission that was in flight when the game died has no honest ending
@@ -3246,7 +3716,12 @@ class Harness:
         self._grab_reset_wanted = self.grabber is not None
         self._frame = None
         self._frame_at = 0.0
-        self._say("Something rebooted. It wasn't me. Where's my car.")
+        # No line here either: a restart detected between two good polls has
+        # no §4 event of its own (`bridge_down`/`bridge_up` only fire when a
+        # poll actually failed), and `_end_activity_if_running` above already
+        # recorded the `activity_end` a locked goal earns — which is the one
+        # event the next decision can speak to.
+        log.info("game restarted; perception and stuck detectors reset")
 
     # -- housekeeping ----------------------------------------------------------
 
@@ -3356,10 +3831,32 @@ class Harness:
             return True
         if self.breaks.due() and not self.missions.in_mission and state.player.wanted == 0:
             planned = self.breaks.start()
-            with contextlib.suppress(BridgeError):
-                # Down or not-ready: he takes the break either way; the game is
-                # not going anywhere without a task.
-                self.bridge.post_task("stop", {})
+            # T2. This used to be a bare `self.bridge.post_task("stop", {})` —
+            # the ONE path in the harness that put a CONTRACTS §1 MOVEMENT task
+            # on the wire without asking the movement wheel, and therefore the
+            # one hole in "the wheel is the only path to movement". `stop` is a
+            # movement task by every definition that matters: it clears whatever
+            # the current holder had running, so a break starting mid-goal
+            # cancelled a roam step out from under an owner that never found
+            # out.
+            #
+            # `force_idle` is the honest expression of what a break IS — nobody
+            # drives, and whatever was running is cancelled through its own
+            # preempt hook, exactly as for a cutscene or a death — and it leaves
+            # `idle` holding an open lease, whose token is what `_execute_action`
+            # then accepts. Down or not-ready: he takes the break either way;
+            # the game is not going anywhere without a task.
+            # No `contextlib.suppress(BridgeError)` any more: `_execute_action`
+            # already swallows every bridge failure into a log line, which is
+            # exactly what the old suppress was there for.
+            # This runs BEFORE `_reflex` opens the movement tick and the loop
+            # `continue`s straight after, so open and close one here: without
+            # it the `stop` below is logged under the previous iteration's
+            # tick number, beside whichever owner posted then (verify audit).
+            self.wheel.begin_tick()
+            self.wheel.force_idle(f"break started ({planned}s)")
+            self._execute_action("stop", {}, self.wheel.token_for("idle"))
+            self.wheel.end_tick()
             self.writer.record_event("break", {"phase": "start", "planned_s": planned})
             self._say("Even I stop for gas. Back in a few.", "chill")
             return True
@@ -3494,6 +3991,8 @@ class Harness:
                 self._switch_in_progress = state.player.switch_in_progress
                 self._retry_in_flight = state.mission.retry_in_flight
                 self._player_down = state.player.dead or state.player.arrested
+                self._mission_active = state.mission.active
+                self._wanted_now = state.player.wanted
 
                 self._reflex(state, delta)
 
@@ -3535,7 +4034,7 @@ class Harness:
                         result = self._think("director", state, delta, director_trigger)
                         self.director_cadence.fired(now)
                         if result is not None:
-                            self._apply_decision("director", result, state)
+                            self._apply_decision("director", result, state, delta, big_event)
                     else:
                         tactical_trigger = self.tactical_cadence.should_fire(now, delta, level)
                         # v1.11 `player.switch_in_progress` gates this call
@@ -3552,7 +4051,7 @@ class Harness:
                             result = self._think("tactical", state, delta, tactical_trigger)
                             self.tactical_cadence.fired(now, level, self.mood.mood)
                             if result is not None:
-                                self._apply_decision("tactical", result, state)
+                                self._apply_decision("tactical", result, state, delta, big_event)
                         elif (
                             level < 3
                             and self.activity_runner.current is None

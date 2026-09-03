@@ -34,6 +34,17 @@ Changelog:
   Every wrapper's underlying native hash was verified by reading the pinned SHVDN 3.7.0.189 DLL's
   IL with `System.Reflection.Metadata` (the table is in fix-opus-b's T6 report and in
   `bridge/src/WeaponState.cs`). NOT VERIFIED in-game: all of it — see `docs/findings.md` T6.
+  **§1 also gains `flee_ped` `{handle}`** (fix-opus-a, T1): `TASK_SMART_FLEE_PED`, the on-foot
+  counterpart of `fight_ped`, reusing the same frozen `handle` wire key — see the task table.
+  **Two new failure details** (T1, the drive-start sequence): `"not_in_drivers_seat"` — a drive task
+  was issued at a ped who is not in seat −1 (`IS_PED_IN_VEHICLE(ped, veh, false)` and
+  `GET_PED_IN_VEHICLE_SEAT(veh, -1)` both checked; no task is issued); `"drive_did_not_start"` — the
+  drive task was alive 2 s after one bridge-side re-issue and `vehicle.speed` was still 0. The engine
+  is switched on (`SET_VEHICLE_ENGINE_ON`) before every drive task and the cruise speed set after it.
+  A drive task the game clears is re-issued ONCE before `"cleared_by_game"` is reported, so the
+  harness's `ClearedByGameBackoff` still sees the same detail string. `walk_to`'s `run: true` is now
+  move-blend 3.0 (sprint) rather than 2.0 — a bridge-side tuning of a frozen flag, same class as the
+  driving-style bit values. NOT VERIFIED in-game: all of it — see `docs/findings.md` T1.
 - v1.13 (additive; bridge 1.5.0 → **1.6.0**). **THE PHONE.** `/state` gains
   `phone` = `{"ringing": bool, "in_call": bool}`, and §1 gains two task types, `answer_call` and
   `reject_call`, both `{}`.
@@ -411,6 +422,7 @@ values empirically (Phase 3) without a contract change.
 | `seek_cover` | `{duration_s: 10}` | cover reached or timeout |
 | `follow_entity` | `{handle, in_vehicle: bool, style: "ignore_lights", speed_mps: 30.0}` | runs until preempted or entity gone (`failed`, `"target_lost"`). `style`/`speed_mps` apply to the in-vehicle tail only; on foot he always runs. Defaults keep pace with a mission NPC — see v1.9 |
 | `fight_ped` | `{handle}` | v1.11. Fight ONE named ped; the bridge picks melee vs combat from the target's `weapon_class`. `failed`/`"target_lost"` if the handle does not resolve; `done` when the target is dead or gone. Needs no relationship setup, unlike `combat_hated_targets_around` |
+| `flee_ped` | `{handle}` | v1.14. Run from ONE named ped (`TASK_SMART_FLEE_PED`), the on-foot counterpart of `fight_ped`, same frozen `handle` key. `done` when the player is 200 m clear or the target is dead/gone; `failed`/`"target_lost"` on a handle that does not resolve; `failed`/`"timeout"` after 120 s. Distinct from `flee_police`, which is coord-based off the last police-spotted position |
 | `set_waypoint` | `{x, y}` | immediate (`done` same tick); map waypoint only, no movement |
 | `stop` | `{}` | clears current task → `idle` |
 | `answer_call` | `{}` | v1.13. Answers the RINGING call by injecting `Control.PhoneSelect` every tick until `phone.in_call` is true. `done` when connected; `failed`/`"not_ringing"` immediately if nothing is ringing; `failed`/`"unanswered"` after ~6 s. **Answering a story call starts a mission.** |

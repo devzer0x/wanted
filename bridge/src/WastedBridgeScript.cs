@@ -13,7 +13,7 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.6.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        public const string BridgeVersion = "1.7.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
         // v1.3.0: CONTRACTS v1.11 (part 1) - mission.entity_blips[] (entity-attached blips,
         // throttled ~4 Hz); driving overhaul: driveAgainstTraffic explicit false on the new
         // StartVehicleMission call, avoid_traffic retuned off the brake-free
@@ -42,6 +42,16 @@ namespace WastedBridge
         // at all). Built because the operator watched Simeon call the agent on stream with no way to
         // accept or refuse: answering a story call STARTS a mission, so this is the control the
         // harness's missions-off switch needs in order to mean anything.
+        // v1.7.0: CONTRACTS proposal v1.14 - weapons and the targeted-violence verbs.
+        // /state gains `player.weapon` {name, class, ammo, owned, loadout}, `vehicle.in_air`
+        // (IS_ENTITY_IN_AIR - the field that makes a jump gradeable) and `vehicle.seat`
+        // ("driver"|"passenger"). Three new §1 task types: `shoot_at` (TASK_SHOOT_AT_ENTITY),
+        // `drive_by` (TASK_DRIVE_BY - UNVERIFIED on a player ped, see TaskEngine) and
+        // `enter_vehicle_seat` (TASK_ENTER_VEHICLE with a passenger seat, which is what a taxi
+        // ride is). `fight_ped` gains a `weapon` param (auto|unarmed|armed) so starting something
+        // with a stranger stays a fist fight. The Ammu-Nation loadout exists in WeaponState and
+        // is OFF unless WASTED_BRIDGE_LOADOUT=ammunation - CONTRACTS §1's frozen safety rule says
+        // there is no weapon-giving, and that rule wins until it is formally changed.
 
         private const float UnstickMinStoppedS = 20f;
         private const float UnstickNudgeBackM = 2.5f;   // total displacement stays ≤ 3 m (contract)
@@ -69,6 +79,8 @@ namespace WastedBridge
         // only called on a change, not every one of ~47 ticks/s.
         private bool? _lastLeaveVehicleAttribute;
         private int _lastCombatAttributeErrorAt = int.MinValue;
+        // v1.7.0: throttle for the weapon-maintenance error log, same pattern as the rest.
+        private int _lastWeaponErrorAt = int.MinValue;
 
         public WastedBridgeScript()
         {
@@ -196,6 +208,24 @@ namespace WastedBridge
             if (!dead)
             {
                 SyncLeaveVehicleAttribute(playerPed);
+            }
+
+            // v1.7.0: keep the loadout topped up at session start and after every death. A no-op
+            // (not one native call) unless WASTED_BRIDGE_LOADOUT=ammunation - see WeaponState for
+            // why that is the default. Wrapped like every other per-tick maintenance call: a
+            // weapon-inventory failure must never cost the snapshot.
+            try
+            {
+                WeaponState.Maintain(playerPed, dead);
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastWeaponErrorAt) > ErrorLogIntervalMs)
+                {
+                    _lastWeaponErrorAt = now;
+                    BridgeLog.Error("weapon loadout maintenance failed; he keeps what he has", ex);
+                }
             }
 
             try

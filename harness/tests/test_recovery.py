@@ -21,6 +21,7 @@ from wasted_harness.behavior.recovery import (
     DAMAGE_WINDOW_S,
     DEAD_STUCK_TIMEOUT_S,
     HOSTILE_CLOSE_RADIUS_M,
+    JACK_HANDOFF_GRACE_S,
     MAX_STALL_RECOVERY_ATTEMPTS,
     SCRIPT_STALL_TIMEOUT_S,
     STALL_INTERVENTION_GAP_S,
@@ -30,22 +31,26 @@ from wasted_harness.behavior.recovery import (
     STATIONARY_TASK_TYPES,
     STRANDED_RADII_M,
     THREAT_HOLD_S,
+    WATER_TIMEOUT_S,
     ApiBackoff,
     BlockingScreenWatchdog,
     BridgeStallTracker,
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
+    JackHandoffGate,
     OffLoopGrab,
+    RoadDodge,
     StrandedEscalator,
     StuckDetector,
     TaskStallDetector,
     ThreatLatch,
+    WaterEscalator,
     classify_api_failure,
     flipped_action,
     threat_action,
 )
-from wasted_harness.bridge_client import BridgeApiError, BridgeTransientError, GameState
+from wasted_harness.bridge_client import BridgeApiError, BridgeTransientError, GameState, Vec3
 from wasted_harness.perception import Delta
 
 
@@ -347,6 +352,145 @@ def test_flipped_action(upside_down: bool, speed: float, expected: str | None) -
     }
     action = flipped_action(make_state(in_vehicle=True, vehicle=vehicle))
     assert (action or {}).get("type") == expected
+
+
+# --- T9 (findings.md R1/R5): WaterEscalator, RoadDodge, JackHandoffGate ------------------------
+
+
+def _water_vehicle(**over: Any) -> dict[str, Any]:
+    base = {
+        "handle": 1, "model": "squalo", "display_name": "Squalo", "class": "Boats",
+        "speed": 0.0, "health": 900.0, "upside_down": False, "in_water": True,
+        "stopped_for_s": 5.0,
+    }
+    base.update(over)
+    return base
+
+
+def test_water_escalator_exits_only_after_the_timeout() -> None:
+    clock = FakeClock()
+    esc = WaterEscalator(clock=clock)
+    state = make_state(in_vehicle=True, vehicle=_water_vehicle())
+    assert esc.check(state) is None, "under the timeout: nothing yet"
+    clock.t += WATER_TIMEOUT_S - 0.1
+    assert esc.check(state) is None
+    clock.t += 0.2
+    action = esc.check(state)
+    assert action == {"type": "exit_vehicle", "params": {}}
+
+
+def test_water_escalator_walks_toward_last_outdoor_after_exiting() -> None:
+    clock = FakeClock()
+    esc = WaterEscalator(clock=clock)
+    in_water = make_state(in_vehicle=True, vehicle=_water_vehicle())
+    assert esc.check(in_water) is None, "arms the timer; nothing yet"
+    clock.t += WATER_TIMEOUT_S + 1.0
+    assert esc.check(in_water) == {"type": "exit_vehicle", "params": {}}
+
+    on_foot = make_state(in_vehicle=False)
+    on_foot.player.last_outdoor = Vec3(x=10.0, y=20.0, z=30.0)
+    clock.t += 1.0
+    action = esc.check(on_foot)
+    assert action == {
+        "type": "walk_to",
+        "params": {"x": 10.0, "y": 20.0, "z": 30.0, "run": True},
+    }
+    # One walk order per bout, not one every tick.
+    clock.t += 1.0
+    assert esc.check(on_foot) is None
+
+
+def test_water_escalator_says_so_honestly_with_no_last_outdoor() -> None:
+    clock = FakeClock()
+    esc = WaterEscalator(clock=clock)
+    in_water = make_state(in_vehicle=True, vehicle=_water_vehicle())
+    esc.check(in_water)
+    clock.t += WATER_TIMEOUT_S + 1.0
+    esc.check(in_water)
+    on_foot = make_state(in_vehicle=False)  # last_outdoor defaults to None
+    clock.t += 1.0
+    assert esc.check(on_foot) is None, "no shore data and no last_outdoor: nothing to guess"
+
+
+def test_water_escalator_does_nothing_dry() -> None:
+    esc = WaterEscalator()
+    dry = _water_vehicle(in_water=False)
+    assert esc.check(make_state(in_vehicle=True, vehicle=dry)) is None
+
+
+def _npc_vehicle(handle: int, x: float, y: float, *, driver: str = "npc", distance: float = 5.0) -> dict[str, Any]:
+    return {
+        "handle": handle, "model": "blista", "display_name": "Blista", "class": "Compact",
+        "distance": distance, "driver": driver, "pos": {"x": x, "y": y, "z": 0.0},
+    }
+
+
+def test_road_dodge_fires_when_a_close_vehicle_closes_fast() -> None:
+    clock = FakeClock()
+    dodge = RoadDodge(clock=clock)
+    far = make_state(in_vehicle=False, nearby_vehicles=[_npc_vehicle(1, 0.0, 20.0, distance=20.0)])
+    assert dodge.check(far) is None, "first tick: nothing to derive a closing speed from yet"
+    clock.t += 1.0
+    # A second closer than ROAD_DODGE_RADIUS_M, having covered well over
+    # ROAD_DODGE_CLOSING_MPS metres in that one second.
+    close = make_state(in_vehicle=False, nearby_vehicles=[_npc_vehicle(1, 0.0, 5.0, distance=5.0)])
+    action = dodge.check(close)
+    assert action is not None
+    assert action["type"] == "walk_to"
+    assert action["params"]["run"] is True
+    # Stepped AWAY from the vehicle (negative y: the vehicle is at y=5 and he is at y=0,
+    # so away-from-it is further toward negative y).
+    assert action["params"]["y"] < 0.0
+
+
+def test_road_dodge_ignores_a_parked_or_distant_vehicle() -> None:
+    clock = FakeClock()
+    dodge = RoadDodge(clock=clock)
+    dodge.check(make_state(in_vehicle=False, nearby_vehicles=[_npc_vehicle(1, 0.0, 20.0, distance=20.0)]))
+    clock.t += 1.0
+    # Barely moved: under ROAD_DODGE_CLOSING_MPS.
+    barely = make_state(in_vehicle=False, nearby_vehicles=[_npc_vehicle(1, 0.0, 19.5, distance=19.5)])
+    assert dodge.check(barely) is None
+
+
+def test_road_dodge_ignores_the_players_own_vehicle_and_empty_cars() -> None:
+    clock = FakeClock()
+    dodge = RoadDodge(clock=clock)
+    dodge.check(make_state(in_vehicle=False, nearby_vehicles=[_npc_vehicle(1, 0.0, 20.0, driver="player", distance=20.0)]))
+    clock.t += 1.0
+    close = make_state(in_vehicle=False, nearby_vehicles=[_npc_vehicle(1, 0.0, 5.0, driver="player", distance=5.0)])
+    assert dodge.check(close) is None, "his own car closing on him is not a road hazard"
+
+
+def test_road_dodge_never_fires_while_seated() -> None:
+    dodge = RoadDodge()
+    seated = make_state(
+        in_vehicle=True,
+        vehicle={
+            "handle": 9, "model": "adder", "display_name": "Adder", "class": "Super",
+            "speed": 10.0, "health": 900.0, "upside_down": False, "in_water": False,
+            "stopped_for_s": 0.0,
+        },
+        nearby_vehicles=[_npc_vehicle(1, 0.0, 2.0, distance=2.0)],
+    )
+    assert dodge.check(seated) is None
+
+
+def test_jack_handoff_gate_holds_for_the_grace_window_after_being_jacked() -> None:
+    clock = FakeClock()
+    gate = JackHandoffGate(clock=clock)
+    jacked = make_state(threat={"attacker_handle": None, "being_jacked_by": 555})
+    assert gate.feed(jacked) is True
+    clear = make_state(threat={"attacker_handle": None, "being_jacked_by": None})
+    clock.t += JACK_HANDOFF_GRACE_S - 0.5
+    assert gate.feed(clear) is True, "still inside the grace window"
+    clock.t += 1.0
+    assert gate.feed(clear) is False, "grace window over: stranded may act again"
+
+
+def test_jack_handoff_gate_is_false_when_nothing_was_ever_jacked() -> None:
+    gate = JackHandoffGate()
+    assert gate.feed(make_state()) is False
 
 
 # --- bridge up but not ready (CONTRACTS v1.2 transient 503s) ------------------
@@ -1651,3 +1795,15 @@ def test_other_failures_do_not_trigger_the_backoff() -> None:
     b = ClearedByGameBackoff(clock=FakeClock())
     assert b.feed(_task_state("t1", "drive_to", "failed", "timeout")) is None
     assert b.refuses("drive_to") == 0.0, "a timeout is the stall detector's business, not this one's"
+
+
+def test_the_stars_only_rung_stands_down_when_the_goal_wants_the_heat() -> None:
+    """Soak finding (2026-09-03): `earn_two_stars` fired its drive-by, got its star,
+    and this rung fled on the next poll — preempting the goal that wanted it. Only
+    the wanted-alone rung yields; being hit still gets the fight/leave rungs."""
+    calm = Delta(wanted_from=0, wanted_to=1, big_health_drop=False)
+    one_star = make_state(in_vehicle=True, wanted=1, health=200)
+    assert threat_action(one_star, calm, False) == {"type": "flee_police", "params": {}}
+    assert threat_action(one_star, calm, False, heat_wanted=True) is None
+    hurt = Delta(wanted_from=1, wanted_to=1, big_health_drop=True)
+    assert threat_action(one_star, hurt, True, heat_wanted=True) is not None

@@ -25,11 +25,13 @@ from ..budget import Pricing
 from ..events import UNPRODUCED_EVENT_TYPES
 from ..logsetup import get_logger
 from .prompts import director_static_prefix
+from .schemas import DecisionValidationContext, sanitize_decision, validate_decision_content
 from .tactical import (
     DIRECTOR_MAX_DECISION_TOKENS,
     BilledCall,
     DecisionFailedError,
     DecisionResult,
+    _content_retry_correction,
     _retry_correction,
 )
 
@@ -118,10 +120,17 @@ class DirectorBrain:
         dynamic_context: str,
         screenshot_jpeg: bytes | None = None,
         screenshot_trigger: str | None = None,
+        validation_ctx: DecisionValidationContext | None = None,
     ) -> DecisionResult:
         """One director decision. A screenshot is attached only when its trigger
         is contracted; passing one without a valid trigger is a programming
-        error and raises immediately (no silent extra vision spend)."""
+        error and raises immediately (no silent extra vision spend).
+
+        `validation_ctx` (T4, findings.md): same content-validation, same
+        one-regenerate-then-sanitize policy as `TacticalBrain.decide` — see
+        that docstring. The director is the tier that actually WRITES
+        `current_goal` (main._apply_decision), so a `goal` naming no offered
+        roam id matters here too, not just for the tactical tier."""
         if screenshot_jpeg is not None and screenshot_trigger not in VISION_TRIGGERS:
             raise ValueError(
                 f"screenshot attached with trigger {screenshot_trigger!r}, which is "
@@ -131,7 +140,7 @@ class DirectorBrain:
         context = dynamic_context
         for attempt in (1, 2):
             try:
-                return self._call(context, screenshot_jpeg)
+                result = self._call(context, screenshot_jpeg)
             except (anthropic.APIError, pydantic.ValidationError, ValueError) as exc:
                 last_exc = exc
                 log.warning(
@@ -143,6 +152,20 @@ class DirectorBrain:
                     # schema violation. Feed the validator's complaint back.
                     context = dynamic_context + _retry_correction(exc)
                     time.sleep(1.0)
+                continue
+            if validation_ctx is not None:
+                violation = validate_decision_content(result.decision, validation_ctx)
+                if violation:
+                    log.warning(
+                        "director decision content rejected by the output validator",
+                        extra={"kv": {"attempt": attempt, "violation": violation.describe()}},
+                    )
+                    if attempt == 1:
+                        context = dynamic_context + _content_retry_correction(violation)
+                        time.sleep(1.0)
+                        continue
+                    result.decision = sanitize_decision(result.decision, violation)
+            return result
         raise DecisionFailedError(
             f"director decision failed twice (last error: "
             f"{type(last_exc).__name__}: {last_exc})"

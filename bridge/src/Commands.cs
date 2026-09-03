@@ -24,6 +24,16 @@ namespace WastedBridge
         public float DurationS;             // seek_cover
         public int Handle;                  // follow_entity
         public bool InVehicle;              // follow_entity
+
+        // --- bridge 1.7.0 (fix-opus-b, T6) ---------------------------------------------------
+        // fight_ped: "auto" | "unarmed" | "armed". Default "auto" is byte-for-byte the v1.11
+        // behaviour (melee vs ranged chosen from the TARGET's weapon class), so a caller that
+        // never heard of the field gets exactly what it used to.
+        public string WeaponMode;
+        // enter_vehicle_seat: 0 front passenger, 1 rear-left, 2 rear-right. The DRIVER's seat
+        // (-1) is deliberately unreachable through this task - that is enter_nearest_vehicle,
+        // which has the "nicer" chooser and the seat verification that go with driving.
+        public int Seat;
     }
 
     /// <summary>

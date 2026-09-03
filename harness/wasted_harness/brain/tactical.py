@@ -27,7 +27,13 @@ from ..logsetup import get_logger
 from ..perception import Delta
 from ..settings import ConfigError, Settings
 from .prompts import director_static_prefix, tactical_static_prefix
-from .schemas import DecisionModel
+from .schemas import (
+    DecisionModel,
+    DecisionValidationContext,
+    DecisionViolation,
+    sanitize_decision,
+    validate_decision_content,
+)
 
 log = get_logger("wasted.brain.tactical")
 
@@ -305,6 +311,28 @@ def _retry_correction(exc: Exception) -> str:
     )
 
 
+def _content_retry_correction(violation: DecisionViolation) -> str:
+    """T4's corrective note: the single regenerate a content violation gets.
+
+    Distinct from :func:`_retry_correction` because the fix on offer is
+    different — nothing here is a word-count problem, so the word-limit
+    coaching paragraph never belongs on it. If the regenerate ALSO violates,
+    the caller sanitizes (drops the line, keeps the action) rather than
+    treating it like a schema failure and discarding the whole decision.
+    """
+    return (
+        "\n\nRETRY — your previous response was REJECTED by the output validator:\n"
+        f"  {violation.describe()}\n"
+        "Fix exactly that and return the decision again. Recheck: every name in "
+        "`say`/`thought` must belong to someone in STATE right now; a mission name "
+        "you use must match the identified mission exactly; do not use a banned "
+        "phrase; do not repeat a recent line under a new wording; and if a ROAM "
+        "AVAILABLE menu was shown, `goal` must be exactly one of the offered ids, "
+        "nothing else. A second miss means this line is dropped and only the "
+        "action goes out.\n"
+    )
+
+
 #: The decision schema in the wire form the API wants, built once. This is the
 #: exact transform `client.messages.parse()` applies internally
 #: (anthropic 1.0.0, resources/messages/messages.py); `transform_schema` is
@@ -408,7 +436,12 @@ class TacticalBrain:
         self._prefix = tactical_static_prefix()
         self._call_api = BilledCall(client, pricing, on_cost)
 
-    def decide(self, dynamic_context: str, mission_active: bool = False) -> DecisionResult:
+    def decide(
+        self,
+        dynamic_context: str,
+        mission_active: bool = False,
+        validation_ctx: DecisionValidationContext | None = None,
+    ) -> DecisionResult:
         """One structured decision. Retries once on validation/API failure, then
         raises DecisionFailedError (reflex keeps control, per CONTRACTS §2).
 
@@ -422,12 +455,23 @@ class TacticalBrain:
         being made on — selects the mission-time tactical model (WP-C) when the
         caller's pricing.yaml configures one. Absent config or `mission_active=False`
         falls straight back through to the normal tactical tier: identical to
-        today's behaviour."""
+        today's behaviour.
+
+        `validation_ctx` (T4, findings.md) — when given, a decision that PARSES
+        but whose content violates the output validator (a name not in STATE,
+        a wrong mission name, a banned phrase, a near-repeat, or — with a roam
+        menu on offer — a `goal` that names no offered id) gets the SAME one
+        regenerate a schema violation gets, using the second (and last)
+        attempt. If the regenerate still violates, the line is sanitized
+        (`say` dropped, `goal` left for the roam engine's own fallback) and
+        the decision is returned rather than discarded — the action always
+        goes out. `None` skips content validation entirely (tests, or a
+        caller with no world snapshot to check against)."""
         last_exc: Exception | None = None
         context = dynamic_context
         for attempt in (1, 2):
             try:
-                return self._call(context, mission_active)
+                result = self._call(context, mission_active)
             except (anthropic.APIError, pydantic.ValidationError, ValueError) as exc:
                 last_exc = exc
                 log.warning(
@@ -437,6 +481,20 @@ class TacticalBrain:
                 if attempt == 1:
                     context = dynamic_context + _retry_correction(exc)
                     time.sleep(0.5)
+                continue
+            if validation_ctx is not None:
+                violation = validate_decision_content(result.decision, validation_ctx)
+                if violation:
+                    log.warning(
+                        "tactical decision content rejected by the output validator",
+                        extra={"kv": {"attempt": attempt, "violation": violation.describe()}},
+                    )
+                    if attempt == 1:
+                        context = dynamic_context + _content_retry_correction(violation)
+                        time.sleep(0.5)
+                        continue
+                    result.decision = sanitize_decision(result.decision, violation)
+            return result
         raise DecisionFailedError(
             f"tactical decision failed twice; reflex layer keeps control "
             f"(last error: {type(last_exc).__name__}: {last_exc})"

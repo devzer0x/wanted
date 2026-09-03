@@ -39,14 +39,21 @@ from wasted_harness.behavior.recovery import (
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
+    JackHandoffGate,
     OffLoopGrab,
+    RoadDodge,
     StrandedEscalator,
     StuckDetector,
     TaskStallDetector,
     ThreatLatch,
+    WaterEscalator,
 )
 from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
-from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
+from wasted_harness.behavior.vehicle import (
+    ControlRegained,
+    MovementWheel,
+    VehicleController,
+)
 from wasted_harness.brain.director import DirectorCadence
 from wasted_harness.brain.tactical import DecisionFailedError, TacticalCadence
 from wasted_harness.bridge_client import (
@@ -128,6 +135,12 @@ def _harness(bridge: Any) -> Harness:
     h.totals = throwaway_totals()
     h.counters = h.totals.counters()
     h.current_goal = "test"
+    # T5 (findings.md R3): `goal_text`/`_validation_context` read this now.
+    h.current_mission = None
+    # T3: `_apply_decision` reads this; unset only means "no roam transition
+    # was drained this tick", the correct default for a harness that never
+    # called `_dynamic_context`.
+    h._tick_roam_transition = False
     h.session_id = "test-session"
     h._stop = threading.Event()
     h._last_stats = 0.0
@@ -380,12 +393,20 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     h.task_stall = TaskStallDetector()
     h.cleared_backoff = ClearedByGameBackoff()
     h.stranded = StrandedEscalator()
+    # T9 (findings.md R1/R5): production collaborators of a tick too — `_reflex`
+    # feeds all three every tick.
+    h.water = WaterEscalator()
+    h.road_dodge = RoadDodge()
+    h.jack_handoff = JackHandoffGate()
     h.threat_latch = ThreatLatch()
     h.damage = DamageTracker()
     # The vehicle-entry machine and the movement arbiter are production
     # collaborators of a tick, not scaffolding: `_reflex` feeds both.
     h.vehicle = VehicleController()
     h.wheel = MovementWheel()
+    # F6's stopwatch: `_reflex` feeds it every tick and `_execute_action` stops
+    # it on the line that posts, so a loop tick cannot run without one.
+    h.control_regained = ControlRegained()
     h.death_recovery = DeathArrestRecovery()
     h.blocking_screen_watchdog = BlockingScreenWatchdog()
     h.restart = GameRestartDetector()
@@ -413,6 +434,8 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     h._switch_in_progress = False
     h._retry_in_flight = False
     h._player_down = False
+    h._mission_active = False
+    h._wanted_now = 0
     h._threat_has_the_wheel = False
     h._screen_blocked = False
     h._thinking_dip_active = False
@@ -506,7 +529,7 @@ class _RaisingBrain:
     def _attempt(self) -> None:
         raise self._cause
 
-    def decide(self, _context: str, mission_active: bool = False):
+    def decide(self, _context: str, mission_active: bool = False, validation_ctx: Any = None):
         self.calls += 1
         try:
             self._attempt()

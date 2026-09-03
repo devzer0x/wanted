@@ -190,7 +190,10 @@ def test_the_catalog_states_what_he_cannot_do() -> None:
         assert "What you CANNOT do" in prefix
         assert "You cannot aim" in prefix
         assert "no special ability" in prefix.lower()
-        assert "cannot pick a weapon" in prefix
+        # Bridge 1.7.0 (T6) makes "you cannot pick a weapon" untrue — `fight_ped`
+        # now takes fists-or-gun — so the claim the prompt must still make is the
+        # one that stayed true: he cannot ACQUIRE one or open the wheel.
+        assert "cannot buy, find or open a weapon wheel" in prefix
 
 
 def test_the_police_rule_is_scoped_to_free_roam_not_absolute() -> None:

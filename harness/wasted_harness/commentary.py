@@ -29,6 +29,8 @@ from collections import deque
 from pathlib import Path
 
 from .brain.schemas import DecisionModel
+from .brain.schemas import jaccard_similarity as _jaccard_similarity
+from .brain.schemas import normalize_line as _normalize
 from .logsetup import get_logger
 
 log = get_logger("wasted.commentary")
@@ -236,26 +238,6 @@ class RecentLines:
             "LINES YOU ALREADY USED (do not repeat these, and do not rephrase "
             f"them — find a new angle):\n{body}"
         )
-
-
-def _normalize(line: str) -> str:
-    """Case/punctuation-insensitive form, so "Fine." and "fine" count as one."""
-    kept = "".join(ch if ch.isalnum() or ch.isspace() else " " for ch in line.lower())
-    return " ".join(kept.split())
-
-
-def _jaccard_similarity(a: str, b: str) -> float:
-    """Normalized-token-overlap similarity: |shared words| / |all words|.
-
-    Cheap, no model call, no new dependency — exactly what CLAUDE.md rule 1
-    and this feature's own brief ask for. Two empty (post-normalization)
-    lines are not similar to each other; there is nothing shared to measure.
-    """
-    wa = set(_normalize(a).split())
-    wb = set(_normalize(b).split())
-    if not wa or not wb:
-        return 0.0
-    return len(wa & wb) / len(wa | wb)
 
 
 class Commentary:

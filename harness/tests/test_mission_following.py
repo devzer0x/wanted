@@ -14,10 +14,13 @@ empty by design (CLAUDE.md rule 1: no hand-invented recordings).
 
 from __future__ import annotations
 
+import json
 import random
+import time
 from types import SimpleNamespace
 from typing import Any
 
+import httpx
 from support import throwaway_learned_scripts, throwaway_totals
 
 from wasted_harness.behavior.activities import ActivityPicker, ActivityRunner
@@ -45,17 +48,24 @@ from wasted_harness.behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    JackHandoffGate,
+    RoadDodge,
     StrandedEscalator,
     StuckDetector,
     TaskStallDetector,
     ThreatLatch,
+    WaterEscalator,
 )
 from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
-from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
+from wasted_harness.behavior.vehicle import (
+    ControlRegained,
+    MovementWheel,
+    VehicleController,
+)
 from wasted_harness.brain.schemas import BRIDGE_TASKS, MOVEMENT_TASKS
 from wasted_harness.brain.vision import MissionOutcome
-from wasted_harness.bridge_client import BridgeApiError, GameState
-from wasted_harness.main import INITIAL_GOAL, Harness
+from wasted_harness.bridge_client import BridgeApiError, BridgeClient, GameState
+from wasted_harness.main import INITIAL_GOAL, PHONE_HANGUP_AFTER_S, Harness
 from wasted_harness.perception import Delta
 
 VEHICLE = {
@@ -465,6 +475,8 @@ def _bare_harness(cutscene_active: bool, player_down: bool = False) -> Harness:
     h._switch_in_progress = False
     h._retry_in_flight = False
     h._player_down = player_down
+    h._mission_active = False
+    h._wanted_now = 0
     h._quiet_until = 0.0
     h._screen_blocked = False
     #: `_execute_action` also refuses a task type the stall detector has just
@@ -473,6 +485,9 @@ def _bare_harness(cutscene_active: bool, player_down: bool = False) -> Harness:
     #: THE GATE. A §1 bridge task without the wheel's current token never
     #: reaches the bridge, so a harness that can post one has to have a wheel.
     h.wheel = MovementWheel()
+    #: F6's stopwatch. `_execute_action` stops it on the one line that posts a
+    #: movement task, so the real method cannot run without one.
+    h.control_regained = ControlRegained()
     h.cleared_backoff = ClearedByGameBackoff()
     return h
 
@@ -665,6 +680,11 @@ class _ReflexStub:
         self.stuck = StuckDetector()
         self.task_stall = TaskStallDetector(clock=self.clock)
         self.stranded = StrandedEscalator()
+        #: T9 (findings.md R1/R5), on the stub's fake clock so a test can
+        #: advance time deliberately rather than race the wall clock.
+        self.water = WaterEscalator(clock=self.clock)
+        self.road_dodge = RoadDodge(clock=self.clock)
+        self.jack_handoff = JackHandoffGate(clock=self.clock)
         self.threat_latch = ThreatLatch(clock=self.clock)
         self.damage = DamageTracker(clock=self.clock)
         #: The vehicle-entry machine and the movement arbiter, both on the
@@ -672,6 +692,10 @@ class _ReflexStub:
         #: than race the wall clock.
         self.vehicle = VehicleController(clock=self.clock)
         self.wheel = MovementWheel(clock=self.clock)
+        #: F6's stopwatch, on the same fake clock: a test that lets three
+        #: seconds pass after a control-regained edge is asserting production
+        #: behaviour, not racing the wall clock.
+        self.control_regained = ControlRegained(clock=self.clock)
         self.cleared_backoff = ClearedByGameBackoff()
         #: Production wiring: what losing the wheel MEANS for each owner.
         self.wheel.on_preempt("roam", self._roam_preempted)
@@ -765,6 +789,9 @@ class _ReflexStub:
             f"(token={token}, held_by={self.wheel.owner})"
         )
         self.wheel.mark_posted(token, action_type)
+        # Production stops F6's stopwatch on the line that posts, and so does
+        # this: a stub that skipped it would report every edge unanswered.
+        self.control_regained.moved(action_type)
         self.posted.append((action_type, dict(params)))
         self.posted_owners.append((self.wheel.tick, token.owner, action_type))
         return "t-reflex-1"
@@ -2570,8 +2597,10 @@ def test_with_missions_off_the_brain_is_told_and_sees_no_job_markers() -> None:
     assert '"starts":[]' not in ctx_on.replace(" ", "")
 
 
-# -- the phone (CONTRACTS v1.13) ---------------------------------------------------------------
-# The executor that built the phone stopped at its turn limit before writing these.
+# -- the phone (T8, findings.md R6, CONTRACTS v1.13) -------------------------------------------
+# "it cant cut the call, check or accept whatever" / "calls are entertaining and can start
+# story": the reflex now ANSWERS every ring, missions on or off, and — missions off only —
+# hangs the call up again after a budget, or immediately during a fight/chase.
 
 
 def _phone_harness(missions_enabled: bool) -> Harness:
@@ -2579,53 +2608,158 @@ def _phone_harness(missions_enabled: bool) -> Harness:
 
     h = _bare_harness(cutscene_active=False)
     h.settings = SimpleNamespace(missions_enabled=missions_enabled)
-    h._phone_rejected_this_ring = False
+    h._phone_answered_this_ring = False
     h._phone_hung_up_this_call = False
+    h._phone_call_connected_at = None
+    h.phone_hangup_after_s = PHONE_HANGUP_AFTER_S
     return h
 
 
-def _phone_state(*, ringing: bool, in_call: bool) -> GameState:
-    return make_state(phone={"ringing": ringing, "in_call": in_call})
+def _phone_state(*, ringing: bool, in_call: bool, wanted: int = 0) -> GameState:
+    return make_state(phone={"ringing": ringing, "in_call": in_call}, wanted=wanted)
 
 
-def test_a_ringing_phone_is_refused_once_per_ring_while_missions_are_off() -> None:
-    h = _phone_harness(missions_enabled=False)
-    ringing = _phone_state(ringing=True, in_call=False)
-    h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, ringing) is True
-    assert [t for t, _ in h.bridge.posted] == ["reject_call"]
-    h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, ringing) is False, "one attempt per ring, not every tick"
-    assert len(h.bridge.posted) == 1
-    # the ring ends, a new one starts: the latch re-arms
-    h.wheel.begin_tick()
-    Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))
-    h.wheel.begin_tick()
-    assert Harness._phone_reflex(h, ringing) is True
-    assert len(h.bridge.posted) == 2
+def _phone_state_under_attack(handle: int = 9012) -> GameState:
+    """A connected call while `threat.attacker_handle` is live (a fight is on)."""
+    body = make_state(phone={"ringing": False, "in_call": True}).model_dump(by_alias=True)
+    body["threat"] = {"attacker_handle": handle, "being_jacked_by": None}
+    return GameState.model_validate(body)
 
 
-def test_a_connected_call_is_hung_up_once_while_missions_are_off() -> None:
-    """Some story calls auto-answer, and the reject soft key is hidden for a few. An
-    already-connected call must be ENDED (PhoneCancel is END CALL mid-call), once."""
+def test_a_ringing_phone_is_answered_once_per_ring_missions_on_or_off() -> None:
+    for missions_enabled in (False, True):
+        h = _phone_harness(missions_enabled=missions_enabled)
+        ringing = _phone_state(ringing=True, in_call=False)
+        h.wheel.begin_tick()
+        assert Harness._phone_reflex(h, ringing) is True
+        assert [t for t, _ in h.bridge.posted] == ["answer_call"]
+        h.wheel.begin_tick()
+        assert Harness._phone_reflex(h, ringing) is False, "one attempt per ring, not every tick"
+        assert len(h.bridge.posted) == 1
+        # the ring ends, a new one starts: the latch re-arms
+        h.wheel.begin_tick()
+        Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))
+        h.wheel.begin_tick()
+        assert Harness._phone_reflex(h, ringing) is True
+        assert len(h.bridge.posted) == 2
+
+
+def test_with_missions_off_a_connected_call_is_hung_up_after_the_budget(monkeypatch) -> None:
+    import time as time_mod
+
+    now = {"t": 1_000_000.0}
+    monkeypatch.setattr(time_mod, "monotonic", lambda: now["t"])
     h = _phone_harness(missions_enabled=False)
     live = _phone_state(ringing=False, in_call=True)
+
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is False, "still inside the budget"
+    assert h.bridge.posted == []
+
+    now["t"] += PHONE_HANGUP_AFTER_S + 0.1
     h.wheel.begin_tick()
     assert Harness._phone_reflex(h, live) is True
     assert [t for t, _ in h.bridge.posted] == ["reject_call"]
+
     h.wheel.begin_tick()
     assert Harness._phone_reflex(h, live) is False, "latched: one hang-up per call"
     assert len(h.bridge.posted) == 1
+
+    # the call ends and a new one connects: the budget and the latch both re-arm
     h.wheel.begin_tick()
-    Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))  # call over -> re-arm
+    Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is False, "a fresh call gets its own full budget"
+    now["t"] += PHONE_HANGUP_AFTER_S + 0.1
     h.wheel.begin_tick()
     assert Harness._phone_reflex(h, live) is True
     assert len(h.bridge.posted) == 2
 
 
-def test_with_missions_on_the_phone_is_left_to_the_brain() -> None:
+def test_with_missions_off_a_connected_call_is_hung_up_immediately_during_a_fight() -> None:
+    h = _phone_harness(missions_enabled=False)
+    live = _phone_state_under_attack()
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is True, "fighting for his life outranks the budget"
+    assert [t for t, _ in h.bridge.posted] == ["reject_call"]
+
+
+def test_with_missions_off_a_connected_call_is_hung_up_immediately_during_a_chase() -> None:
+    h = _phone_harness(missions_enabled=False)
+    live = _phone_state(ringing=False, in_call=True, wanted=2)
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is True, "a live chase outranks the budget too"
+    assert [t for t, _ in h.bridge.posted] == ["reject_call"]
+
+
+def test_with_missions_on_the_phone_is_still_answered_but_never_hung_up(monkeypatch) -> None:
+    import time as time_mod
+
+    now = {"t": 2_000_000.0}
+    monkeypatch.setattr(time_mod, "monotonic", lambda: now["t"])
     h = _phone_harness(missions_enabled=True)
-    for st in (_phone_state(ringing=True, in_call=False), _phone_state(ringing=False, in_call=True)):
+
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, _phone_state(ringing=True, in_call=False)) is True
+    assert [t for t, _ in h.bridge.posted] == ["answer_call"]
+
+    # Connected, and well past what would be the missions-off hang-up budget:
+    # missions on means the story owns this call and nothing here ends it.
+    now["t"] += PHONE_HANGUP_AFTER_S * 10
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, _phone_state_under_attack()) is False
+    assert [t for t, _ in h.bridge.posted] == ["answer_call"], "no automatic hang-up when jobs are allowed"
+
+
+def test_a_phone_reflex_post_reaches_the_real_bridge_client_not_just_the_fake() -> None:
+    """Regression (found by fix-opus-b): `answer_call`/`reject_call` were
+    missing from `bridge_client.BRIDGE_TASK_TYPES`, so the REAL
+    `BridgeClient.post_task` raised `ValueError('not a bridge task')` before
+    any I/O ever happened — `_phone_reflex` was posting the right verb and
+    `BridgeClient` was throwing it away one line later, client-side. That is
+    the literal bug behind the operator's "it cant cut the call".
+
+    `_bare_harness`'s `_FakeBridge` records blindly and never exercises that
+    validation at all, so it could not have caught this — this test drives a
+    REAL `BridgeClient` through an `httpx.MockTransport` instead: a genuine
+    recording bridge, on the exact code path the bug was in.
+    """
+    calls: list[tuple[str, dict[str, Any]]] = []
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        body = json.loads(request.content)
+        calls.append((body["type"], body.get("params", {})))
+        return httpx.Response(202, json={"task_id": "t-real-1"})
+
+    client = BridgeClient(timeout_s=0.5, connect_retries=0)
+    client._client = httpx.Client(base_url=client.base_url, transport=httpx.MockTransport(handler))
+    try:
+        h = _phone_harness(missions_enabled=False)
+        h.bridge = client
+        # A connected call during a chase: hangs up immediately (T8), which
+        # means `reject_call` must reach `post_task` on THIS tick.
+        live = _phone_state(ringing=False, in_call=True, wanted=2)
         h.wheel.begin_tick()
-        assert Harness._phone_reflex(h, st) is False
-    assert h.bridge.posted == [], "no automatic answer or refusal when jobs are allowed"
+        assert Harness._phone_reflex(h, live) is True
+        assert calls == [("reject_call", {})]
+
+        # And the answer half of the same path, on a fresh ring.
+        calls.clear()
+        h.wheel.begin_tick()
+        assert Harness._phone_reflex(h, _phone_state(ringing=True, in_call=False)) is True
+        assert calls == [("answer_call", {})]
+    finally:
+        client.close()
+
+
+def test_a_wait_in_free_roam_with_control_is_ignored() -> None:
+    """Seen on stream and in the soak: a completed goal, a stopped car, and the
+    brain says `wait` — which held the drive-away AND the next goal pick, and the
+    next think said `wait` again. In free roam with control, `wait` is a no-op."""
+    h = _bare_harness(cutscene_active=False)
+    assert Harness._execute_action(h, "wait", {"seconds": 12}) is None
+    assert h._quiet_until == 0.0
+    # ...but with something to wait for it is honoured, capped at 30 s.
+    h._wanted_now = 1
+    Harness._execute_action(h, "wait", {"seconds": 90})
+    assert 0.0 < h._quiet_until <= time.monotonic() + 30.0 + 0.01

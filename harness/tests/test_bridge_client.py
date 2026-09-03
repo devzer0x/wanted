@@ -69,4 +69,26 @@ def test_bridge_task_types_match_contract() -> None:
         "fight_ped",
         "set_waypoint",
         "stop",
+        # Bridge 1.7.0 (fix-opus-b, T6). `attack_ped` is deliberately NOT here:
+        # it would be the same native and the same param as `fight_ped`'s ranged
+        # arm, so the weapon choice ships as `fight_ped {weapon}` instead.
+        "shoot_at",
+        "drive_by",
+        "enter_vehicle_seat",
+        # T8 (findings.md R6), CONTRACTS v1.13. FIXED here: these two were in
+        # `brain.schemas.BRIDGE_TASKS` and issued by `main._phone_reflex` all
+        # along but were never added to THIS tuple, so every phone-reflex post
+        # raised ValueError("not a bridge task") client-side before any I/O —
+        # the literal bug behind the operator's "it cant cut the call".
+        "answer_call",
+        "reject_call",
+        # bridge 1.7.0 (fix-opus-a, T1), CONTRACTS v1.14.
+        "flee_ped",
     )
+
+
+def test_phone_tasks_are_real_bridge_tasks_not_primitives() -> None:
+    """The regression test for the bug above: both verbs must actually reach
+    `post_task` without `BridgeClient` rejecting them client-side first."""
+    assert "answer_call" in BRIDGE_TASK_TYPES
+    assert "reject_call" in BRIDGE_TASK_TYPES

@@ -204,7 +204,8 @@ namespace WastedBridge
             return BridgeResponse.FromJson(202, new JObject { ["task_id"] = req.Id });
         }
 
-        /// <summary>Validates params for all 14 CONTRACTS §1 task types; no natives involved.</summary>
+        /// <summary>Validates params for all 14 CONTRACTS §1 task types, plus the proposed flee_ped;
+        /// no natives involved.</summary>
         private static bool TryBuildTaskRequest(string type, JObject p, out TaskRequest req,
                                                 out string error, out string detail)
         {
@@ -336,6 +337,76 @@ namespace WastedBridge
                     if (!TryInt(p, "handle", out req.Handle))
                     {
                         return Invalid(out error, out detail, "fight_ped requires integer handle");
+                    }
+                    // Bridge 1.7.0 (fix-opus-b, T6): optional weapon mode. Absent means "auto",
+                    // which is exactly v1.11's behaviour, so no existing caller changes. An
+                    // unknown value is a 400 rather than a silent fallback: "unarmed" and "armed"
+                    // are the difference between a fist fight and a shooting, and quietly picking
+                    // one because the caller misspelled the other is not a safe degradation.
+                    req.WeaponMode = OptString(p, "weapon", "auto");
+                    if (req.WeaponMode != "auto" && req.WeaponMode != "unarmed"
+                        && req.WeaponMode != "armed")
+                    {
+                        return Invalid(out error, out detail,
+                            "weapon must be \"auto\", \"unarmed\" or \"armed\"");
+                    }
+                    return true;
+                }
+                case "flee_ped":
+                {
+                    // The on-foot counterpart of fight_ped (TASK_SMART_FLEE_PED - see
+                    // TaskEngine.StartFleePed), validated identically and reusing the same frozen
+                    // "handle" wire key. PROPOSED for CONTRACTS v1.14, not in v1.13: the harness
+                    // cannot post it until brain/schemas.py and the action catalog list it, and
+                    // those are another package's files. Accepting it here is what makes the
+                    // bridge half of that change deployable and testable on its own.
+                    if (!TryInt(p, "handle", out req.Handle))
+                    {
+                        return Invalid(out error, out detail, "flee_ped requires integer handle");
+                    }
+                    return true;
+                }
+                // --- bridge 1.7.0 (fix-opus-b, T6) ------------------------------------------
+                case "shoot_at":
+                case "drive_by":
+                {
+                    // Both are target-explicit and both reuse follow_entity's already-frozen
+                    // "handle" wire key. WHICH WEAPON is deliberately NOT a parameter: it is
+                    // chosen bridge-side from the range at task start (WeaponState.SelectForRange
+                    // / SelectForDriveBy), read fresh, because the harness's snapshot is up to a
+                    // poll period old - the same reasoning fight_ped already documents for
+                    // reading the target's weapon class.
+                    if (!TryInt(p, "handle", out req.Handle))
+                    {
+                        return Invalid(out error, out detail, type + " requires integer handle");
+                    }
+                    req.DurationS = OptFloat(p, "duration_s", type == "drive_by" ? 12f : 8f);
+                    if (req.DurationS <= 0f || req.DurationS > 60f)
+                    {
+                        return Invalid(out error, out detail,
+                            "duration_s must be between 0 and 60 seconds");
+                    }
+                    return true;
+                }
+                case "enter_vehicle_seat":
+                {
+                    if (!TryInt(p, "handle", out req.Handle))
+                    {
+                        return Invalid(out error, out detail,
+                            "enter_vehicle_seat requires integer handle");
+                    }
+                    if (!TryInt(p, "seat", out req.Seat))
+                    {
+                        req.Seat = 2;   // rear-right: where the game's own cab AI seats a player
+                    }
+                    if (req.Seat < 0 || req.Seat > 2)
+                    {
+                        // The driver's seat is NOT reachable from here (see TaskRequest.Seat):
+                        // "get in and drive" is enter_nearest_vehicle, which has the "nicer"
+                        // chooser and the seat verification that belong with driving.
+                        return Invalid(out error, out detail,
+                            "seat must be 0 (front passenger), 1 (rear-left) or 2 (rear-right); "
+                            + "the driver's seat is enter_nearest_vehicle");
                     }
                     return true;
                 }

@@ -52,6 +52,7 @@ harness is the only way `done_when` can tell an upgrade from the fallback.
 from __future__ import annotations
 
 import collections
+import os
 import random
 import time
 from collections.abc import Callable
@@ -60,7 +61,13 @@ from typing import Any
 
 from ..bridge_client import GameState, NearbyVehicle
 from ..logsetup import get_logger
-from .activities import CHAOS_BUDGET_PER_HOUR, LANDMARKS, Activity
+from .activities import (
+    CHAOS_BUDGET_PER_HOUR,
+    FREEWAY_ONRAMPS,
+    LANDMARKS,
+    STUNT_APPROACHES,
+    Activity,
+)
 from .navigation import planar_distance
 from .recovery import STALL_MOVE_M
 
@@ -75,13 +82,21 @@ log = get_logger("wasted.roam")
 #: locking free roam for `timeout_s` and then reporting a failure that was
 #: structurally guaranteed. Every entry names a specific bridge/contract change.
 UNBUILDABLE_GOALS: dict[str, str] = {
-    "big_jump": (
-        "no airtime. /state has no on-ground flag and no vertical velocity, and "
-        "at a 2-4 Hz poll a large z-delta is equally a jump, a hill, a car-park "
-        "ramp or a lift. The run-up IS expressible (and ships as `freeway_run`); "
-        "'he landed it' needs a bridge-side airtime field — the same gap "
-        "events.UNPRODUCED_EVENT_REASONS['stunt'] already documents."
-    ),
+    # `big_jump` WAS here ("no airtime. /state has no on-ground flag and no
+    # vertical velocity"). Bridge 1.7.0 adds `vehicle.in_air` (IS_ENTITY_IN_AIR
+    # through the SHVDN `Entity.IsInAir` wrapper), so "the wheels left the
+    # ground" is now a field read rather than a z-delta guess, and the goal
+    # ships. It is still gated on the bridge actually SENDING the field
+    # (:func:`air_reported`) — an older bridge simply does not offer it.
+    #
+    # `taxi_ride` WAS here ("`enter_nearest_vehicle` always seats him as
+    # DRIVER ... Needs a seat parameter at minimum"). Bridge 1.7.0 adds exactly
+    # that: `enter_vehicle_seat{handle, seat}` (TASK_ENTER_VEHICLE with a
+    # passenger seat index) plus `vehicle.seat`, so riding in the back of a cab
+    # to a waypoint is both expressible AND gradeable. The "no hail action" half
+    # is worked around the way a human without a phone app does it: walk to a
+    # STOPPED cab and get in.
+    #
     # `pick_a_fight` and `gang_trouble` WERE here, ruled out because nothing could
     # start violence against a peaceful ped. That was true of the 19-action
     # catalog and is no longer true: CONTRACTS §1 gained `fight_ped{handle}`, and
@@ -92,22 +107,27 @@ UNBUILDABLE_GOALS: dict[str, str] = {
     # rather than on him being armed, and the goal ends on the health floor if
     # that turns out to have been optimistic.
     "rob_store": (
-        "a robbery is aim-a-weapon-and-hold. There is no aim, no fire, no weapon "
-        "selection, no threaten; `press_prompt_key` is a single E press. A "
-        "`player.cash` delta would be a perfect done_when and nothing in the "
-        "vocabulary can produce one. Needs aim/fire-at-entity plus weapon state."
+        "a robbery is AIM-a-weapon-and-HOLD, and the two halves that arrived in "
+        "bridge 1.7.0 are the wrong two. `shoot_at`/`fight_ped{weapon}` fire; "
+        "there is still no AIM-without-firing and no THREATEN, and shooting the "
+        "clerk empties the till instead of filling it. `player.cash` would be a "
+        "perfect done_when and nothing in the vocabulary can produce one. Needs "
+        "an aim-at-entity task that does not pull the trigger."
     ),
     "buy_gun": (
         "buying is a menu: browse, select, confirm. `press_prompt_key` is one E "
-        "press; there is no up/down/select, no shop state in /state, no weapon "
-        "field to confirm the purchase. Walking into the shop is a visual beat, "
-        "not a purchase, and must not be dressed up as one."
+        "press; there is no up/down/select and no shop state in /state. "
+        "`player.weapon.owned` (1.7.0) can now CONFIRM a purchase after the "
+        "fact, which is genuinely new — but confirming is not doing, and there "
+        "is still no way to work the menu. Walking into the shop is a visual "
+        "beat, not a purchase, and must not be dressed up as one."
     ),
-    "taxi_ride": (
-        "no hail action; `enter_nearest_vehicle` always seats him as DRIVER "
-        "(VehicleSeat.Driver is hardcoded in TaskEngine), so there is no passenger "
-        "seat; and no fare/destination menu. Needs a seat parameter at minimum. "
-        "'Steal a taxi and drive it' is `steal_nice_car`, a different goal."
+    "hold_up_a_driver": (
+        "the design brief's 'point a gun at a driver and take the car' needs the "
+        "same missing aim-without-firing verb as `rob_store`, plus a way to read "
+        "that the ped complied. `jack_a_driver` ships the outcome (he ends up in "
+        "the car) without the threat beat; dressing that up as a hold-up would "
+        "put a line on air about something the code cannot see happening."
     ),
 }
 
@@ -191,6 +211,273 @@ def _vpos(v: NearbyVehicle) -> tuple[float, float, float] | None:
     return None if v.pos is None else (v.pos.x, v.pos.y, v.pos.z)
 
 
+# --- bridge 1.7.0 fields, read defensively ------------------------------------
+#
+# `player.weapon`, `vehicle.in_air` and `vehicle.seat` arrive with bridge 1.7.0.
+# Every reader below asks whether the field was actually SENT, not just whether
+# it is truthy — the same rule `PlayerState.interior_reported` already sets for
+# v1.12. A pre-1.7.0 bridge omits the key, the model default reads "no", and a
+# goal that depends on it is simply NOT OFFERED. That is the honest degradation:
+# the alternative is a goal whose `done_when` can never fire, locking free roam
+# for `timeout_s` and reporting a failure that was structurally guaranteed —
+# exactly what :data:`UNBUILDABLE_GOALS` exists to prevent.
+
+
+def supports_v17(state: GameState) -> bool:
+    """Is this snapshot from a bridge that speaks 1.7.0?
+
+    `player.weapon` is the marker: a 1.7.0 bridge always sends the object (it is
+    never null while a ped exists), an older one omits the key entirely, and
+    pydantic records which keys were on the wire. Deliberately NOT a version
+    string comparison — `bridge.version` is free text and the field's presence
+    is the fact that actually matters. This one works ON FOOT, which
+    :func:`air_reported` and :func:`seat_reported` cannot: both live on
+    `vehicle`, which is null when he is walking.
+    """
+    return "weapon" in state.player.model_fields_set
+
+
+def weapon_reported(state: GameState) -> bool:
+    return supports_v17(state) and state.player.weapon is not None
+
+
+def weapon_class(state: GameState) -> str:
+    """``unarmed|melee|gun|projectile|unknown`` for what he is HOLDING, or ``""``."""
+    w = getattr(state.player, "weapon", None)
+    return "" if w is None else (w.weapon_class or "")
+
+
+def armed_with_a_gun(state: GameState) -> bool:
+    return weapon_class(state) == "gun"
+
+
+def owns_weapon(state: GameState, name: str) -> bool:
+    """Does he own this `WeaponHash` member name (`Pistol`, `MicroSMG`, ...)?
+
+    `player.weapon.owned` is the bridge's HAS_PED_GOT_WEAPON read over the three
+    tracked loadout weapons only, so a `False` here means "not one of the three
+    we track", never "he is definitely unarmed" — which is why `needs` gates on
+    this and `done_when` never does.
+    """
+    w = getattr(state.player, "weapon", None)
+    return bool(w is not None and name in (w.owned or {}))
+
+
+def weapon_ammo(state: GameState, name: str) -> int | None:
+    """Rounds carried for one owned weapon, or None when it is not owned/reported."""
+    w = getattr(state.player, "weapon", None)
+    if w is None:
+        return None
+    return (w.owned or {}).get(name)
+
+
+def air_reported(state: GameState) -> bool:
+    v = state.vehicle
+    return v is not None and "in_air" in v.model_fields_set
+
+
+def in_air(state: GameState) -> bool:
+    v = state.vehicle
+    return bool(v is not None and getattr(v, "in_air", False))
+
+
+def seat_reported(state: GameState) -> bool:
+    v = state.vehicle
+    return v is not None and "seat" in v.model_fields_set and v.seat is not None
+
+
+def riding_as_passenger(state: GameState) -> bool:
+    """In a vehicle somebody ELSE is driving. Needs `vehicle.seat` (1.7.0)."""
+    v = state.vehicle
+    return bool(state.player.in_vehicle and v is not None and getattr(v, "seat", None) == "passenger")
+
+
+# --- the chaos ladder (T7) ------------------------------------------------------
+#
+# Three tiers of nuisance, and a rule that walks him DOWN one when the show
+# turns into a death loop. The operator's bar for free roam is "keep doing
+# nuisance"; the counter-bar, in his own words, is that "bad judgement is funny,
+# dying every four minutes is not". A fixed catalog cannot serve both, so the
+# catalog is tiered and the tier is chosen by measured outcomes rather than by
+# mood: nothing here reads the model, and nothing here is a random draw.
+#
+#   L1  nuisance with no bodies. Cars, hills, buses, distance.
+#   L2  trouble that answers back. Fists, gangs, cop cars, two stars, a drive-by.
+#   L3  the ones that can genuinely end him. Three stars held, a block shot up,
+#       a police helicopter.
+#
+# A goal is offered only when `goal.level <= RoamEngine.level`. Nothing else in
+# the selection rules changes, so every existing filter (cooldown, category
+# alternation, health, novelty, chaos budget) still applies on top.
+
+#: The tier free roam starts a session on. L2 rather than L3 on purpose: he
+#: begins with no gun he did not earn (bridge 1.7.0 ships the Ammu-Nation
+#: loadout OFF by default), so the L3 goals would be gated on a weapon he does
+#: not have and the first half hour would be a menu of things he cannot do. He
+#: climbs to L3 after a clean 30 minutes, which is also the point by which he
+#: has usually picked something up.
+CHAOS_START_LEVEL = 2
+CHAOS_MIN_LEVEL = 1
+CHAOS_MAX_LEVEL = 3
+
+#: Deaths inside free roam, per rolling hour, that force a step DOWN. Six is
+#: one death every ten minutes: past that the stream is a respawn montage, and
+#: the fix that a human would apply is "stop picking fights for a bit", which is
+#: exactly one tier.
+DEATHS_PER_HOUR_STEP_DOWN = 6
+
+#: How long he has to go without dying before the tier he lost comes back. Half
+#: an hour is long enough that it is a genuine recovery rather than a bounce off
+#: the same fight, and short enough to happen inside one stream.
+CLEAN_RECOVERY_S = 30 * 60.0
+
+#: The rolling window deaths are counted in.
+DEATH_WINDOW_S = 3600.0
+
+#: Chaos budget per hour, per tier. :data:`activities.CHAOS_BUDGET_PER_HOUR` is
+#: the L1 figure and stays the ActivityPicker's own budget; the higher tiers buy
+#: the headroom their goals cost (a `gang_trouble` alone is 2.0). Without this a
+#: single L2 goal would spend the whole hour's budget and the tier would be
+#: decoration.
+CHAOS_BUDGET_BY_LEVEL: dict[int, float] = {
+    1: CHAOS_BUDGET_PER_HOUR,
+    2: CHAOS_BUDGET_PER_HOUR * 2.5,
+    3: CHAOS_BUDGET_PER_HOUR * 4.0,
+}
+
+
+class ChaosLadder:
+    """The tier, and the two measurements that move it.
+
+    Deliberately a plain object with an injected clock and no knowledge of
+    `/state`: :meth:`RoamEngine.observe` feeds it the death EDGE it detects, so
+    "how do we know he died" lives in one place and this class only does the
+    arithmetic.
+    """
+
+    def __init__(self, clock: Any, level: int = CHAOS_START_LEVEL) -> None:
+        self._clock = clock
+        self.level = max(CHAOS_MIN_LEVEL, min(CHAOS_MAX_LEVEL, level))
+        self._deaths: list[float] = []
+        #: When the current clean run started: a death, or a step, restarts it.
+        self._clean_since = clock()
+        #: Set on every change so the engine can announce it exactly once.
+        self.transition: str | None = None
+
+    def note_death(self, now: float) -> None:
+        self._deaths.append(now)
+        self._clean_since = now
+        self._prune(now)
+        if len(self._deaths) >= DEATHS_PER_HOUR_STEP_DOWN and self.level > CHAOS_MIN_LEVEL:
+            self.level -= 1
+            # The death counter is CLEARED on a step-down: the six deaths bought
+            # the step, and leaving them in the window would spend them again on
+            # the next death and walk him from L3 to L1 in two deaths.
+            self._deaths.clear()
+            self.transition = (
+                f"CHAOS LEVEL DOWN to L{self.level}: "
+                f"{DEATHS_PER_HOUR_STEP_DOWN} deaths in an hour. Ease off."
+            )
+            log.info(
+                "chaos level down",
+                extra={"kv": {"level": self.level, "reason": "deaths_per_hour"}},
+            )
+
+    def tick(self) -> None:
+        """Called once per observation: expire old deaths, promote on a clean run."""
+        now = self._clock()
+        self._prune(now)
+        if self.level >= CHAOS_MAX_LEVEL:
+            return
+        if now - self._clean_since >= CLEAN_RECOVERY_S:
+            self.level += 1
+            self._clean_since = now
+            self.transition = (
+                f"CHAOS LEVEL UP to L{self.level}: "
+                f"{CLEAN_RECOVERY_S / 60:.0f} clean minutes. Push it."
+            )
+            log.info(
+                "chaos level up",
+                extra={"kv": {"level": self.level, "reason": "clean_run"}},
+            )
+
+    def deaths_in_window(self) -> int:
+        self._prune(self._clock())
+        return len(self._deaths)
+
+    def _prune(self, now: float) -> None:
+        self._deaths = [t for t in self._deaths if now - t < DEATH_WINDOW_S]
+
+
+# --- mission cadence, as configuration -----------------------------------------
+
+#: The DEFAULT mission cadence, kept as module constants because the tests, the
+#: day planner and the "let's get paid" trigger all name them. They are now the
+#: defaults of :class:`RoamCadence` rather than the rule itself: the live values
+#: are on `RoamEngine.cadence` and are environment-overridable.
+#:
+#: Retuned in T7 from (3 goals OR 15 minutes, both FORCING) because that
+#: collapsed the whole menu to one goal after three cars on a stream that is
+#: supposed to be free roam. Six completed goals now OFFER the job at the top of
+#: the menu; only the forty-minute clock forces it.
+GOALS_BEFORE_MISSION = 6
+ROAM_BEFORE_MISSION_S = 40 * 60.0
+
+
+
+def _env_float(name: str, default: float) -> float:
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    try:
+        return float(raw)
+    except ValueError:
+        log.warning(
+            "ignoring a non-numeric cadence override",
+            extra={"kv": {"var": name, "value": raw[:40], "using": default}},
+        )
+        return default
+
+
+@dataclass(frozen=True)
+class RoamCadence:
+    """When free roam should hand the wheel to the story, as configuration.
+
+    The old numbers were three completed goals OR fifteen minutes, and BOTH
+    forced: the menu collapsed to one goal. Measured on 2026-09-03 that meant
+    `start_nearest_mission` was 2 of 22 picks in two hours of a stream that is
+    supposed to be free roam, and the dashboard said "walk to Franklin's marker
+    and start the job" while the operator had missions switched OFF.
+
+    The shape is now two DIFFERENT levers:
+
+    * ``goals_before_offer`` — after this many COMPLETED roam goals the job is
+      put at the TOP of the menu with a why, and everything else stays on it.
+      An offer he can refuse; the model or the draw may still pick a car.
+    * ``force_after_s`` — only this, the wall clock, collapses the menu. Forty
+      minutes is long enough that a viewer who tuned in for chaos got a stream
+      of it first.
+
+    ``missions_enabled`` is not here on purpose: it is not cadence, it is an
+    absolute off switch (``Settings.missions_enabled`` / ``WASTED_MISSIONS_ENABLED``)
+    and it is checked BEFORE either lever, so no cadence value can turn it back on.
+    """
+
+    goals_before_offer: int = GOALS_BEFORE_MISSION
+    force_after_s: float = ROAM_BEFORE_MISSION_S
+
+    @classmethod
+    def from_env(cls) -> RoamCadence:
+        return cls(
+            goals_before_offer=max(
+                1, int(_env_float("WASTED_ROAM_GOALS_BEFORE_MISSION", GOALS_BEFORE_MISSION))
+            ),
+            force_after_s=max(
+                60.0, _env_float("WASTED_ROAM_MISSION_FORCE_S", ROAM_BEFORE_MISSION_S)
+            ),
+        )
+
+
 # --- thresholds ---------------------------------------------------------------
 
 #: How long he may be effectively stationary with nothing progressing before the
@@ -218,12 +505,6 @@ GOAL_MOVE_M = STALL_MOVE_M
 #: second gives up, because two 10 s windows with an escalation in between is
 #: real evidence and 20 s is already most of the operator's budget.
 GOAL_STUCK_STRIKES = 2
-
-#: Completed roam goals before `start_nearest_mission` becomes the ONLY option,
-#: and the wall-clock equivalent. The story has to move: the show is missions
-#: with free roam between them, not the other way round.
-GOALS_BEFORE_MISSION = 3
-ROAM_BEFORE_MISSION_S = 15 * 60.0
 
 #: A short jittered beat between goals so the show is not a conveyor belt of set
 #: pieces. Two orders of magnitude shorter than the old ACTIVITY_GAP_S (150-420 s)
@@ -297,6 +578,11 @@ HILL_LANDMARKS: tuple[str, ...] = ("mount_chiliad", "vinewood_sign", "galileo_ob
 
 #: A landmark nearer than this is not a drive, it is a parking manoeuvre.
 MIN_LANDMARK_TRIP_M = 300.0
+
+#: How near one of the curated (UNVERIFIED) freeway approach points counts as
+#: "there's the on-ramp". Generous, because the points are approximate by
+#: construction and the trigger only reorders a menu.
+ONRAMP_NEAR_M = 200.0
 
 
 # --- action helpers (frozen vocabulary only) ----------------------------------
@@ -542,6 +828,10 @@ class Goal:
     #: Posts no actions of its own: another owner (the day planner) does the
     #: work and `done_when` watches for its result.
     handoff: bool = False
+    #: Chaos tier (T7). Offered only while `RoamEngine.level >= level`. L1 is
+    #: nuisance with no bodies, L2 is trouble that answers back, L3 is the ones
+    #: that can genuinely end him. See the ladder block at the top of the module.
+    level: int = 1
 
 
 # --- needs / plan / done_when --------------------------------------------------
@@ -658,7 +948,11 @@ def _plan_pick_a_fight(state, view):
     steps: list[dict[str, Any]] = []
     if mark.distance > VEHICLE_APPROACH_M and getattr(mark, "pos", None) is not None:
         steps.append(_walk_to((mark.pos.x, mark.pos.y, mark.pos.z), run=True))
-    steps.append({"type": "fight_ped", "params": {"handle": mark.handle}})
+    # `weapon: "unarmed"` (bridge 1.7.0): SET_CURRENT_PED_WEAPON to
+    # WeaponHash.Unarmed before the combat task, so this is a fist fight
+    # whatever he happens to be carrying. Without it, the same goal on a the agent
+    # who picked up a pistol is an execution, and the show is not that.
+    steps.append({"type": "fight_ped", "params": {"handle": mark.handle, "weapon": "unarmed"}})
     return steps, {"mark": mark.handle}
 
 
@@ -912,11 +1206,32 @@ def _needs_two_stars(state: GameState, view: RoamView) -> bool:
 
 
 def _plan_two_stars(state, view):
+    """Provoke, then drive: the police are not interested in bad driving alone.
+
+    The first version was get-in-a-car-and-run-red-lights and, measured, sat
+    at zero stars for its whole 180 s timeout — the longest silent stretch in
+    the soak. Now the plan opens with the thing that actually draws them when
+    he has a gun (`drive_by` from the seat, `shoot_at` on foot — bridge 1.7.0,
+    the same verbs `drive_by_run`/`armed_rampage_block` use), and only THEN
+    drives like a maniac, which is what turns one star into two. Unarmed, it is
+    the old plan: jack an occupied car, which is a star by itself.
+    """
     steps: list[dict[str, Any]] = []
-    if not state.player.in_vehicle:
-        v = occupied_vehicle(state)
-        if v is not None:
-            steps += _approach_then_enter(v, "any", 15.0)
+    armed = weapon_reported(state) and any(
+        owns_weapon(state, n) for n in ("Pistol", "MicroSMG", "PumpShotgun")
+    )
+    if state.player.in_vehicle:
+        mark = _drive_by_target(state)
+        if armed and owns_weapon(state, "MicroSMG") and mark is not None:
+            steps.append({"type": "drive_by", "params": {"handle": mark.handle, "duration_s": 8.0}})
+        steps.append(_wander("ignore_lights"))
+        return steps, {}
+    mark = nearest_mark(state)
+    if armed and mark is not None:
+        steps.append({"type": "shoot_at", "params": {"handle": mark.handle, "duration_s": 5.0}})
+    v = occupied_vehicle(state)
+    if v is not None:
+        steps += _approach_then_enter(v, "any", 15.0)
     steps.append(_wander("ignore_lights"))
     return steps, {}
 
@@ -994,6 +1309,323 @@ def _done_bike_hills(state: GameState, snap: dict[str, Any]) -> bool:
     if state.vehicle is None or not is_motorcycle(state.vehicle.vehicle_class):
         return False
     return planar_distance(player_pos(state), snap["target"]) <= HILL_ARRIVE_M
+
+
+# --- T7: the new tiers ---------------------------------------------------------
+#
+# One trio per goal, same shape as everything above. What is new is that four of
+# them read a `/state` field that did not exist before bridge 1.7.0, and every
+# one of those four gates its `needs` on the field having actually been SENT —
+# so on an older bridge they are simply absent from the menu rather than
+# offerable-and-uncompletable.
+
+
+#: `VehicleHash` member names for cabs, lowercased — same provenance and same
+#: caveat as :data:`BUS_MODELS`: curated, not verified against the running game.
+TAXI_MODELS: frozenset[str] = frozenset({"taxi"})
+
+#: How far a jump run-up has to have covered before airtime counts as a jump
+#: rather than the kerb outside where he started.
+BIG_JUMP_RUNUP_M = 100.0
+#: ...or this long into the goal. The approach is the NEAREST one, so a goal
+#: picked 60 m from the ramp jumps with `_from_start_m` under the run-up bar
+#: and the completion was refused (soak trace: airborne at 107 s, timed out at
+#: 216 s). Eight seconds in, the wheels leaving the ground is the jump.
+BIG_JUMP_MIN_S = 8.0
+
+#: Vehicle classes that are in the air as their NORMAL state. Offering
+#: `big_jump` in one would complete it on the first tick.
+FLYING_CLASSES: frozenset[str] = frozenset({"helicopters", "planes"})
+
+#: A cab has to be stopped to be walked to, and the ride has to actually go
+#: somewhere before "he took a taxi" is a true statement on air.
+TAXI_RIDE_M = 250.0
+
+#: How near an empty helicopter has to be to be worth walking to. Wider than
+#: :data:`TRIGGER_RADIUS_M` because a parked helicopter is a rare enough sight
+#: that a slightly longer walk is worth it, and it does not drive away.
+HELI_RADIUS_M = 60.0
+
+#: How far from the shooting he has to get before "and then he left" is true.
+DRIVE_BY_ESCAPE_M = 150.0
+#: Nothing further away than this is a drive-by target; it is a car window, not
+#: a rifle. Matches :data:`TRIGGER_RADIUS_M` by construction.
+DRIVE_BY_RADIUS_M = TRIGGER_RADIUS_M
+
+#: Seconds he has to hold three stars for the L3 goal to have happened. The
+#: escape is NOT part of this goal: the moment it completes, `available()`'s
+#: wanted rule hands the next tick to `lose_the_cops`, which is a better escape
+#: than anything this goal could post and is already written.
+HOLD_THREE_S = 90.0
+
+#: Seconds of standing his ground for `armed_rampage_block`. Same hand-off: the
+#: cops are somebody else's goal once this one is done.
+RAMPAGE_S = 60.0
+
+#: Seat index asked for when riding as a passenger. Rear-right, which is where
+#: the game's own cab-hailing puts the player; the schema only allows 0/1/2, so
+#: no value of this can ever ask for the driver's seat.
+PASSENGER_SEAT = 2
+
+
+def _stationary_taxi(state: GameState, view: RoamView) -> NearbyVehicle | None:
+    best: NearbyVehicle | None = None
+    for v in state.nearby.vehicles:
+        if (v.model or "").strip().lower() not in TAXI_MODELS:
+            continue
+        if v.distance > TRIGGER_RADIUS_M or v.handle not in view.stationary_handles:
+            continue
+        if best is None or v.distance < best.distance:
+            best = v
+    return best
+
+
+def _parked_helicopter(state: GameState) -> NearbyVehicle | None:
+    best: NearbyVehicle | None = None
+    for v in empty_vehicles(state, HELI_RADIUS_M):
+        if (v.vehicle_class or "").strip().lower() != "helicopters":
+            continue
+        if best is None or v.distance < best.distance:
+            best = v
+    return best
+
+
+def _nearest_approach(state: GameState) -> dict[str, Any]:
+    here = player_pos(state)
+    return min(STUNT_APPROACHES, key=lambda a: planar_distance(here, a["pos"]))
+
+
+def _ammo_snapshot(state: GameState) -> dict[str, int]:
+    """Rounds carried, per tracked weapon, at the moment a goal is picked.
+
+    Graded later as a TOTAL across the tracked set rather than per weapon,
+    because which weapon the bridge selects is a bridge-side decision taken from
+    the range at task start (shotgun inside 10 m, pistol beyond) and the harness
+    deliberately does not duplicate that rule — see the CONTRACTS proposal.
+    """
+    w = getattr(state.player, "weapon", None)
+    return dict(w.owned or {}) if w is not None else {}
+
+
+# -- big_jump (L1) ---------------------------------------------------------------
+
+
+def _needs_big_jump(state: GameState, view: RoamView) -> bool:
+    if view.mood == "scared":
+        return False
+    if not state.player.in_vehicle or state.vehicle is None:
+        return False
+    if not air_reported(state):
+        return False  # pre-1.7.0 bridge: `done_when` could never fire
+    return (state.vehicle.vehicle_class or "").strip().lower() not in FLYING_CLASSES
+
+
+def _plan_big_jump(state, view):
+    approach = _nearest_approach(state)
+    pos = approach["pos"]
+    return (
+        [
+            _waypoint(pos),
+            _drive_to(pos, float(approach["speed_mps"]), "rushed", 20.0),
+            _wander("rushed"),
+        ],
+        {"start": player_pos(state), "approach": approach["name"]},
+    )
+
+
+def _done_big_jump(state: GameState, snap: dict[str, Any]) -> bool:
+    """Wheels off the ground, after a run-up long enough to have been a run-up.
+
+    `in_air` is a bridge field (IS_ENTITY_IN_AIR), so this is a READ, not the
+    z-delta guess the old UNBUILDABLE entry refused to ship. At a 2-4 Hz poll a
+    real jump is 1-8 snapshots long, so it is observable; a jump missed between
+    polls costs a completion, never a false one.
+    """
+    return in_air(state) and (
+        snap.get("_from_start_m", 0.0) >= BIG_JUMP_RUNUP_M
+        or snap.get("_elapsed", 0.0) >= BIG_JUMP_MIN_S
+    )
+
+
+# -- taxi_ride (L1) --------------------------------------------------------------
+
+
+def _needs_taxi_ride(state: GameState, view: RoamView) -> bool:
+    if not supports_v17(state) or state.player.in_vehicle or state.player.wanted > 0:
+        return False
+    return _stationary_taxi(state, view) is not None
+
+
+def _plan_taxi_ride(state, view):
+    cab = _stationary_taxi(state, view)
+    assert cab is not None
+    name, target = _landmark_choice(state, view)
+    steps: list[dict[str, Any]] = [_waypoint(target)]
+    pos = _vpos(cab)
+    if pos is not None and cab.distance > VEHICLE_APPROACH_M:
+        steps.append(_walk_to(pos, run=True))
+    # The waypoint FIRST, then the seat: the game's own cab AI drives to the
+    # active waypoint, so setting it after he is seated would be a ride to
+    # wherever the last waypoint happened to be.
+    steps.append(
+        {"type": "enter_vehicle_seat", "params": {"handle": cab.handle, "seat": PASSENGER_SEAT}}
+    )
+    return steps, {"taxi": cab.handle, "start": player_pos(state), "landmark": name}
+
+
+def _done_taxi_ride(state: GameState, snap: dict[str, Any]) -> bool:
+    """In the back of THAT cab, and it has actually taken him somewhere.
+
+    `vehicle.seat` (1.7.0) is what makes this honest: without it, "in the taxi"
+    is equally true of having jacked it and driven off, which is a different
+    goal (`steal_nice_car`) and a different line on air.
+    """
+    if not riding_as_passenger(state) or state.vehicle is None:
+        return False
+    if state.vehicle.handle != snap.get("taxi"):
+        return False
+    return snap.get("_from_start_m", 0.0) >= TAXI_RIDE_M
+
+
+# -- drive_by_run (L2) -----------------------------------------------------------
+
+
+def _drive_by_target(state: GameState) -> Any | None:
+    """Nearest thing worth leaning out of the window at: a gang member first."""
+    gang = [p for p in gang_nearby(state) if p.distance <= DRIVE_BY_RADIUS_M]
+    if gang:
+        return min(gang, key=lambda p: p.distance)
+    marks = [p for p in state.nearby.peds if p.distance <= DRIVE_BY_RADIUS_M and _fightable(p)]
+    return min(marks, key=lambda p: p.distance) if marks else None
+
+
+def _needs_drive_by(state: GameState, view: RoamView) -> bool:
+    return (
+        weapon_reported(state)
+        and owns_weapon(state, "MicroSMG")
+        and state.player.in_vehicle
+        and state.player.wanted == 0
+        and state.player.health >= GANG_MIN_HEALTH
+        and _drive_by_target(state) is not None
+    )
+
+
+def _plan_drive_by(state, view):
+    mark = _drive_by_target(state)
+    assert mark is not None
+    return (
+        [
+            {"type": "drive_by", "params": {"handle": mark.handle, "duration_s": 12.0}},
+            _wander("rushed"),
+        ],
+        {"target": mark.handle, "start": player_pos(state), "ammo_start": _ammo_snapshot(state)},
+    )
+
+
+def _done_drive_by(state: GameState, snap: dict[str, Any]) -> bool:
+    """He FIRED, and then he left.
+
+    Graded on rounds gone, not on the target dying and not on the task returning
+    `done`: TASK_DRIVE_BY's behaviour on a PLAYER ped is the one thing the
+    combat research brief flags as contradicted between sources, so this goal is
+    deliberately built so that a native which quietly does nothing produces a
+    TIMEOUT and a log line — the evidence the operator needs — instead of a
+    completion he did not earn.
+    """
+    return (
+        snap.get("_ammo_spent", 0) >= 1
+        and snap.get("_from_start_m", 0.0) >= DRIVE_BY_ESCAPE_M
+    )
+
+
+# -- three_star_survival (L3) ----------------------------------------------------
+
+
+def _needs_three_star(state: GameState, view: RoamView) -> bool:
+    if state.player.wanted < 2 or state.player.health < GANG_MIN_HEALTH:
+        return False
+    return state.player.in_vehicle or bool(empty_vehicles(state, 50.0))
+
+
+def _plan_three_star(state, view):
+    steps: list[dict[str, Any]] = []
+    if not state.player.in_vehicle:
+        steps.append(_enter("any", 50.0))
+    steps.append(_wander("ignore_lights"))
+    return steps, {"start": player_pos(state)}
+
+
+def _done_three_star(state: GameState, snap: dict[str, Any]) -> bool:
+    """Ninety seconds at three stars. The ESCAPE is not graded here on purpose.
+
+    `available()`'s wanted rule already puts `lose_the_cops` at the top of the
+    next tick's menu, and it is a better-written escape than anything this goal
+    could post. Two goals chained by the engine's own rules beats one goal with
+    a second phase nothing can advance — the plan runner steps on task
+    completion, and `wander_drive` never completes.
+    """
+    return snap.get("_held3_s", 0.0) >= HOLD_THREE_S
+
+
+# -- armed_rampage_block (L3) ----------------------------------------------------
+
+
+def _needs_rampage(state: GameState, view: RoamView) -> bool:
+    if not weapon_reported(state) or state.player.in_vehicle:
+        return False
+    if state.player.wanted > 0 or state.player.health < GANG_MIN_HEALTH:
+        return False
+    armed = armed_with_a_gun(state) or any(
+        owns_weapon(state, n) for n in ("Pistol", "MicroSMG", "PumpShotgun")
+    )
+    return armed and nearest_mark(state) is not None
+
+
+def _plan_rampage(state, view):
+    mark = nearest_mark(state)
+    assert mark is not None
+    # `weapon: "armed"` is the bridge-side selection rule (CONTRACTS proposal):
+    # pump shotgun inside 10 m, pistol beyond, read from the range at task start
+    # rather than from a snapshot that is up to a poll period old.
+    return (
+        [{"type": "fight_ped", "params": {"handle": mark.handle, "weapon": "armed"}}],
+        {"start": player_pos(state), "ammo_start": _ammo_snapshot(state)},
+    )
+
+
+def _done_rampage(state: GameState, snap: dict[str, Any]) -> bool:
+    """A minute of it, and rounds actually gone.
+
+    The "one block" half of the brief is enforced by the PLAN (the target is a
+    ped already within :data:`FIGHT_RADIUS_M`) and reported, not graded: a
+    completion test he can fail by walking twenty metres is a goal that locks
+    free roam until its timeout, which is the failure mode this module exists to
+    prevent.
+    """
+    return snap.get("_elapsed", 0.0) >= RAMPAGE_S and snap.get("_ammo_spent", 0) >= 1
+
+
+# -- helicopter_grab (L3) --------------------------------------------------------
+
+
+def _needs_helicopter(state: GameState, view: RoamView) -> bool:
+    return not state.player.in_vehicle and _parked_helicopter(state) is not None
+
+
+def _plan_helicopter(state, view):
+    heli = _parked_helicopter(state)
+    assert heli is not None
+    return _approach_then_enter(heli, "any", PROXIMITY_SEARCH_RADIUS_M), {
+        "target_model": heli.model
+    }
+
+
+def _done_helicopter(state: GameState, snap: dict[str, Any]) -> bool:
+    return (
+        state.player.in_vehicle
+        and state.vehicle is not None
+        and (state.vehicle.vehicle_class or "").strip().lower() == "helicopters"
+    )
 
 
 def _needs_start_mission(state: GameState, view: RoamView) -> bool:
@@ -1098,6 +1730,7 @@ CATALOG: tuple[Goal, ...] = (
         # same: the goal owns its own stars until it finishes or times out, and
         # `lose_the_cops` takes over the moment it does.
         wants_heat=True,
+        level=2,
     ),
     Goal(
         id="pick_a_fight",
@@ -1110,6 +1743,12 @@ CATALOG: tuple[Goal, ...] = (
         timeout_s=60.0,
         cooldown_s=4 * 60.0,
         chaos_cost=1.0,
+        # L2: a fist fight answers back. `weapon: "unarmed"` is the point of the
+        # goal, not a detail — the bridge selects WeaponHash.Unarmed before it
+        # tasks combat, so starting something with a stranger stays a fist fight
+        # even when he is carrying, which is the difference between a bit and a
+        # murder.
+        level=2,
     ),
     Goal(
         id="gang_trouble",
@@ -1122,6 +1761,7 @@ CATALOG: tuple[Goal, ...] = (
         timeout_s=120.0,
         cooldown_s=15 * 60.0,
         chaos_cost=2.0,
+        level=2,
         # A gang fight makes noise and noise makes stars. Same reasoning as
         # `steal_cop_car`: heat is a consequence, not the aim, but the override
         # must not kill the goal the moment it starts working.
@@ -1150,6 +1790,7 @@ CATALOG: tuple[Goal, ...] = (
         cooldown_s=8 * 60.0,
         chaos_cost=1.0,
         wants_heat=True,
+        level=2,
     ),
     Goal(
         id="honk_run",
@@ -1229,6 +1870,7 @@ CATALOG: tuple[Goal, ...] = (
         cooldown_s=60 * 60.0,
         chaos_cost=2.0,
         wants_heat=True,
+        level=2,
     ),
     Goal(
         id="lose_the_cops",
@@ -1270,6 +1912,98 @@ CATALOG: tuple[Goal, ...] = (
         cooldown_s=0.0,
         calm=True,
         handoff=True,
+    ),
+    # ---- T7 additions ---------------------------------------------------------
+    Goal(
+        id="big_jump",
+        category="stunt",
+        description="find a ramp and get all four wheels off the ground",
+        why="that road goes up",
+        needs=_needs_big_jump,
+        plan=_plan_big_jump,
+        done_when=_done_big_jump,
+        # The approach is the nearest one, so the drive there is short, and
+        # the jump either happens on the run-up or it does not: measured in
+        # the soak, 240 s here was the single longest stretch with nothing
+        # new on screen. Two minutes is the run-up plus one honest retry.
+        timeout_s=120.0,
+        cooldown_s=12 * 60.0,
+        chaos_cost=0.25,
+        level=1,
+    ),
+    Goal(
+        id="taxi_ride",
+        category="errand",
+        description="get in the back of a cab like a normal person",
+        why="not driving for once",
+        needs=_needs_taxi_ride,
+        plan=_plan_taxi_ride,
+        done_when=_done_taxi_ride,
+        timeout_s=300.0,
+        cooldown_s=20 * 60.0,
+        calm=True,
+        level=1,
+    ),
+    Goal(
+        id="drive_by_run",
+        category="trouble",
+        description="lean out at the corner, then be somewhere else",
+        why="the SMG is in the car",
+        needs=_needs_drive_by,
+        plan=_plan_drive_by,
+        done_when=_done_drive_by,
+        timeout_s=180.0,
+        cooldown_s=20 * 60.0,
+        chaos_cost=2.0,
+        # Shooting from a car earns stars immediately; without the exemption the
+        # override kills the goal a second into its own escape and `done_when`
+        # can never fire. Same reasoning as `earn_two_stars`.
+        wants_heat=True,
+        level=2,
+    ),
+    Goal(
+        id="three_star_survival",
+        category="trouble",
+        description="stay ahead of three stars for a minute and a half",
+        why="they brought helicopters",
+        needs=_needs_three_star,
+        plan=_plan_three_star,
+        done_when=_done_three_star,
+        timeout_s=300.0,
+        cooldown_s=40 * 60.0,
+        chaos_cost=2.0,
+        wants_heat=True,
+        level=3,
+    ),
+    Goal(
+        id="armed_rampage_block",
+        category="trouble",
+        description="make a scene on this block, then walk away from it",
+        why="this block, then gone",
+        needs=_needs_rampage,
+        plan=_plan_rampage,
+        done_when=_done_rampage,
+        timeout_s=240.0,
+        cooldown_s=30 * 60.0,
+        chaos_cost=2.0,
+        wants_heat=True,
+        level=3,
+    ),
+    Goal(
+        id="helicopter_grab",
+        category="acquisition",
+        description="take the helicopter nobody is sitting in",
+        why="nobody is flying that",
+        needs=_needs_helicopter,
+        plan=_plan_helicopter,
+        done_when=_done_helicopter,
+        timeout_s=180.0,
+        cooldown_s=45 * 60.0,
+        chaos_cost=2.0,
+        # A police helicopter is police property; same exemption and the same
+        # reason as `steal_cop_car`.
+        wants_heat=True,
+        level=3,
     ),
     Goal(
         id="roam_the_block",
@@ -1347,6 +2081,31 @@ def _t_get_paid(state: GameState, view: RoamView) -> bool:
     return view.since_mission_s is None or view.since_mission_s >= ROAM_BEFORE_MISSION_S
 
 
+def _t_gang_corner(state: GameState, view: RoamView) -> bool:
+    """Enough of them, close enough, that "whose corner is this" is a real question."""
+    return len(gang_nearby(state)) >= GANG_MIN_PEDS
+
+
+def _t_onramp(state: GameState, view: RoamView) -> bool:
+    """In something quick, near a curated freeway approach point.
+
+    THE POINT LIST IS CURATED AND UNVERIFIED. `/state` cannot answer "is this a
+    freeway": `location.street` is a name string with no road-type flag (see
+    :data:`UNCOMPUTABLE_TRIGGERS`), so the only options were authored data or no
+    trigger at all. The points are REUSED from
+    :data:`activities.STUNT_APPROACHES`, which are already-curated approach
+    coordinates near freeway ramps — nothing new was invented here, and none of
+    them was surveyed against the running game. A wrong point costs a promotion
+    (the goal is still on the menu, just not at the top); it can never cause a
+    false completion, because `freeway_run` is graded on displacement and never
+    on where he was standing when it started.
+    """
+    if not _needs_freeway_run(state, view):
+        return False
+    here = player_pos(state)
+    return any(planar_distance(here, a["pos"]) <= ONRAMP_NEAR_M for a in FREEWAY_ONRAMPS)
+
+
 #: Order matters only as a tiebreak: the first matching trigger wins the top
 #: slot. Everything here is computable from `/state` plus a cross-tick diff; the
 #: brief's other triggers are recorded in :data:`UNCOMPUTABLE_TRIGGERS`.
@@ -1358,6 +2117,12 @@ TRIGGERS: tuple[Trigger, ...] = (
     Trigger("random_event", "something's happening", _needs_random_event),
     Trigger("hijack_bus", "public transport", _needs_bus),
     Trigger("freeway_run", "open road", _t_open_road),
+    # T7 additions. Both sit BELOW the acquisition triggers on purpose: a
+    # supercar under his nose is a stronger reason to change what he is doing
+    # than a corner he could pick a fight on, and the first matching trigger
+    # takes the top slot.
+    Trigger("gang_trouble", "wrong corner, wrong colours", _t_gang_corner),
+    Trigger("freeway_run", "there's the on-ramp", _t_onramp),
     Trigger("start_nearest_mission", "let's get paid", _t_get_paid),
     Trigger(
         "drive_to_landmark",
@@ -1456,12 +2221,27 @@ class RoamEngine:
         clock: Any = time.monotonic,
         *,
         missions_enabled: bool = True,
+        cadence: RoamCadence | None = None,
+        level: int = CHAOS_START_LEVEL,
     ) -> None:
         self._rng = rng or random.Random()
         #: Operator switch (Settings.missions_enabled). Off: `start_nearest_mission`
         #: is never offered and never forced, so free roam is the whole show.
         self._missions_enabled = missions_enabled
+        #: T7: when the story gets offered and when it gets forced, as data.
+        #: Defaulted from the environment so the operator can retune the show
+        #: without a code change (WASTED_ROAM_GOALS_BEFORE_MISSION /
+        #: WASTED_ROAM_MISSION_FORCE_S) and a caller can inject one in a test.
+        self.cadence = cadence or RoamCadence.from_env()
         self._clock = clock
+        #: T7: the chaos tier, and the deaths that move it.
+        # `WASTED_CHAOS_LEVEL=1|2|3` pins the starting tier from the box's .env
+        # (docs/go-live.md §6); the ladder still moves itself from there.
+        self.ladder = ChaosLadder(clock, int(_env_float("WASTED_CHAOS_LEVEL", float(level))))
+        #: Death EDGE detection lives here, not in the ladder: `player.dead` is
+        #: true for every tick of the wasted screen, so counting ticks would
+        #: spend the whole hour's death budget on one death.
+        self._was_dead = False
         self.current: LockedGoal | None = None
 
         self._last_run: dict[str, float] = {}
@@ -1515,9 +2295,23 @@ class RoamEngine:
 
     # -- per-tick observation ---------------------------------------------------
 
+    @property
+    def level(self) -> int:
+        """The chaos tier goals are filtered on. Read-only: only the ladder moves it."""
+        return self.ladder.level
+
     def observe(self, state: GameState, *, mood: str = "bored", mood_style: str = "normal") -> None:
         """Fold this snapshot into the cross-tick derivations. Once per tick."""
         now = self._clock()
+        self._observe_death(state, now)
+        self.ladder.tick()
+        if self.ladder.transition is not None:
+            # The ladder gets its own line rather than sharing the goal
+            # transition slot: a tier change is news, and losing it because a
+            # goal happened to end on the same tick would make the step-down
+            # invisible on air and in the log.
+            self._transition = self.ladder.transition
+            self.ladder.transition = None
         self._observe_vehicles(state, now)
         self._observe_carjack(state, now)
         self._observe_movement(state, now)
@@ -1541,6 +2335,30 @@ class RoamEngine:
             # validating this tick's answer against last tick's menu is how a
             # goal that is no longer on offer gets accepted.
             self.available(state)
+
+    def _observe_death(self, state: GameState, now: float) -> None:
+        """Count a death ONCE, on the false->true edge of `player.dead`.
+
+        Only deaths that happen while free roam owns him count towards the
+        ladder: dying inside a mission is the mission's problem, and stepping
+        the nuisance tier down for it would punish the wrong half of the show.
+        `self.current is not None` is the test, and it is deliberately the LOCK
+        rather than "the engine exists" — between goals nobody is steering.
+        """
+        dead = state.player.dead
+        if dead and not self._was_dead and self.current is not None:
+            self.ladder.note_death(now)
+            log.info(
+                "roam death",
+                extra={
+                    "kv": {
+                        "goal": self.current.goal.id,
+                        "level": self.ladder.level,
+                        "deaths_in_window": self.ladder.deaths_in_window(),
+                    }
+                },
+            )
+        self._was_dead = dead
 
     def _observe_vehicles(self, state: GameState, now: float) -> None:
         seen: dict[int, tuple[tuple[float, float, float], float]] = {}
@@ -1606,37 +2424,62 @@ class RoamEngine:
     def chaos_available(self) -> float:
         now = self._clock()
         self._chaos_spent = [(t, c) for (t, c) in self._chaos_spent if now - t < 3600.0]
-        return CHAOS_BUDGET_PER_HOUR - sum(c for _, c in self._chaos_spent)
+        budget = CHAOS_BUDGET_BY_LEVEL.get(self.ladder.level, CHAOS_BUDGET_PER_HOUR)
+        return budget - sum(c for _, c in self._chaos_spent)
 
     # -- the menu ---------------------------------------------------------------
 
     def mission_forced(self) -> bool:
-        """Has the story waited long enough that a job is the only thing on offer?"""
+        """Has the story waited long enough that a job is the ONLY thing on offer?
+
+        The wall clock and nothing else (:class:`RoamCadence`). The completed-goal
+        counter used to force too, which is how a stream that is supposed to be
+        free roam collapsed its whole menu to one goal after three cars; that
+        counter is now :meth:`mission_offered`, an offer he can refuse.
+        """
         if not self._missions_enabled:
             return False
-        return (
-            self._completed_since_mission >= GOALS_BEFORE_MISSION
-            or self._clock() - self._roam_started_at >= ROAM_BEFORE_MISSION_S
-        )
+        return self._clock() - self._roam_started_at >= self.cadence.force_after_s
+
+    def mission_offered(self) -> bool:
+        """Has he done enough roam goals that the job belongs at the TOP of the menu?
+
+        An offer, not an order: every other legal goal stays on the list under
+        it, so the draw (or the model) may still take a car. The menu only ever
+        collapses on :meth:`mission_forced`.
+        """
+        if not self._missions_enabled:
+            return False
+        return self._completed_since_mission >= self.cadence.goals_before_offer
 
     def available(self, state: GameState) -> list[Offer]:
         """The ordered menu. The ONLY goals that may be picked this tick.
 
         Order of the rules is the specification:
-        1. `wanted > 0` overrides everything with `lose_the_cops`.
-        2. Three completed goals or fifteen minutes of roam forces the job.
-        3. Otherwise: needs + cooldown + chaos + health + category alternation.
+        1. `wanted > 0` puts `lose_the_cops` at the top — but the goals whose
+           whole point is heat (`wants_heat`) stay on the menu under it.
+        2. Forty minutes without a job forces the job (:class:`RoamCadence`).
+        3. Otherwise: tier + needs + cooldown + chaos + health + category
+           alternation.
         4. A matching trigger sorts its goal to the top with a quotable `why`.
         5. The menu is never empty: the fallback is always legal.
         """
         view = self.view
         now = self._clock()
 
-        # 1. The cops.
+        # 1. The cops. `lose_the_cops` leads, and everything that is ABOUT heat
+        # rides along: the old rule replaced the whole menu, which meant
+        # `three_star_survival` — a goal whose `needs` is "he already has two
+        # stars" — could never be offered at all, and `earn_two_stars` could
+        # never be re-picked after the first star landed. Everything else still
+        # yields: a scenic drive with a police helicopter overhead is not a
+        # scenic drive.
         cops = GOALS_BY_ID["lose_the_cops"]
         if cops.needs(state, view):
-            self._offers = [Offer(cops, "they are on me", triggered=True)]
-            self._offered = (cops.id,)
+            offers = [Offer(cops, "they are on me", triggered=True)]
+            offers += self._filtered(state, view, now, heat_only=True)
+            self._offers = offers
+            self._offered = tuple(o.id for o in offers)
             return list(self._offers)
 
         # 2. The story has to move.
@@ -1658,29 +2501,17 @@ class RoamEngine:
             return list(self._offers)
 
         # 3. The ordinary filter.
-        chaos = self.chaos_available()
-        hurt = health_fraction(state) < CALM_HEALTH_FRACTION
-        offers: list[Offer] = []
-        for goal in CATALOG:
-            if goal.override_only or goal.fallback:
-                continue
-            if goal.handoff and not self._missions_enabled:
-                continue  # the operator has missions switched off
-            if now - self._last_run.get(goal.id, -1e12) < goal.cooldown_s:
-                continue
-            if goal.chaos_cost > chaos:
-                continue
-            if hurt and not goal.calm:
-                continue
-            # Never the same category twice running. The show is not three
-            # scenic drives in a row with a personality bolted on.
-            if self._last_category is not None and goal.category == self._last_category:
-                continue
-            if self._recent_ids and goal.id == self._recent_ids[-1]:
-                continue  # never the exact same goal twice running
-            if not goal.needs(state, view):
-                continue
-            offers.append(Offer(goal, goal.why))
+        offers = self._filtered(state, view, now, heat_only=False)
+
+        # 3b. Enough goals done that the job belongs at the top — as an OFFER.
+        # It goes in front of the triggers deliberately and then the triggers
+        # run: a live opportunity (a supercar under his nose, an unattended cop
+        # car) still outranks "you have done six things", because the offer is
+        # about pacing and the trigger is about something that is happening.
+        if self.mission_offered() and job.needs(state, view):
+            offers = [Offer(job, "six down, time to get paid", triggered=True)] + [
+                o for o in offers if o.id != job.id
+            ]
 
         # 4. Triggers: at most one goal is promoted, and it keeps its `why`.
         offers = self._promote_triggered(state, offers)
@@ -1704,6 +2535,49 @@ class RoamEngine:
         self._offers = offers
         self._offered = tuple(o.id for o in offers)
         return list(offers)
+
+    def _filtered(
+        self, state: GameState, view: RoamView, now: float, *, heat_only: bool
+    ) -> list[Offer]:
+        """Every ordinary goal that passes every filter, in catalog order.
+
+        Factored out of :meth:`available` so the wanted branch and the ordinary
+        branch cannot drift apart: the ONLY difference between them is
+        `heat_only`, which keeps the `wants_heat` goals and drops the rest.
+        """
+        chaos = self.chaos_available()
+        hurt = health_fraction(state) < CALM_HEALTH_FRACTION
+        offers: list[Offer] = []
+        for goal in CATALOG:
+            if goal.override_only or goal.fallback:
+                continue
+            if heat_only and not goal.wants_heat:
+                continue
+            # T7: the chaos tier. Checked FIRST because it is the cheapest test
+            # and because a goal above the tier must not even run its `needs` —
+            # `needs` is a live-state read and running it costs nothing, but a
+            # tier the ladder just took away should look exactly like a goal
+            # that is not in the catalog.
+            if goal.level > self.ladder.level:
+                continue
+            if goal.handoff and not self._missions_enabled:
+                continue  # the operator has missions switched off
+            if now - self._last_run.get(goal.id, -1e12) < goal.cooldown_s:
+                continue
+            if goal.chaos_cost > chaos:
+                continue
+            if hurt and not goal.calm:
+                continue
+            # Never the same category twice running. The show is not three
+            # scenic drives in a row with a personality bolted on.
+            if self._last_category is not None and goal.category == self._last_category:
+                continue
+            if self._recent_ids and goal.id == self._recent_ids[-1]:
+                continue  # never the exact same goal twice running
+            if not goal.needs(state, view):
+                continue
+            offers.append(Offer(goal, goal.why))
+        return offers
 
     def _promote_triggered(self, state: GameState, offers: list[Offer]) -> list[Offer]:
         by_id = {o.id: o for o in offers}
@@ -1766,6 +2640,15 @@ class RoamEngine:
 
     def bored(self) -> bool:
         return self.current is None and self.still_for_s() >= BOREDOM_S
+
+    def heat_is_the_goal(self) -> bool:
+        """Is the locked goal one that WANTS the police (`Goal.wants_heat`)?
+
+        Read by the threat reflex: its stars-only rung must not flee from the
+        heat a goal just went and earned. The other rungs are not consulted —
+        being shot is being shot, whatever the goal.
+        """
+        return self.current is not None and self.current.goal.wants_heat
 
     def pick(
         self, state: GameState, *, goal_id: str | None = None, prefer: str | None = None
@@ -1853,6 +2736,7 @@ class RoamEngine:
         locked = self.current
         if locked is None:
             return None
+        self._fold_goal_progress(state, locked)
         if locked.goal.done_when(state, locked.snapshot):
             return "done"
         if state.player.dead or state.player.arrested:
@@ -1875,6 +2759,66 @@ class RoamEngine:
                 return "stuck"
             return "escalate"
         return None
+
+    #: The keys :meth:`_fold_goal_progress` maintains inside a locked goal's
+    #: snapshot. Underscore-prefixed so they can never collide with a plan's own
+    #: pick-time memory, and listed here so a `done_when` author can see the
+    #: whole vocabulary in one place.
+    PROGRESS_KEYS: tuple[str, ...] = (
+        "_elapsed",
+        "_from_start_m",
+        "_held3_s",
+        "_ammo_spent",
+    )
+
+    def _fold_goal_progress(self, state: GameState, locked: LockedGoal) -> None:
+        """Update the cross-tick measurements a `done_when` may read.
+
+        The predicates stay PURE functions of (state, snapshot) — the same
+        property the module's `needs`/`plan` trio has — and the derivation that
+        needs consecutive snapshots happens here, in the engine, which is the
+        only place that sees every tick. Three of the four measurements are
+        impossible to express any other way: "he has held three stars for
+        ninety seconds" and "he has fired a round since he started" are not
+        facts about one snapshot.
+
+        The snapshot dict is already a LIVE record (`replan` mutates it with
+        `setdefault`), so writing into it is not a new liberty.
+        """
+        now = self._clock()
+        snap = locked.snapshot
+        snap["_elapsed"] = locked.elapsed(now)
+
+        start = snap.get("start")
+        if start is not None:
+            snap["_from_start_m"] = planar_distance(player_pos(state), start)
+
+        # Continuous seconds at three stars or more. Broken by dropping below.
+        if state.player.wanted >= 3:
+            since = snap.get("_held3_since")
+            if since is None:
+                snap["_held3_since"] = now
+                since = now
+            snap["_held3_s"] = now - since
+        else:
+            snap["_held3_since"] = None
+            snap["_held3_s"] = 0.0
+
+        # Rounds gone since the goal was picked, totalled over the tracked
+        # loadout. A TOTAL rather than per-weapon on purpose: which weapon the
+        # bridge selects is decided bridge-side from the range at task start,
+        # and duplicating that rule here would be two owners of one decision.
+        # Only DECREASES count, so picking ammo up mid-goal cannot go negative
+        # and cannot mask a shot already fired.
+        ammo_start = snap.get("ammo_start")
+        if isinstance(ammo_start, dict):
+            spent = 0
+            for name, started in ammo_start.items():
+                now_ammo = weapon_ammo(state, name)
+                if now_ammo is None:
+                    continue  # weapon lost (arrest, death) — not evidence of a shot
+                spent += max(0, int(started) - int(now_ammo))
+            snap["_ammo_spent"] = max(int(snap.get("_ammo_spent", 0)), spent)
 
     def replan(self, state: GameState) -> dict[str, Any] | None:
         """Rebuild the locked goal's plan from where he actually is now.
@@ -2021,6 +2965,11 @@ class RoamEngine:
         elif self._offers:
             ids = " | ".join(o.id for o in self._offers)
             menu = "; ".join(f'{o.id} ("{o.why}")' for o in self._offers)
+            # The tier is stated because it EXPLAINS the menu: without it, a
+            # model that has seen `armed_rampage_block` on an earlier menu reads
+            # its absence as an oversight and writes prose about it. One clause,
+            # no instruction — the filtering is done in code either way.
+            lines.append(f"ROAM TIER: L{self.ladder.level} of 3.")
             lines.append(
                 f'ROAM AVAILABLE: {menu}. Set your "goal" field to EXACTLY ONE of: '
                 f"{ids} — the bare id, no sentence. First listed is the live opportunity. "

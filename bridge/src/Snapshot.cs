@@ -39,6 +39,10 @@ namespace WastedBridge
         // script has never seen him cross one. The escape's first move is "walk back to where you
         // came in", and only the bridge sees the tick BEFORE the door.
         [JsonProperty("last_outdoor")] public Vec3Dto LastOutdoor;
+
+        // Bridge 1.7.0 (CONTRACTS proposal v1.14) — what he is carrying. Always a present
+        // object, never null, so a consumer never has to null-check it (PhoneDto's rule).
+        [JsonProperty("weapon")] public WeaponDto Weapon = new WeaponDto();
     }
 
     /// <summary>
@@ -71,6 +75,22 @@ namespace WastedBridge
         [JsonProperty("since_s")] public float SinceS;
     }
 
+    /// <summary>
+    /// Bridge 1.7.0 (CONTRACTS proposal v1.14). `player.weapon`: the weapon in his hands, plus
+    /// how many rounds he has for each of the three the bridge tracks. `owned` is
+    /// HAS_PED_GOT_WEAPON over the LOADOUT SET ONLY — a name that is missing means "not one of
+    /// the three", never "he has nothing". `loadout` reports which prep mode the bridge is
+    /// running ("off" by default; see WeaponState for why).
+    /// </summary>
+    internal sealed class WeaponDto
+    {
+        [JsonProperty("name")] public string Name = "Unarmed";
+        [JsonProperty("class")] public string Class = "unarmed";
+        [JsonProperty("ammo")] public int Ammo;
+        [JsonProperty("owned")] public Dictionary<string, int> Owned = new Dictionary<string, int>();
+        [JsonProperty("loadout")] public string Loadout = "off";
+    }
+
     internal sealed class VehicleDto
     {
         [JsonProperty("handle")] public int Handle;
@@ -82,6 +102,19 @@ namespace WastedBridge
         [JsonProperty("upside_down")] public bool UpsideDown;
         [JsonProperty("in_water")] public bool InWater;
         [JsonProperty("stopped_for_s")] public float StoppedForS;
+
+        // Bridge 1.7.0 (CONTRACTS proposal v1.14). IS_ENTITY_IN_AIR through the SHVDN
+        // Entity.IsInAir wrapper (verified by IL: it pushes 0x886E37EC497200B6). The game's own
+        // answer to "are the wheels off the ground" — the field that turns the harness's
+        // `big_jump` from a declared-impossible goal into a read.
+        [JsonProperty("in_air")] public bool InAir;
+
+        // Bridge 1.7.0. "driver" | "passenger", from GET_PED_IN_VEHICLE_SEAT(veh, -1) == player.
+        // A single native call rather than SHVDN's Ped.SeatIndex, which reads the ped's memory at
+        // a hard-coded offset (verified by IL: MemDataMarshal.ReadByte) and would break silently
+        // on a game patch. Two values, not a seat index: "which of the twelve back seats" is not
+        // a question anything asks, and "is somebody else driving" is.
+        [JsonProperty("seat")] public string Seat;
     }
 
     internal sealed class LocationDto

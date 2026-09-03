@@ -10,6 +10,7 @@ where it is obviously an input and not evidence).
 
 from __future__ import annotations
 
+import itertools
 import random
 import re
 from pathlib import Path
@@ -22,11 +23,15 @@ from wasted_harness.behavior.roam import (
     BREADCRUMB_M,
     CALM_HEALTH_FRACTION,
     CATALOG,
+    CLEAN_RECOVERY_S,
+    DEATHS_PER_HOUR_STEP_DOWN,
     FALLBACK_GOAL_ID,
+    FREEWAY_ONRAMPS,
     GOAL_STUCK_S,
     GOAL_STUCK_STRIKES,
     GOALS_BEFORE_MISSION,
     GOALS_BY_ID,
+    HOLD_THREE_S,
     INDOOR_STILL_S,
     MAX_ESCAPE_RUNGS,
     PICKABLE_GOAL_IDS,
@@ -36,12 +41,21 @@ from wasted_harness.behavior.roam import (
     UNCOMPUTABLE_TRIGGERS,
     VEHICLE_RANK,
     HouseEscape,
+    RoamCadence,
     RoamEngine,
     RoamView,
+    air_reported,
     as_activity,
+    in_air,
     is_bus_model,
     is_police_model,
+    owns_weapon,
+    riding_as_passenger,
+    seat_reported,
+    supports_v17,
     vehicle_rank,
+    weapon_ammo,
+    weapon_reported,
 )
 from wasted_harness.brain.schemas import ACTION_TYPES, BRIDGE_TASKS
 from wasted_harness.bridge_client import GameState
@@ -272,6 +286,26 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
         in_vehicle=False, health=200,
         nearby_vehicles=[veh(5, "taxi", "Sedans", 6.0, driver="npc", pos=(6.0, 0.0, 0.0))],
     )
+    # `taxi_ride` needs the cab to read as STOPPED, which is a cross-tick
+    # derivation, so it gets its own engine fed two identical snapshots.
+    taxi_engine, taxi_clock = engine(seed=2)
+    taxi_kerb = armed_state(
+        in_vehicle=False,
+        nearby_vehicles=[veh(77, "taxi", "Sedans", 9.0, driver="npc", pos=(9.0, 0.0, 0.0))],
+    )
+    taxi_engine.observe(taxi_kerb)
+    taxi_clock.tick(2.0)
+    taxi_engine.observe(taxi_kerb)
+    # T7: six goals read a field that only a bridge >= 1.7.0 sends, so they need
+    # a snapshot that carries it — `armed_state` is `make_state` plus exactly
+    # those keys. Building them here rather than widening `make_state` keeps
+    # every other test in this file exercising the pre-1.7.0 shape, which is
+    # what the "an older bridge simply does not offer it" gate is for.
+    full_kit = {"Pistol": 60, "MicroSMG": 90, "PumpShotgun": 24}
+    gang_ped = {
+        "handle": 62, "model": "g_m_y_ballasout_01", "distance": 12.0,
+        "relationship": "neutral", "pos": {"x": 12.0, "y": 0.0, "z": 0.0},
+    }
     special = {
         "lose_the_cops": make_state(wanted=2),
         "take_my_car_back": on_foot,
@@ -280,11 +314,45 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
         "chase_that_car": driven,
         "honk_run": driven,
         "jack_a_driver": jackable,
+        "big_jump": armed_state(
+            in_vehicle=True,
+            vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+            in_air=False,
+        ),
+        "drive_by_run": armed_state(
+            in_vehicle=True,
+            vehicle={"class": "Sedans", "model": "sultan", "speed": 14.0},
+            health=200,
+            weapon=_weapon(owned=dict(full_kit)),
+            nearby_peds=[gang_ped],
+        ),
+        "three_star_survival": armed_state(
+            wanted=3,
+            in_vehicle=True,
+            vehicle={"class": "Sedans", "model": "sultan", "speed": 20.0},
+            health=200,
+        ),
+        "armed_rampage_block": armed_state(
+            in_vehicle=False,
+            health=200,
+            weapon=_weapon(owned=dict(full_kit)),
+            nearby_peds=[
+                {"handle": 41, "model": "a_m_y_hipster_01", "distance": 7.0,
+                 "relationship": "neutral", "pos": {"x": 7.0, "y": 0.0, "z": 0.0}},
+            ],
+        ),
+        "helicopter_grab": armed_state(
+            in_vehicle=False,
+            nearby_vehicles=[veh(88, "polmav", "Helicopters", 25.0, pos=(25.0, 0.0, 0.0))],
+        ),
+        "taxi_ride": taxi_kerb,
     }
     jacked_view = RoamView(rng=random.Random(1), stolen_from=(5, (6.0, 0.0, 0.0)))
     for goal in CATALOG:
         goal_state = special.get(goal.id, state)
         view = jacked_view if goal.id == "take_my_car_back" else e.view
+        if goal.id == "taxi_ride":
+            view = taxi_engine.view
         assert goal.needs(goal_state, view), f"{goal.id} was not offerable"
         plan, _snap = goal.plan(goal_state, view)
         if goal.handoff:
@@ -561,22 +629,30 @@ def test_lose_the_cops_is_not_ended_by_the_stars_it_exists_to_lose() -> None:
 # --- the story has to move -----------------------------------------------------
 
 
-def test_three_completed_goals_force_the_job_as_the_only_option() -> None:
+def test_six_completed_goals_OFFER_the_job_at_the_top_without_forcing_it() -> None:
+    """T7 retune: the goal counter offers; only the wall clock forces.
+
+    It used to force at three, which is how a stream that is supposed to be free
+    roam collapsed its whole menu to one goal after three cars.
+    """
     e, clock = engine()
     state = observed(e, make_state(starts=[start((400.0, 0.0, 0.0))]))
     for _ in range(GOALS_BEFORE_MISSION):
+        assert not e.mission_offered()
         assert not e.mission_forced()
         e.pick(state, goal_id="roam_the_block")
         e.close("completed")
         clock.tick(1.0)
         e.observe(state)
-    assert e.mission_forced()
+    assert e.mission_offered()
+    assert not e.mission_forced(), "completed goals must never collapse the menu"
     offers = [o.id for o in e.available(state)]
     assert offers[0] == "start_nearest_mission", "the job is what he picks"
     assert FALLBACK_GOAL_ID in offers, "never a menu of one goal that cannot move him"
+    assert len(offers) > 1, "an OFFER leaves the rest of the menu standing"
 
 
-def test_a_failed_goal_does_not_count_toward_the_three() -> None:
+def test_a_failed_goal_does_not_count_toward_the_offer() -> None:
     e, clock = engine()
     state = observed(e, make_state(starts=[start((400.0, 0.0, 0.0))]))
     for _ in range(GOALS_BEFORE_MISSION + 2):
@@ -584,10 +660,11 @@ def test_a_failed_goal_does_not_count_toward_the_three() -> None:
         e.close("timeout")
         clock.tick(1.0)
         e.observe(state)
-    assert not e.mission_forced(), "a timeout is not an achievement"
+    assert not e.mission_offered(), "a timeout is not an achievement"
+    assert not e.mission_forced()
 
 
-def test_fifteen_minutes_of_roam_forces_the_job_too() -> None:
+def test_the_wall_clock_is_the_only_thing_that_forces_the_job() -> None:
     e, clock = engine()
     state = observed(e, make_state(starts=[start((400.0, 0.0, 0.0))]))
     clock.tick(ROAM_BEFORE_MISSION_S - 1.0)
@@ -1375,3 +1452,636 @@ def test_honk_run_uses_the_horn_primitive_and_ends_on_distance() -> None:
     far = observed(e, _car_state(pos=(400.0, 0.0, 0.0), vehicle={"class": "Sedans", "model": "prairie", "speed": 10.0}))
     assert e.judge(far) == "done"
 
+
+# --- T7: the chaos ladder, the tiers, the cadence -------------------------------
+#
+# fix-opus-b. Every test below drives the public surface (`observe`, `available`,
+# `pick`, `judge`, `close`) with states from the builders at the top of this
+# file — no private attribute is poked except the FakeClock, which is the
+# injected clock and is meant to be driven.
+
+
+def _weapon(
+    name: str = "Pistol",
+    weapon_class: str = "gun",
+    ammo: int = 60,
+    owned: dict[str, int] | None = None,
+    loadout: str = "off",
+) -> dict[str, Any]:
+    """A bridge-1.7.0 `player.weapon` object, shaped exactly like the DTO."""
+    return {
+        "name": name,
+        "class": weapon_class,
+        "ammo": ammo,
+        "owned": {"Pistol": 60} if owned is None else owned,
+        "loadout": loadout,
+    }
+
+
+def armed_state(**over: Any) -> GameState:
+    """`make_state` plus the 1.7.0 fields, applied after validation-shaped merge.
+
+    `make_state` builds the body from the pre-1.7.0 contract, so the new keys are
+    grafted on here rather than threaded through it — that keeps every existing
+    test in this file testing exactly what it tested before, including the
+    "a pre-1.7.0 bridge omits the key" path the new goals gate on.
+    """
+    weapon = over.pop("weapon", _weapon())
+    in_air = over.pop("in_air", None)
+    seat = over.pop("seat", None)
+    state = make_state(**over)
+    body = state.model_dump(by_alias=True)
+    body["player"]["weapon"] = weapon
+    if body.get("vehicle") is not None:
+        if in_air is not None:
+            body["vehicle"]["in_air"] = in_air
+        if seat is not None:
+            body["vehicle"]["seat"] = seat
+    return GameState.model_validate(body)
+
+
+def test_the_1_7_0_fields_are_only_read_when_the_bridge_actually_sent_them() -> None:
+    """A pre-1.7.0 snapshot must read as "cannot tell", never as "unarmed"."""
+    old = make_state(in_vehicle=True)
+    assert not supports_v17(old)
+    assert not weapon_reported(old)
+    assert not air_reported(old)
+    assert not seat_reported(old)
+    new = armed_state(in_vehicle=True, in_air=True, seat="passenger")
+    assert supports_v17(new)
+    assert weapon_reported(new)
+    assert air_reported(new) and in_air(new)
+    assert seat_reported(new) and riding_as_passenger(new)
+    assert owns_weapon(new, "Pistol") and not owns_weapon(new, "MicroSMG")
+    assert weapon_ammo(new, "Pistol") == 60
+
+
+def test_tier_filters_the_menu_and_nothing_above_it_is_offerable() -> None:
+    """L1 sees no trouble; L3 sees everything its state allows."""
+    for level in (1, 2, 3):
+        clock = FakeClock()
+        e = RoamEngine(random.Random(3), clock=clock, level=level)
+        state = armed_state(
+            in_vehicle=False,
+            health=200,
+            nearby_peds=[ped(handle=40, model="a_m_y_hipster_01", distance=6.0)],
+            weapon=_weapon(owned={"Pistol": 60, "MicroSMG": 90, "PumpShotgun": 24}),
+        )
+        e.observe(state)
+        offers = e.available(state)
+        assert offers, "the menu is never empty"
+        assert all(o.goal.level <= level for o in offers), (
+            level, [(o.id, o.goal.level) for o in offers]
+        )
+    # And the tier really is the thing doing it: the same state at L3 offers a
+    # goal that L1 refused.
+    clock = FakeClock()
+    e3 = RoamEngine(random.Random(3), clock=clock, level=3)
+    state = armed_state(
+        in_vehicle=False,
+        health=200,
+        nearby_peds=[ped(handle=40, model="a_m_y_hipster_01", distance=6.0)],
+        weapon=_weapon(owned={"Pistol": 60}),
+    )
+    e3.observe(state)
+    assert "armed_rampage_block" in {o.id for o in e3.available(state)}
+    e1 = RoamEngine(random.Random(3), clock=FakeClock(), level=1)
+    e1.observe(state)
+    assert "armed_rampage_block" not in {o.id for o in e1.available(state)}
+
+
+def test_seven_deaths_in_an_hour_steps_the_tier_down_and_a_clean_run_gives_it_back() -> None:
+    """F5, as arithmetic: the synthetic seven-death hour the ticket asks for."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(5), clock=clock, level=3)
+    alive = armed_state(in_vehicle=False, nearby_peds=[ped(handle=40, distance=6.0)])
+    dead = armed_state(in_vehicle=False, dead=True, nearby_peds=[ped(handle=40, distance=6.0)])
+    assert e.level == 3
+
+    levels: list[int] = []
+    last_death_at = clock.t
+    for _i in range(7):
+        e.observe(alive)
+        # A death only counts while a goal is LOCKED — dying between goals is
+        # nobody's fault and must not move the tier.
+        if e.current is None:
+            e.pick(alive)
+        clock.tick(60.0)
+        e.observe(dead)
+        e.observe(dead)  # the wasted screen lasts many ticks; the edge fires once
+        last_death_at = clock.t
+        levels.append(e.level)
+        if e.current is not None:
+            e.close("player_down")
+        clock.tick(30.0)
+        e.observe(alive)
+
+    assert e.ladder.deaths_in_window() <= DEATHS_PER_HOUR_STEP_DOWN
+    assert e.level == 2, levels
+    assert levels[:5] == [3, 3, 3, 3, 3], "no step before the sixth death"
+    assert levels[5] == 2, "the sixth death is the one that costs a tier"
+
+    # A clean half hour buys it back, and not a second earlier. Measured from
+    # the LAST death, which is when the clean run started.
+    clock.t = last_death_at + CLEAN_RECOVERY_S - 1.0
+    e.observe(alive)
+    assert e.level == 2
+    clock.tick(2.0)
+    e.observe(alive)
+    assert e.level == 3
+
+
+def test_a_death_between_goals_does_not_cost_a_tier() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(5), clock=clock, level=2)
+    alive = armed_state()
+    dead = armed_state(dead=True)
+    for _ in range(10):
+        e.observe(alive)
+        e.observe(dead)
+        clock.tick(5.0)
+    assert e.ladder.deaths_in_window() == 0
+    assert e.level == 2
+
+
+def test_heat_goals_stay_on_the_menu_with_stars_up_and_nothing_else_does() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(7), clock=clock, level=3)
+    hot = armed_state(
+        wanted=2,
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+        health=200,
+        nearby_vehicles=[veh(2, "police", "Emergency", 15.0, pos=(15.0, 0.0, 0.0))],
+    )
+    e.observe(hot)
+    offers = e.available(hot)
+    ids = [o.id for o in offers]
+    assert ids[0] == "lose_the_cops", ids
+    assert "three_star_survival" in ids, ids
+    for offer in offers[1:]:
+        assert offer.goal.wants_heat, f"{offer.id} should have yielded to the cops"
+    # The pre-existing exemptions are still exemptions.
+    assert GOALS_BY_ID["steal_cop_car"].wants_heat
+    assert GOALS_BY_ID["earn_two_stars"].wants_heat
+
+
+def test_the_mission_is_offered_after_six_goals_and_forced_only_by_the_clock() -> None:
+    clock = FakeClock()
+    cadence = RoamCadence(goals_before_offer=6, force_after_s=40 * 60.0)
+    e = RoamEngine(random.Random(11), clock=clock, cadence=cadence, level=1)
+    # Counted on a state with NO mission markers, so the loop cannot pick
+    # `start_nearest_mission` itself — completing THAT resets the counter (it
+    # started a mission), which would make the test measure nothing.
+    roaming = armed_state(
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+    )
+    state = armed_state(
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+        starts=[start((300.0, 0.0, 0.0))],
+    )
+    e.observe(roaming)
+    assert not e.mission_offered() and not e.mission_forced()
+
+    for i in range(6):
+        e.observe(roaming)
+        picked = e.pick(roaming)
+        assert picked is not None
+        e.close("completed")
+        clock.tick(1.0)
+        # The offer arrives on the sixth completion, not before it.
+        assert e.mission_offered() is (i == 5), i
+    assert not e.mission_forced(), "six goals must NOT force; only the clock does"
+
+    e.observe(state)
+    ids = [o.id for o in e.available(state)]
+    assert ids[0] == "start_nearest_mission", ids
+    assert len(ids) > 1, "an OFFER leaves the rest of the menu standing"
+
+    # Forty minutes is what collapses it.
+    clock.tick(40 * 60.0)
+    assert e.mission_forced()
+    e.observe(state)
+    forced = [o.id for o in e.available(state)]
+    assert forced[0] == "start_nearest_mission"
+    assert set(forced) <= {"start_nearest_mission", FALLBACK_GOAL_ID}, forced
+
+
+def test_missions_off_beats_every_cadence_value() -> None:
+    clock = FakeClock()
+    e = RoamEngine(
+        random.Random(11),
+        clock=clock,
+        missions_enabled=False,
+        cadence=RoamCadence(goals_before_offer=1, force_after_s=1.0),
+        level=1,
+    )
+    state = armed_state(in_vehicle=True, starts=[start((300.0, 0.0, 0.0))])
+    clock.tick(10 * 60.0)
+    e.observe(state)
+    assert not e.mission_offered()
+    assert not e.mission_forced()
+    assert "start_nearest_mission" not in {o.id for o in e.available(state)}
+
+
+def test_the_cadence_reads_the_environment(monkeypatch: pytest.MonkeyPatch) -> None:
+    monkeypatch.setenv("WASTED_ROAM_GOALS_BEFORE_MISSION", "9")
+    monkeypatch.setenv("WASTED_ROAM_MISSION_FORCE_S", "600")
+    assert RoamCadence.from_env() == RoamCadence(goals_before_offer=9, force_after_s=600.0)
+    monkeypatch.setenv("WASTED_ROAM_GOALS_BEFORE_MISSION", "not a number")
+    assert RoamCadence.from_env().goals_before_offer == GOALS_BEFORE_MISSION
+
+
+def test_the_new_triggers_promote_with_a_why() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(13), clock=clock, level=2)
+    corner = armed_state(
+        in_vehicle=False,
+        health=200,
+        nearby_peds=[
+            ped(handle=60, model="g_m_y_ballasout_01", distance=15.0, pos=(15.0, 0.0, 0.0)),
+            ped(handle=61, model="g_m_y_famca_01", distance=18.0, pos=(18.0, 0.0, 0.0)),
+        ],
+    )
+    e.observe(corner)
+    top = e.available(corner)[0]
+    assert top.id == "gang_trouble", [o.id for o in e.available(corner)]
+    assert top.triggered and top.why == "wrong corner, wrong colours"
+
+    ramp = FREEWAY_ONRAMPS[0]["pos"]
+    e2 = RoamEngine(random.Random(13), clock=FakeClock(), level=1)
+    on_ramp = armed_state(
+        pos=(ramp[0] + 20.0, ramp[1], ramp[2]),
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 12.0},
+    )
+    e2.observe(on_ramp)
+    offers = e2.available(on_ramp)
+    freeway = next(o for o in offers if o.id == "freeway_run")
+    assert freeway.triggered and freeway.why == "there's the on-ramp"
+    assert offers[0].id == "freeway_run", [o.id for o in offers]
+
+
+def test_novelty_memory_still_holds_across_tiers() -> None:
+    """Never the same id twice running, and the last four sink."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(17), clock=clock, level=3)
+    state = armed_state(
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+        nearby_vehicles=[veh(1, "adder", "Super", 12.0, pos=(12.0, 0.0, 0.0))],
+    )
+    seen: list[str] = []
+    for _ in range(8):
+        e.observe(state)
+        picked = e.pick(state)
+        if picked is None:
+            clock.tick(5.0)
+            continue
+        locked, _first = picked
+        seen.append(locked.goal.id)
+        # Never offered the same id twice running.
+        e.close("completed")
+        clock.tick(20.0)
+        e.observe(state)
+        if not locked.goal.fallback:
+            # The fallback is exempt by design — it is the one guaranteed
+            # option, so `available()` is never empty and he is never out of
+            # ideas. Every other id must be off the next menu.
+            assert locked.goal.id not in {o.id for o in e.available(state)}, locked.goal.id
+    assert len(seen) >= 4
+    for a, b in itertools.pairwise(seen):
+        assert a != b, seen
+
+
+def test_goal_progress_is_folded_and_the_new_done_whens_read_it() -> None:
+    """`_held3_s`, `_ammo_spent`, `_from_start_m` — the cross-tick measurements."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(19), clock=clock, level=3)
+    hot = armed_state(
+        wanted=3,
+        in_vehicle=True,
+        vehicle={"class": "Sedans", "model": "sultan", "speed": 20.0},
+        health=200,
+    )
+    e.observe(hot)
+    picked = e.pick(hot, goal_id="three_star_survival")
+    assert picked is not None and picked[0].goal.id == "three_star_survival"
+    assert e.judge(hot) is None
+    clock.tick(HOLD_THREE_S - 1.0)
+    e.reset_movement_anchor()
+    assert e.judge(hot) is None, "eighty-nine seconds is not ninety"
+    clock.tick(2.0)
+    e.reset_movement_anchor()
+    assert e.judge(hot) == "done"
+    assert e.current is not None and e.current.snapshot["_held3_s"] >= HOLD_THREE_S
+
+    # Dropping below three stars restarts the clock rather than banking it.
+    e.close("completed")
+    clock.tick(60.0)
+    e.observe(hot)
+    e.pick(hot, goal_id="three_star_survival")
+    clock.tick(60.0)
+    cooled = armed_state(wanted=1, in_vehicle=True, health=200)
+    e.reset_movement_anchor()
+    assert e.judge(cooled) is None
+    assert e.current is not None and e.current.snapshot["_held3_s"] == 0.0
+
+
+def test_a_drive_by_that_fired_nothing_never_completes() -> None:
+    """The native is UNVERIFIED on a player ped; the goal is built to say so."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(23), clock=clock, level=2)
+    full = {"Pistol": 60, "MicroSMG": 90}
+    at_the_corner = armed_state(
+        in_vehicle=True,
+        vehicle={"class": "Sedans", "model": "sultan", "speed": 14.0},
+        health=200,
+        weapon=_weapon(owned=dict(full)),
+        nearby_peds=[ped(handle=60, model="g_m_y_ballasout_01", distance=12.0, pos=(12.0, 0.0, 0.0))],
+    )
+    e.observe(at_the_corner)
+    picked = e.pick(at_the_corner, goal_id="drive_by_run")
+    assert picked is not None and picked[0].goal.id == "drive_by_run"
+    assert picked[1]["type"] == "drive_by"
+
+    # Drove away, fired nothing: NOT done, because nothing happened.
+    far_no_shot = armed_state(
+        pos=(400.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"class": "Sedans", "model": "sultan", "speed": 20.0},
+        health=200,
+        weapon=_weapon(owned=dict(full)),
+    )
+    clock.tick(20.0)
+    e.reset_movement_anchor()
+    assert e.judge(far_no_shot) is None
+
+    # Same distance, rounds gone: done.
+    far_shot = armed_state(
+        pos=(400.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"class": "Sedans", "model": "sultan", "speed": 20.0},
+        health=200,
+        weapon=_weapon(owned={"Pistol": 60, "MicroSMG": 61}),
+    )
+    e.reset_movement_anchor()
+    assert e.judge(far_shot) == "done"
+
+
+def test_big_jump_needs_the_airtime_field_and_grades_on_it() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(29), clock=clock, level=1)
+    driving = armed_state(
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+        in_air=False,
+    )
+    e.observe(driving)
+    assert "big_jump" in {o.id for o in e.available(driving)}
+    # A bridge that does not send the field must not offer the goal at all.
+    old_bridge = make_state(
+        in_vehicle=True, vehicle={"class": "Sports", "model": "banshee", "speed": 30.0}
+    )
+    e_old = RoamEngine(random.Random(29), clock=FakeClock(), level=1)
+    e_old.observe(old_bridge)
+    assert "big_jump" not in {o.id for o in e_old.available(old_bridge)}
+
+    picked = e.pick(driving, goal_id="big_jump")
+    assert picked is not None and picked[0].goal.id == "big_jump"
+    # Airborne on the doorstep is a kerb, not a jump.
+    kerb = armed_state(
+        pos=(10.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+        in_air=True,
+    )
+    e.reset_movement_anchor()
+    assert e.judge(kerb) is None
+    airborne = armed_state(
+        pos=(400.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+        in_air=True,
+    )
+    e.reset_movement_anchor()
+    assert e.judge(airborne) == "done"
+
+
+def test_taxi_ride_is_graded_on_the_seat_not_on_being_in_the_car() -> None:
+    clock = FakeClock()
+    e = RoamEngine(random.Random(31), clock=clock, level=1)
+    cab = veh(77, "taxi", "Sedans", 9.0, driver="npc", pos=(9.0, 0.0, 0.0))
+    kerb = armed_state(in_vehicle=False, nearby_vehicles=[cab])
+    e.observe(kerb)
+    clock.tick(2.0)
+    e.observe(kerb)  # a second identical snapshot: the cab reads as stopped
+    assert "taxi_ride" in {o.id for o in e.available(kerb)}
+    picked = e.pick(kerb, goal_id="taxi_ride")
+    assert picked is not None
+    types = [s["type"] for s in picked[0].plan]
+    assert types[0] == "set_waypoint", types
+    assert types[-1] == "enter_vehicle_seat", types
+    assert picked[0].plan[-1]["params"] == {"handle": 77, "seat": 2}
+
+    # He jacked it instead: in the cab, driving it. NOT a taxi ride.
+    jacked = armed_state(
+        pos=(500.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"handle": 77, "class": "Sedans", "model": "taxi", "speed": 18.0},
+        seat="driver",
+    )
+    clock.tick(30.0)
+    e.reset_movement_anchor()
+    assert e.judge(jacked) is None
+    rode = armed_state(
+        pos=(500.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"handle": 77, "class": "Sedans", "model": "taxi", "speed": 18.0},
+        seat="passenger",
+    )
+    e.reset_movement_anchor()
+    assert e.judge(rode) == "done"
+
+
+def test_pick_a_fight_is_always_a_fist_fight() -> None:
+    """CLAUDE.md-adjacent: a the agent who owns a pistol must not execute a pedestrian."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(37), clock=clock, level=2)
+    state = armed_state(
+        in_vehicle=False,
+        health=200,
+        weapon=_weapon(name="Pistol", weapon_class="gun", owned={"Pistol": 60}),
+        nearby_peds=[ped(handle=40, model="a_m_y_hipster_01", distance=6.0)],
+    )
+    e.observe(state)
+    picked = e.pick(state, goal_id="pick_a_fight")
+    assert picked is not None
+    fight = next(s for s in picked[0].plan if s["type"] == "fight_ped")
+    assert fight["params"]["weapon"] == "unarmed", fight
+    # ...and the armed goal asks for the other one.
+    e.close("completed")
+    clock.tick(30.0)
+    e3 = RoamEngine(random.Random(37), clock=FakeClock(), level=3)
+    e3.observe(state)
+    rampage = e3.pick(state, goal_id="armed_rampage_block")
+    assert rampage is not None
+    assert rampage[0].plan[0]["params"]["weapon"] == "armed"
+
+
+def test_every_new_goal_is_offerable_in_some_state_and_plans_legal_actions() -> None:
+    """The T7 half of the catalog-wide guarantee, with 1.7.0-shaped snapshots."""
+    full = {"Pistol": 60, "MicroSMG": 90, "PumpShotgun": 24}
+    gang_ped = ped(handle=60, model="g_m_y_ballasout_01", distance=12.0, pos=(12.0, 0.0, 0.0))
+    cases: dict[str, GameState] = {
+        "big_jump": armed_state(
+            in_vehicle=True,
+            vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+            in_air=False,
+        ),
+        "drive_by_run": armed_state(
+            in_vehicle=True,
+            vehicle={"class": "Sedans", "model": "sultan", "speed": 14.0},
+            health=200,
+            weapon=_weapon(owned=dict(full)),
+            nearby_peds=[gang_ped],
+        ),
+        "three_star_survival": armed_state(
+            wanted=3,
+            in_vehicle=True,
+            vehicle={"class": "Sedans", "model": "sultan", "speed": 20.0},
+            health=200,
+        ),
+        "armed_rampage_block": armed_state(
+            in_vehicle=False,
+            health=200,
+            weapon=_weapon(owned=dict(full)),
+            nearby_peds=[ped(handle=41, model="a_m_y_hipster_01", distance=7.0)],
+        ),
+        "helicopter_grab": armed_state(
+            in_vehicle=False,
+            nearby_vehicles=[veh(88, "polmav", "Helicopters", 25.0, pos=(25.0, 0.0, 0.0))],
+        ),
+    }
+    for goal_id, state in cases.items():
+        goal = GOALS_BY_ID[goal_id]
+        e = RoamEngine(random.Random(41), clock=FakeClock(), level=3)
+        e.observe(state)
+        assert goal.needs(state, e.view), f"{goal_id} was not offerable"
+        plan, _snap = goal.plan(state, e.view)
+        assert plan, f"{goal_id} materialised an empty plan"
+        for step in plan:
+            assert step["type"] in ACTION_TYPES, f"{goal_id}: {step['type']}"
+        assert goal_id in {o.id for o in e.available(state)}, goal_id
+
+    # taxi_ride needs two snapshots for the cab to read as stopped.
+    clock = FakeClock()
+    e = RoamEngine(random.Random(41), clock=clock, level=1)
+    kerb = armed_state(
+        in_vehicle=False,
+        nearby_vehicles=[veh(77, "taxi", "Sedans", 9.0, driver="npc", pos=(9.0, 0.0, 0.0))],
+    )
+    e.observe(kerb)
+    clock.tick(2.0)
+    e.observe(kerb)
+    assert "taxi_ride" in {o.id for o in e.available(kerb)}
+    plan, _ = GOALS_BY_ID["taxi_ride"].plan(kerb, e.view)
+    for step in plan:
+        assert step["type"] in ACTION_TYPES, step
+
+
+# --- earn_two_stars provokes before it drives (soak finding, 2026-09-03) -------
+
+
+def test_earn_two_stars_opens_with_a_drive_by_when_he_has_the_smg() -> None:
+    """Measured: the get-in-a-car-and-run-lights plan sat at zero stars for its whole
+    180 s timeout — the longest silent stretch in the 12-minute soak. Armed and seated,
+    the plan now fires out of the window first (bridge 1.7.0 `drive_by`), then drives."""
+    e, _ = engine()
+    state = observed(
+        e,
+        armed_state(
+            in_vehicle=True, health=200,
+            weapon=_weapon(name="MicroSMG", owned={"Pistol": 60, "MicroSMG": 90}),
+            nearby_peds=[ped(handle=62, distance=12.0)],
+        ),
+    )
+    picked = e.pick(state, goal_id="earn_two_stars")
+    assert picked is not None
+    plan = picked[0].plan
+    assert plan[0]["type"] == "drive_by" and plan[0]["params"]["handle"] == 62
+    assert plan[-1]["type"] == "wander_drive"
+
+
+def test_earn_two_stars_opens_with_a_burst_on_foot_when_armed() -> None:
+    e, _ = engine()
+    state = observed(
+        e,
+        armed_state(
+            in_vehicle=False, health=200,
+            weapon=_weapon(owned={"Pistol": 60}),
+            nearby_peds=[ped(handle=71, distance=8.0)],
+            nearby_vehicles=[veh(5, "taxi", "Sedans", 10.0, driver="npc", pos=(10.0, 0.0, 0.0))],
+        ),
+    )
+    picked = e.pick(state, goal_id="earn_two_stars")
+    assert picked is not None
+    types = [s["type"] for s in picked[0].plan]
+    assert types[0] == "shoot_at" and picked[0].plan[0]["params"]["handle"] == 71
+    assert types[-1] == "wander_drive"
+
+
+def test_earn_two_stars_unarmed_is_the_carjack_it_always_was() -> None:
+    """No gun, no invented gun (CLAUDE.md rule 5): the plan is the old one."""
+    e, _ = engine()
+    state = observed(
+        e,
+        make_state(
+            in_vehicle=False, health=200,
+            nearby_peds=[ped(handle=71, distance=8.0)],
+            nearby_vehicles=[veh(5, "taxi", "Sedans", 10.0, driver="npc", pos=(10.0, 0.0, 0.0))],
+        ),
+    )
+    picked = e.pick(state, goal_id="earn_two_stars")
+    assert picked is not None
+    types = [s["type"] for s in picked[0].plan]
+    assert "shoot_at" not in types and "drive_by" not in types
+    assert types[-1] == "wander_drive"
+
+
+def test_big_jump_picked_next_to_the_ramp_still_counts_the_jump() -> None:
+    """The approach is the nearest one, so he can start 60 m from it: the jump then
+    happens under the 100 m run-up bar. Eight seconds in, airborne is the jump."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(29), clock=clock, level=1)
+    driving = armed_state(
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+        in_air=False,
+    )
+    e.observe(driving)
+    assert e.pick(driving, goal_id="big_jump") is not None
+    clock.tick(10.0)
+    near = armed_state(
+        pos=(60.0, 0.0, 0.0),
+        in_vehicle=True,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 30.0},
+        in_air=True,
+    )
+    e.reset_movement_anchor()
+    assert e.judge(near) == "done"
+
+
+def test_the_chaos_level_can_be_pinned_from_the_environment(monkeypatch) -> None:
+    """docs/go-live.md §6: `WASTED_CHAOS_LEVEL` pins the starting tier; the ladder
+    still moves itself from there, and nonsense is ignored, not fatal."""
+    monkeypatch.setenv("WASTED_CHAOS_LEVEL", "1")
+    assert RoamEngine(random.Random(1), clock=FakeClock()).ladder.level == 1
+    monkeypatch.setenv("WASTED_CHAOS_LEVEL", "9")
+    assert RoamEngine(random.Random(1), clock=FakeClock()).ladder.level == 3
+    monkeypatch.setenv("WASTED_CHAOS_LEVEL", "lots")
+    assert RoamEngine(random.Random(1), clock=FakeClock()).ladder.level == 2
+    monkeypatch.delenv("WASTED_CHAOS_LEVEL")
+    assert RoamEngine(random.Random(1), clock=FakeClock()).ladder.level == 2

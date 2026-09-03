@@ -85,6 +85,17 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("player.last_outdoor.x", Kind.Number),
             new FieldSpec("player.last_outdoor.y", Kind.Number),
             new FieldSpec("player.last_outdoor.z", Kind.Number),
+            // Bridge 1.7.0 (CONTRACTS proposal v1.14, fix-opus-b): what he is carrying. Always a
+            // present object; `owned` is a map of WeaponHash member name -> rounds, over the
+            // three tracked loadout weapons only, so it is legitimately empty most of the time.
+            new FieldSpec("player.weapon", Kind.Object),
+            new FieldSpec("player.weapon.name", Kind.String),
+            new FieldSpec("player.weapon.class", Kind.String,
+                allowed: new[] { "unarmed", "melee", "gun", "projectile", "unknown" }),
+            new FieldSpec("player.weapon.ammo", Kind.Integer),
+            new FieldSpec("player.weapon.owned", Kind.Object),
+            new FieldSpec("player.weapon.loadout", Kind.String,
+                allowed: new[] { "off", "ammunation" }),
 
             // null when on foot — the key is always present (contract example shows "vehicle": null)
             new FieldSpec("vehicle", Kind.Object, nullable: true),
@@ -97,6 +108,11 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("vehicle.upside_down", Kind.Boolean),
             new FieldSpec("vehicle.in_water", Kind.Boolean),
             new FieldSpec("vehicle.stopped_for_s", Kind.Number),
+            // Bridge 1.7.0: IS_ENTITY_IN_AIR, and who has the wheel. `seat` is nullable because
+            // a failed native read must say "cannot tell" rather than pick one of the answers.
+            new FieldSpec("vehicle.in_air", Kind.Boolean),
+            new FieldSpec("vehicle.seat", Kind.String, nullable: true,
+                allowed: new[] { "driver", "passenger" }),
 
             new FieldSpec("location", Kind.Object),
             new FieldSpec("location.street", Kind.String),

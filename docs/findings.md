@@ -120,3 +120,28 @@ Parallelism: T1+T2 (a), T3+T4+T5 (c), T6+T7 (b), T8+T9 (d), T10 (e) touch disjoi
 `main.py` and `TaskEngine.cs`/`BridgeRouter.cs`, which are split by REGION (a: movement rungs and
 driving cases; c: say/dashboard paths; d: reflex rungs and phone cases; b: weapon/combat cases).
 Merge order a → c → b → d.
+
+
+## Ticket status (2026-09-03, PHASE 3 integration)
+
+T1 DONE (fix-opus-a) · T2 DONE (fix-opus-a) · T3/T4/T5 DONE (fix-sonnet-c) · T6/T7 DONE
+(fix-opus-b) · T8/T9 DONE (fix-sonnet-d) · T10 DONE (fix-sonnet-e) · **T11 OPEN — operator**
+(the enabled API key onto the box; both the box's and the dev machine's keys return 401).
+
+Whole-tree audit (`verify`, read-only): movement single-owner PASS; goal box plugin-only PASS;
+no live brain call reachable from tests/tools PASS; commentary-without-event FAIL on two
+harness-authored lines — both removed (below).
+
+## Integration findings (found by the soak / the audit after the fan-out; all fixed, all tested)
+
+| # | What the trace showed | Root cause | Fix |
+|---|---|---|---|
+| I1 | A locked goal sat with nothing running until the stuck watchdog failed it ~20 s later | `ActivityRunner.next_step` abandons the step machine on any foreign RUNNING task; only the wheel's preempt hook closes `roam.current`. Phone tasks never touch the wheel, and `_begin_roam_goal` then released roam's own lease on a `pick()` with nothing to pick | `main._drive_activities` routes on the lock; `_advance_roam_goal` restarts the plan (`_restart_locked_plan`) once the phone task is done, and waits while it runs (posting over it would cancel the answer/hang-up). `tests/test_goal_survives_phone.py` |
+| I2 | `earn_two_stars` sat at zero stars for its whole 180 s timeout — the longest silent stretch | The plan was get-in-a-car-and-run-red-lights; the police do not care | Armed: `drive_by` from the seat / `shoot_at` on foot first (bridge 1.7.0 verbs), then drive. Unarmed: the old carjack. `test_roam.py::test_earn_two_stars_*` |
+| I3 | The goal above, once active, was closed as `wanted` one poll after its drive-by earned the star | `_drive_activities`' stand-down gate had no `wants_heat` exemption (only `judge()` did) | Gate exempts `roam.heat_is_the_goal()` |
+| I4 | ...and the threat reflex fled the star on the next poll, preempting the goal | Rung 6 of `threat_action` (stars alone → `flee_police`) knew nothing about the goal | `heat_wanted=` kwarg; only the stars-alone rung yields, every damage rung still fires. `test_recovery.py::test_the_stars_only_rung_*` |
+| I5 | A completed goal, a stopped car, 12.7 s of nothing | The brain said `wait`; the quiet period held the drive-away (`deliberate_wait`) AND the next goal pick, and the next think said `wait` again — the "he's just thinking, not playing" loop seen on stream | `wait` is honoured only with a reason (cutscene / switch / retry / dead / mission / stars), capped at 30 s; in free roam with control it is logged and ignored. `test_mission_following.py::test_a_wait_in_free_roam_*` |
+| I6 | `big_jump` airborne at 107 s, timed out at 216 s | The approach is the nearest one; a goal picked 60 m from the ramp jumps under the 100 m run-up bar | `done_when` also accepts airtime ≥ 8 s into the goal; timeout 240 → 120 s. `test_roam.py::test_big_jump_picked_next_to_the_ramp_*` |
+| I7 | — (audit) | `flee_ped` in `schemas.BRIDGE_TASKS` and the catalog but not in `bridge_client.BRIDGE_TASK_TYPES` — the same miss as the phone bug | Added; `test_bridge_client.py` tuple updated |
+| I8 | — (audit) | "Lost the screen feed" and "Something rebooted" were spoken with no §4 event | Both lines removed; the log keeps the record |
+| I9 | — (audit) | A break start posted `stop` under the previous iteration's wheel tick number | `_handle_breaks` opens and closes its own wheel tick |

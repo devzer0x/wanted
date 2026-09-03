@@ -5,7 +5,8 @@ using GTA.Native;
 namespace WastedBridge
 {
     /// <summary>
-    /// Game-thread-only task state machine implementing the 11 CONTRACTS.md §1 task types.
+    /// Game-thread-only task state machine implementing the CONTRACTS.md §1 task types (plus the
+    /// proposed flee_ped - see StartFleePed).
     /// Tasks map to the game's own ped-task natives (the same pathfinding/driving NPCs use).
     /// Every method here must be called from the script's Tick handler, never from HTTP threads.
     /// </summary>
@@ -123,13 +124,37 @@ namespace WastedBridge
 
         // The native's FIRST argument is the control GROUP, not the action: 0 = PLAYER,
         // 1 = CAMERA, 2 = FRONTEND. The phone reads FRONTEND, but SHVDN's own control helpers pass
-        // 0 throughout and the engine is documented as tolerating it, so 0 is what ships and it is
-        // LOGGED on every task start (see StartPhoneInput) — if the live smoke test shows the input
-        // never registering, this is the one number to flip, and hot-reload means that costs a
-        // rebuild and a script reload, not a game restart. UNVERIFIED against the running game:
-        // nothing on a dev machine can tell 0 from 2 here.
-        private const int PhoneControlGroup = 0;
+        // 0 throughout and the engine is documented as tolerating it, so 0 is tried FIRST.
+        //
+        // T8 (findings.md R6) — FALLBACK ORDERING, not a single guessed number: nothing on a dev
+        // machine can tell 0 from 2 here (this needs the live smoke test), so rather than hard-code
+        // one and hope, the injector spends the first half of PhoneInputTimeoutMs on group 0, and if
+        // the phone state has not moved by then, switches to group 2 for the remainder. Both
+        // StartPhoneInput and UpdatePhoneInput log which group is ACTIVE (StartPhoneInput once at
+        // the start, the switch itself once more if it happens), and Done()/Fail() at the end of a
+        // completed attempt name the group that was active when the state actually changed — that
+        // is the one line the live smoke test reads to know which to hard-code from here on. A
+        // virtual/synthetic gamepad (a third, input-SOURCE-level path rather than a different
+        // control GROUP) is explicitly OUT OF SCOPE: SHVDN exposes no native or wrapper to
+        // synthesize a gamepad device from the game thread — only SET_CONTROL_VALUE_NEXT_FRAME
+        // against the engine's existing control groups — and inventing one would mean writing to
+        // the Windows input stack directly, which is exactly the kind of unverified guess CLAUDE.md
+        // rule 6 forbids for a capability nothing here has asked for.
+        private const int PhoneControlGroupPrimary = 0;
+        private const int PhoneControlGroupFallback = 2;
         private const float PhoneControlValue = 1f;
+
+        // Which group THIS episode is currently injecting, and whether the fallback has already
+        // been tried — both reset per task in StartPhoneInput, the same lifecycle every other
+        // per-episode field on this class (e.g. _stuckStage) already follows.
+        private int _phoneActiveGroup;
+        private bool _phoneFallbackTried;
+
+        // T8's phone-UI-stuck watchdog state (UpdatePhoneUiWatchdog). NOT per-task-episode like the
+        // two fields above — this runs every tick regardless of `_req`, so it needs its own
+        // independent lifetime rather than being reset by StartPhoneInput.
+        private int? _phoneUiIdleSince;      // Game.GameTime the UI was first seen up, ring/call both false
+        private int _lastPhoneUiDestroyAt = int.MinValue;
 
         // How long either phone task keeps injecting before giving up. The input only registers
         // once the phone has RISEN on screen — the game raises it by itself for an incoming call,
@@ -142,11 +167,71 @@ namespace WastedBridge
         // the call is still ringing.
         private const int PhoneInputTimeoutMs = 6000;
 
+        // T8: how long the phone UI may sit open with neither a ring nor a call before
+        // UpdatePhoneUiWatchdog forces it closed. Longer than PhoneInputTimeoutMs on purpose: an
+        // answer_call/reject_call task in flight already owns clearing the UI within 6 s on its
+        // own, so this is the backstop for the UI being up for a reason THIS bridge did not cause.
+        private const int PhoneUiStuckTimeoutMs = 10000;
+
+        // ---- T1/R1: the drive-start sequence -------------------------------------------------
+        //
+        // ROOT CAUSE, measured. Bridge log 2026-09-03 09:14Z: `enter_nearest_vehicle` started ->
+        // ~1.0 s -> `failed: cleared_by_game`, 111 times in two hours, re-posted within 300 ms by
+        // whichever harness owner got the wheel next. `/state` at the same moment: `in_vehicle:
+        // false`, an EMPTY Prairie 2.84 m away. Nothing in this file ever confirmed the DRIVER'S
+        // SEAT (only `ped.IsInVehicle()`, which is true in a passenger seat and true mid-entry),
+        // nothing ever started the ENGINE, and nothing ever checked, after issuing a drive task,
+        // that the task was alive and the wheels were turning.
+        //
+        // The sequence every drive task now runs through PrepareToDrive/ApplyDriveTuning/
+        // ArmDriveVerification, in this order:
+        //   1. seat        IS_PED_IN_VEHICLE(ped, veh, atGetIn: false) AND
+        //                  GET_PED_IN_VEHICLE_SEAT(veh, -1) == ped
+        //   2. engine      SET_VEHICLE_ENGINE_ON(veh, true, true, false)
+        //   3. the task    TASK_VEHICLE_* (unchanged)
+        //   4. tuning      SET_DRIVE_TASK_CRUISE_SPEED + SET_DRIVER_ABILITY +
+        //                  SET_DRIVER_AGGRESSIVENESS - all three documented as effective only
+        //                  while the drive task is ALREADY running, hence after step 3
+        //   5. verify      +2 s: script task live AND veh.Speed > 0, else ONE re-issue, else fail
+
+        /// <summary>How long after a drive task is issued (or re-issued) the bridge grades whether
+        /// it actually started. Long enough for the engine to close a door, start the motor and get
+        /// the car rolling; short enough that a dead order is reported while leaving is still
+        /// survivable (the harness's own motion watchdog, behavior/vehicle.py, sits at 6 s and
+        /// grades a stronger 1.5 m/s bar - two layers, deliberately different bars).</summary>
+        private const int DriveStartVerifyMs = 2000;
+
+        /// <summary>ONE re-issue per task episode, then a reasoned failure. Not a loop: a re-post
+        /// storm is the measured bug (111 clears / 2 h), so the cap is the point of the mechanism,
+        /// not a detail of it.</summary>
+        private const int MaxDriveStarts = 1;
+
+        // ---- T1: the no-progress watchdog inside a movement step -----------------------------
+        //
+        // walk_to's own timeout is 5 minutes and enter_nearest_vehicle's is 1 minute: long enough
+        // for a whole roam goal to die of old age while the ped stands against a wall. This is the
+        // per-step stall check the ticket asks for - 10 s without moving, escalate ONCE by
+        // re-issuing the same order, 10 s more, fail the step with a reason the harness can read.
+        //
+        // NOT applied to follow_entity (a tail standing still next to a target that is also
+        // standing still is correct), nor to the combat/cover/phone tasks (standing and shooting is
+        // the task). Applied to a VEHICLE task only once the engine's own jam ladder below has
+        // spent its attempt budget: a car stopped at a red light for 10 s is not stalled, and
+        // failing every drive at every junction would be worse than the bug being fixed.
+        private const int NoProgressWindowMs = 10000;
+
+        /// <summary>How far he has to get in <see cref="NoProgressWindowMs"/> to count as making
+        /// progress. Above walk_to's own 2 m arrival radius would make arrival unreachable, so it
+        /// sits below it: 1.5 m is further than a ped shuffles on the spot and less than one
+        /// walking second.</summary>
+        private const float NoProgressMinMoveM = 1.5f;
+
         // Watchdog timeouts (bridge-side judgement; contract names "timeout" as a failure detail).
         private const int DriveToTimeoutMs = 600000;
         private const int WalkToTimeoutMs = 300000;
         private const int EnterVehicleTimeoutMs = 60000;
         private const int ExitVehicleTimeoutMs = 30000;
+        private const int FleePedTimeoutMs = 120000;
 
         // CONTRACTS v1.10 item 4 (task liveness / "cleared_by_game"; recipe:
         // docs/research/brief-script-task-status.json). WaitingToStart is a legal opening state for
@@ -184,6 +269,20 @@ namespace WastedBridge
         private uint? _expectedTaskHash;
         private int _expectedHashSetAt;      // Game.GameTime ms, reset on every (re)issue
         private int _clearedStreak;          // consecutive Update() ticks the hash has mismatched
+
+        // T1 drive-start verification state, reset per task episode in Start(). Deliberately
+        // primitive-typed, like _expectedTaskHash above and for the same reason: a FIELD of a SHVDN
+        // type forces eager type resolution when the CLR loads TaskEngine, which throws
+        // TypeLoadException against bridge/tools/offline-checks' stub (it defines exactly one GTA
+        // type). That is why the progress anchor below is two floats rather than a Vector3.
+        private int _driveVerifyAt;          // Game.GameTime ms at which to grade the start; 0 = off
+        private int _driveStarts;            // re-issues of the drive task this episode (cap: 1)
+
+        // T1 no-progress watchdog state, reset per task episode in Start().
+        private int _progressAt;             // Game.GameTime ms the current no-progress window opened
+        private float _progressAnchorX;
+        private float _progressAnchorY;
+        private int _progressEscalations;    // escalations this episode (cap: 1, then fail)
 
         // Item 5: anti-stuck recovery ladder state, reset per task episode in Start().
         private enum StuckStage { Idle, Reversing, Turning }
@@ -236,6 +335,10 @@ namespace WastedBridge
             _stuckStage = StuckStage.Idle;   // item 5: fresh episode, fresh attempt budget
             _stuckAttempts = 0;
             _stuckTurnLeftNext = true;
+            _driveVerifyAt = 0;          // T1: armed by ArmDriveVerification at each drive issue
+            _driveStarts = 0;
+            _progressEscalations = 0;
+            _progressAt = 0;
 
             Ped ped = Game.Player.Character;
             if (ped == null || !ped.Exists())
@@ -260,10 +363,7 @@ namespace WastedBridge
                 }
 
                 case "walk_to":
-                    ped.Task.FollowNavMeshTo(new Vector3(req.X, req.Y, req.Z),
-                        req.Run ? PedMoveBlendRatio.Run : PedMoveBlendRatio.Walk);
-                    // Wraps TASK_FOLLOW_NAV_MESH_TO_COORD -> FollowNavMeshToCoord.
-                    SetExpectedHash(ScriptTaskNameHash.FollowNavMeshToCoord);
+                    IssueWalkTo(ped);
                     break;
 
                 case "enter_nearest_vehicle":
@@ -345,6 +445,23 @@ namespace WastedBridge
                     StartFightPed(ped, req);
                     break;
 
+                case "flee_ped":
+                    StartFleePed(ped, req);
+                    break;
+
+                // --- bridge 1.7.0 (fix-opus-b, T6) --------------------------------------
+                case "shoot_at":
+                    StartShootAt(ped, req);
+                    break;
+
+                case "drive_by":
+                    StartDriveBy(ped, req);
+                    break;
+
+                case "enter_vehicle_seat":
+                    StartEnterVehicleSeat(ped, req);
+                    break;
+
                 case "answer_call":
                 case "reject_call":
                     StartPhoneInput(ped, req);
@@ -375,6 +492,13 @@ namespace WastedBridge
         /// <summary>Per-tick completion checks per the CONTRACTS §1 table.</summary>
         public void Update(Ped ped, bool playerDead, bool playerArrested)
         {
+            // T8: runs every tick regardless of `_status`/`_req` below — see
+            // UpdatePhoneUiWatchdog's own docstring for why it cannot wait for a phone task.
+            if (ped != null && ped.Exists() && !playerDead && !playerArrested)
+            {
+                UpdatePhoneUiWatchdog(ped);
+            }
+
             if (_status != "running" || _req == null)
             {
                 return;
@@ -407,6 +531,22 @@ namespace WastedBridge
             // progress can itself Fail the task (follow_entity's target going away during a
             // reissue), so re-check status the same way CheckLiveness's caller does.
             UpdateStuckRecovery(ped);
+            if (_status != "running")
+            {
+                return;
+            }
+
+            // T1: did the drive order actually take? +2 s after each issue, once per issue.
+            UpdateDriveStart(ped);
+            if (_status != "running")
+            {
+                return;
+            }
+
+            // T1: the per-step stall watchdog. Runs after the two above so a task the game already
+            // cleared, or a drive that never started, is reported as THAT rather than as "he did
+            // not move" - the diagnosis the harness reads has to name the actual cause.
+            UpdateProgress(ped);
             if (_status != "running")
             {
                 return;
@@ -504,6 +644,20 @@ namespace WastedBridge
                     UpdateFightPed();
                     break;
 
+                case "flee_ped":
+                    UpdateFleePed(ped, elapsed);
+                    break;
+
+                // --- bridge 1.7.0 (fix-opus-b, T6) --------------------------------------
+                case "shoot_at":
+                case "drive_by":
+                    UpdateTimedFire(elapsed);
+                    break;
+
+                case "enter_vehicle_seat":
+                    UpdateEnterVehicleSeat(ped, elapsed);
+                    break;
+
                 case "answer_call":
                 case "reject_call":
                     UpdatePhoneInput(ped, elapsed);
@@ -573,7 +727,307 @@ namespace WastedBridge
             _clearedStreak++;
             if (_clearedStreak >= LivenessDebounceTicks)
             {
-                Fail("cleared_by_game");
+                // T1. A DRIVE task the game clears gets exactly one re-issue before it is reported
+                // failed; everything else fails immediately, unchanged. The measured storm
+                // (`started` -> ~1 s -> `failed: cleared_by_game`, 111 times) was the harness
+                // re-posting into a game that was going to clear the task again, so the retry
+                // belongs HERE, where it is counted and capped, not out there where three owners
+                // each get their own turn.
+                //
+                // The failure detail stays exactly "cleared_by_game" - the contract's own v1.10
+                // value, and the string behavior/recovery.py's ClearedByGameBackoff matches
+                // EXACTLY (`(task.detail or "") != "cleared_by_game"`). Renaming it here would
+                // silently disarm the harness-side backoff, which is the other half of the same
+                // fix. What the ticket calls "drive_did_not_start" is the OTHER failure mode -
+                // the task is alive and the wheels never turned - and it has its own detail below.
+                if (!IsVehicleDrivingTask() || _driveStarts >= MaxDriveStarts)
+                {
+                    Fail("cleared_by_game");
+                    return;
+                }
+                Vehicle veh = CurrentVehicle(ped);
+                if (veh == null)
+                {
+                    Fail("cleared_by_game");
+                    return;
+                }
+                BridgeLog.Warn("DRIVE START: the game cleared " + Describe()
+                               + " (expected script task hash " + _expectedTaskHash.Value
+                               + ", " + _clearedStreak + " consecutive ticks mismatched)"
+                               + " - re-issuing once, then failing");
+                RestartDrive(ped, veh);
+            }
+        }
+
+        // ---- T1: the drive-start sequence ------------------------------------------------------
+
+        /// <summary>
+        /// The seat check the observed failure needed and did not have. `ped.IsInVehicle()` - what
+        /// every drive path in this file used to rely on - is true in a PASSENGER seat and true
+        /// while the ped is still climbing in, so a drive task issued on it goes to a ped who is
+        /// not driving anything.
+        ///
+        /// Both halves are called RAW rather than through a SHVDN wrapper, on purpose:
+        ///   IS_PED_IN_VEHICLE (0xA3EE4A07279BB9DB, BOOL(Ped, Vehicle, BOOL atGetIn)) - the wrapper
+        ///     `Ped.IsInVehicle(Vehicle)` is documented in the pinned lib/Docs/ScriptHookVDotNet3.xml
+        ///     (M:GTA.Ped.IsInVehicle(GTA.Vehicle)) as "sitting in OR GETTING OUT the specified
+        ///     Vehicle", i.e. it does not mean what this check needs. The raw call names
+        ///     atGetIn: false explicitly, which is the ticket's own requirement.
+        ///   GET_PED_IN_VEHICLE_SEAT - reached through `Vehicle.GetPedOnSeat(VehicleSeat)` because
+        ///     that wrapper's exact body was read from SHVDN source during research
+        ///     (docs/research/brief-shvdn-blips-occupants.json: "`Vehicle.GetPedOnSeat(VehicleSeat)`
+        ///     (returns null for empty seat: `handle != 0 ? new Ped(handle) : null`, native
+        ///     GET_PED_IN_VEHICLE_SEAT)"), so it is known to pass the seat index straight through -
+        ///     and `VehicleSeat.Driver` is -1 in the pinned DLL (read by MetadataLoadContext over
+        ///     bridge/lib/ScriptHookVDotNet3.dll), making this literally
+        ///     GET_PED_IN_VEHICLE_SEAT(veh, -1) == ped. Using the wrapper also side-steps the
+        ///     native's build-dependent third parameter, which a raw call would have to guess at.
+        ///
+        /// NOT VERIFIED in-game (no server access from this environment): whether either read is
+        /// true on the exact frame TASK_ENTER_VEHICLE reports done. If the live log shows
+        /// `not_in_drivers_seat` immediately after a successful entry, the settle window is the
+        /// thing to add, not the check.
+        /// </summary>
+        private static bool InDriversSeat(Ped ped, Vehicle veh)
+        {
+            if (ped == null || !ped.Exists() || veh == null || !veh.Exists())
+            {
+                return false;
+            }
+            if (!Function.Call<bool>(Hash.IS_PED_IN_VEHICLE, ped.Handle, veh.Handle, false))
+            {
+                return false;
+            }
+            Ped driver = veh.GetPedOnSeat(VehicleSeat.Driver);
+            return driver != null && driver.Exists() && driver.Handle == ped.Handle;
+        }
+
+        /// <summary>
+        /// The two preconditions of every drive task, in order: confirm the driver's seat, then
+        /// start the engine. Returns false having ALREADY failed the task, so callers just return.
+        ///
+        /// SET_VEHICLE_ENGINE_ON (0x2497C4717C8B881E, void(Vehicle, BOOL value, BOOL instantly,
+        /// BOOL disableAutoStart)) is called raw rather than through `Vehicle.IsEngineRunning`'s
+        /// setter: the pinned XML documents that property only as "gets or sets a value indicating
+        /// whether the engine is running" and says nothing about which of the native's other two
+        /// arguments it passes, and `instantly: true` (no ignition animation) with
+        /// `disableAutoStart: false` is exactly what this sequence needs. Hash confirmed present in
+        /// the pinned DLL's GTA.Native.Hash by MetadataLoadContext.
+        ///
+        /// Starting a car the agent is sitting in is not a cheat under CLAUDE.md rule 5: turning the
+        /// key is what the player character does when a human presses W, and the game's own AI
+        /// drivers get the same treatment. No health, money, position or physics is touched.
+        /// </summary>
+        private bool PrepareToDrive(Ped ped, Vehicle veh)
+        {
+            if (!InDriversSeat(ped, veh))
+            {
+                Fail("not_in_drivers_seat");
+                return false;
+            }
+            Function.Call(Hash.SET_VEHICLE_ENGINE_ON, veh.Handle, true, true, false);
+            return true;
+        }
+
+        /// <summary>Opens the verification window for a drive task that was just issued.</summary>
+        private void ArmDriveVerification()
+        {
+            _driveVerifyAt = Game.GameTime + DriveStartVerifyMs;
+        }
+
+        /// <summary>Is the script task this episode issued still the one the ped is running?
+        /// Same read as <see cref="CheckLiveness"/> but without the debounce - used at the single
+        /// 2 s verification point, where one sample is the whole question. `Vacant`/`Finished` are
+        /// the two statuses that mean "not running" (pinned XML: Vacant is what
+        /// ScriptTaskNameHash.Invalid resolves to); WaitingToStart and Dormant are both legal
+        /// states for a live task the engine has briefly interrupted.</summary>
+        private bool ScriptTaskIsLive(Ped ped)
+        {
+            if (_expectedTaskHash == null)
+            {
+                return true; // no researched hash for this task type: nothing to judge it against
+            }
+            ScriptTaskNameHash currentHash;
+            ScriptTaskStatus currentStatus;
+            ped.GetCurrentScriptTaskNameHashAndStatus(out currentHash, out currentStatus);
+            return (uint)currentHash == _expectedTaskHash.Value
+                   && currentStatus != ScriptTaskStatus.Vacant
+                   && currentStatus != ScriptTaskStatus.Finished;
+        }
+
+        /// <summary>
+        /// T1's post-start verification: 2 s after a drive task was issued, is the task alive AND
+        /// is the car moving? Anything else is a drive order that went nowhere, which is what
+        /// `wander_drive`'s old `CruiseWithVehicle(...)` -and-hope did not notice for six seconds.
+        /// One re-issue, then <c>failed/"drive_did_not_start"</c>. Never a third.
+        /// </summary>
+        private void UpdateDriveStart(Ped ped)
+        {
+            if (_driveVerifyAt == 0 || !IsVehicleDrivingTask())
+            {
+                return;
+            }
+            if (_stuckStage != StuckStage.Idle)
+            {
+                // A TASK_VEHICLE_TEMP_ACTION rung deliberately owns the wheels right now; the drive
+                // task is supposed to look dead. Same reasoning as CheckLiveness's guard.
+                _driveVerifyAt = Game.GameTime + DriveStartVerifyMs;
+                return;
+            }
+            if (Game.GameTime < _driveVerifyAt)
+            {
+                return;
+            }
+
+            Vehicle veh = CurrentVehicle(ped);
+            if (veh == null)
+            {
+                // Out of the car entirely: the per-task not_in_vehicle grading owns that, and it
+                // reports the truth more precisely than this check could.
+                _driveVerifyAt = 0;
+                return;
+            }
+
+            bool live = ScriptTaskIsLive(ped);
+            bool moving = veh.Speed > 0f;
+            if (live && moving)
+            {
+                _driveVerifyAt = 0; // it started. The stuck ladder and the timeouts own it now.
+                return;
+            }
+
+            string why = (live ? "task running, " : "script task not running, ")
+                         + "speed " + veh.Speed.ToString("F2") + " m/s";
+            if (_driveStarts < MaxDriveStarts && InDriversSeat(ped, veh))
+            {
+                BridgeLog.Warn("DRIVE START: " + Describe() + " did not start (" + why
+                               + ") - re-issuing once, then failing");
+                RestartDrive(ped, veh);
+                return;
+            }
+            BridgeLog.Warn("DRIVE START: " + Describe() + " did not start after "
+                           + _driveStarts + " re-issue(s) (" + why + ") - giving up");
+            Fail("drive_did_not_start");
+        }
+
+        /// <summary>The one permitted re-issue: count it, re-run the full seat/engine/task/tuning
+        /// sequence, and re-open the verification window so the retry is graded exactly like the
+        /// original. <see cref="ReissueVehicleTask"/> routes back through Issue*, which calls
+        /// <see cref="PrepareToDrive"/>, so a retry into a seat he has since lost fails
+        /// not_in_drivers_seat rather than posting a drive order at a passenger.</summary>
+        private void RestartDrive(Ped ped, Vehicle veh)
+        {
+            _driveStarts++;
+            _clearedStreak = 0;
+            ReissueVehicleTask(ped, veh);
+        }
+
+        // ---- T1: the per-step no-progress watchdog ---------------------------------------------
+
+        /// <summary>The movement steps the no-progress watchdog grades. See NoProgressWindowMs for
+        /// why follow_entity and the combat/cover tasks are not on this list.</summary>
+        private bool IsProgressWatchedTask()
+        {
+            if (_status != "running" || _req == null)
+            {
+                return false;
+            }
+            return _req.Type == "walk_to" || _req.Type == "enter_nearest_vehicle"
+                   || _req.Type == "enter_vehicle_seat"
+                   || _req.Type == "flee_ped" || _req.Type == "flee_police"
+                   || _req.Type == "drive_to" || _req.Type == "wander_drive";
+        }
+
+        private void ResetProgress(Ped ped)
+        {
+            _progressAt = Game.GameTime;
+            _progressAnchorX = ped.Position.X;
+            _progressAnchorY = ped.Position.Y;
+        }
+
+        /// <summary>10 s without moving <see cref="NoProgressMinMoveM"/>: escalate once by
+        /// re-issuing the same order, then fail the step <c>no_progress</c>. This is the watchdog
+        /// the ticket asks for inside every movement step; without it walk_to's own timeout is five
+        /// minutes of a ped stood against a wall while a roam goal times out around him.</summary>
+        private void UpdateProgress(Ped ped)
+        {
+            if (!IsProgressWatchedTask())
+            {
+                return;
+            }
+            if (_stuckStage != StuckStage.Idle)
+            {
+                ResetProgress(ped); // a temp-action rung is driving; judge nothing while it runs
+                return;
+            }
+            if (IsVehicleDrivingTask() && _stuckAttempts < MaxStuckAttemptsPerEpisode)
+            {
+                // The engine's own jam ladder gets first refusal on a wedged car, and a red light
+                // is not a stall. Only once that ladder is spent does standing still become a
+                // failure worth reporting.
+                ResetProgress(ped);
+                return;
+            }
+            if (_progressAt == 0)
+            {
+                ResetProgress(ped);
+                return;
+            }
+            float moved = DistanceXY(ped.Position, _progressAnchorX, _progressAnchorY);
+            if (moved >= NoProgressMinMoveM)
+            {
+                ResetProgress(ped);
+                return;
+            }
+            if (Game.GameTime - _progressAt < NoProgressWindowMs)
+            {
+                return;
+            }
+            if (_progressEscalations == 0)
+            {
+                _progressEscalations = 1;
+                BridgeLog.Warn("NO PROGRESS: " + Describe() + " moved " + moved.ToString("F2")
+                               + " m in " + NoProgressWindowMs + " ms - re-issuing once");
+                ReissueMovementTask(ped);
+                if (_status == "running")
+                {
+                    ResetProgress(ped);
+                }
+                return;
+            }
+            BridgeLog.Warn("NO PROGRESS: " + Describe() + " moved " + moved.ToString("F2")
+                           + " m in " + NoProgressWindowMs + " ms after an escalation - failing");
+            Fail("no_progress");
+        }
+
+        /// <summary>The escalation rung: re-issue exactly what this step already asked for. A
+        /// vehicle task goes through <see cref="ReissueVehicleTask"/> (seat + engine + tuning +
+        /// a fresh verification window); an on-foot one re-runs its own native.</summary>
+        private void ReissueMovementTask(Ped ped)
+        {
+            if (IsVehicleDrivingTask())
+            {
+                Vehicle veh = CurrentVehicle(ped);
+                if (veh != null)
+                {
+                    ReissueVehicleTask(ped, veh);
+                }
+                return;
+            }
+            switch (_req.Type)
+            {
+                case "walk_to":
+                    IssueWalkTo(ped);
+                    break;
+                case "enter_nearest_vehicle":
+                    StartEnterNearestVehicle(ped, _req);
+                    break;
+                case "flee_ped":
+                    StartFleePed(ped, _req);
+                    break;
+                case "flee_police":
+                    IssueFlee(ped);
+                    break;
             }
         }
 
@@ -692,6 +1146,11 @@ namespace WastedBridge
         /// [the drive task]; re-issue it").</summary>
         private void IssueDriveTo(Ped ped, Vehicle veh)
         {
+            // T1 steps 1-2: the seat and the engine, before any drive order goes out.
+            if (!PrepareToDrive(ped, veh))
+            {
+                return;
+            }
             // Nightly signature: DriveTo(vehicle, target, speed, VehicleDrivingFlags, radius) —
             // argument order differs from stable v3.6.0 (bridge/README). This wraps
             // TASK_VEHICLE_DRIVE_TO_COORD_LONGRANGE, whose native signature (docs/research/
@@ -704,13 +1163,21 @@ namespace WastedBridge
             // Polls as this exact hash (name match verified against the pinned ScriptTaskNameHash
             // enum).
             SetExpectedHash(ScriptTaskNameHash.VehicleDriveToCoordLongrange);
-            ApplyDriverCompetence(ped, _req.Style);
+            ApplyDriveTuning(ped, _req.Style, _req.SpeedMps);
+            ArmDriveVerification();
         }
 
         /// <summary>wander_drive's native call, factored out for the same reissue reason as
         /// <see cref="IssueDriveTo"/>.</summary>
         private void IssueWanderDrive(Ped ped, Vehicle veh)
         {
+            // T1 steps 1-2, same as IssueDriveTo. This is the exact call site the 2026-09-03
+            // findings name (`ped.Task.CruiseWithVehicle(veh, 13 m/s, style)` with no seat check,
+            // no engine and no post-start verification).
+            if (!PrepareToDrive(ped, veh))
+            {
+                return;
+            }
             ped.Task.CruiseWithVehicle(veh, WanderCruiseSpeedMps, _req.Style);
             // Wraps TASK_VEHICLE_DRIVE_WANDER (docs/research/brief-natives.json: void(Ped, Vehicle,
             // speed, drivingStyle) — likewise no driveAgainstTraffic parameter, same item-1 audit
@@ -720,7 +1187,13 @@ namespace WastedBridge
             // here in preference to the research brief's more tentative "VehicleMission family"
             // guess.
             SetExpectedHash(ScriptTaskNameHash.VehicleDriveWander);
-            ApplyDriverCompetence(ped, _req.Style);
+            // wander_drive carries no speed on the wire (CONTRACTS §1: params are `{style}`), so the
+            // cruise speed the ticket asks for is this file's own WanderCruiseSpeedMps - set again
+            // through SET_DRIVE_TASK_CRUISE_SPEED because the value handed to
+            // TASK_VEHICLE_DRIVE_WANDER is only the task's OPENING speed, and the mid-task field is
+            // what the engine actually reads afterwards.
+            ApplyDriveTuning(ped, _req.Style, WanderCruiseSpeedMps);
+            ArmDriveVerification();
         }
 
         /// <summary>
@@ -741,6 +1214,12 @@ namespace WastedBridge
             // req.Style/req.SpeedMps already carry either the caller's explicit value or the v1.9
             // defaults (BridgeRouter's follow_entity parsing) - clamp the speed into the sane band
             // regardless of which one it is. Unchanged from the old VehicleFollow call.
+            // T1 steps 1-2, same as the other two drive issuers: a follow is a drive task too, and
+            // "he was in the passenger seat" is exactly as fatal here as it is for wander_drive.
+            if (!PrepareToDrive(ped, veh))
+            {
+                return;
+            }
             float speed = System.Math.Min(FollowVehicleMaxSpeedMps,
                 System.Math.Max(FollowVehicleMinSpeedMps, _req.SpeedMps));
 
@@ -776,7 +1255,8 @@ namespace WastedBridge
             // target_lost / not_in_vehicle checks are what actually catch that case, not this
             // liveness check.
             SetExpectedHash(ScriptTaskNameHash.VehicleMission);
-            ApplyDriverCompetence(ped, _req.Style);
+            ApplyDriveTuning(ped, _req.Style, speed);
+            ArmDriveVerification();
         }
 
         /// <summary>
@@ -797,7 +1277,7 @@ namespace WastedBridge
         /// the brief calls out explicitly. If bridge-smoke or stream telemetry shows the values are
         /// not taking hold, move this call to the following Tick() instead.
         /// </summary>
-        private static void ApplyDriverCompetence(Ped ped, VehicleDrivingFlags style)
+        private static void ApplyDriveTuning(Ped ped, VehicleDrivingFlags style, float cruiseSpeedMps)
         {
             // SET_DRIVER_ABILITY has no SHVDN wrapper (no P:/M: entry in
             // lib/Docs/ScriptHookVDotNet3.xml; confirmed present in GTA.Native.Hash via
@@ -808,6 +1288,19 @@ namespace WastedBridge
             ped.DrivingAggressiveness = pursuit
                 ? DriverAggressivenessPursuit
                 : DriverAggressivenessNormal;
+            // T1 step 4: SET_DRIVE_TASK_CRUISE_SPEED, through the SHVDN wrapper Ped.DrivingSpeed
+            // (verified present and SETTABLE in the pinned DLL by MetadataLoadContext:
+            // `GTA.Ped P: Single DrivingSpeed {set;}`; the pinned XML's own remark says it "actually
+            // changes the cruise speed field on CTaskVehicleMissionBase"). The same XML is why this
+            // runs AFTER the task-issuing native rather than before it: "the drive task running on
+            // this Ped must be active before setting the value can actually affect".
+            //
+            // Guarded because the speed a drive task opened with is not always meaningful to
+            // re-assert: a zero or negative here would be an order to stop, which no caller means.
+            if (cruiseSpeedMps > 0f)
+            {
+                ped.DrivingSpeed = cruiseSpeedMps;
+            }
         }
 
         // ---- item 5: anti-stuck recovery ladder ------------------------------------------------
@@ -1016,11 +1509,48 @@ namespace WastedBridge
                 return;
             }
 
+            // Bridge 1.7.0 (fix-opus-b, T6): the caller's weapon mode, applied BEFORE the combat
+            // task so the engine builds the right CTask for what is actually in his hands.
+            //
+            //   "unarmed"  fists, whatever he is carrying. This is what makes `pick_a_fight` a
+            //              BIT rather than a shooting: a the agent who happens to own a pistol must
+            //              not execute a pedestrian who annoyed him.
+            //   "armed"    the loadout gun chosen by RANGE (pump shotgun inside 10 m, pistol
+            //              beyond) — read here, at task start, rather than from the harness's
+            //              snapshot, for the same reason the target's weapon class is re-read
+            //              below. Selection is HAS_PED_GOT_WEAPON-guarded: if he owns neither,
+            //              nothing is selected and this is a fist fight after all.
+            //   "auto"     the v1.11 behaviour, unchanged: answer in kind.
+            //
+            // Nothing here GIVES him anything — see WeaponState for why the loadout is off by
+            // default — so every branch works on whatever he actually earned in-game.
+            string mode = string.IsNullOrEmpty(req.WeaponMode) ? "auto" : req.WeaponMode;
+            if (mode == "unarmed")
+            {
+                WeaponState.SelectUnarmed(ped);
+            }
+            else if (mode == "armed")
+            {
+                float range = DistanceXY(ped.Position, target.Position.X, target.Position.Y);
+                WeaponState.SelectForRange(ped, range);
+            }
+
             // SnapshotBuilder.WeaponClassOf's own IS_PED_ARMED classification, re-read here rather
             // than trusted from a stale /state snapshot: the target's weapon can change between the
             // harness reading /state and this task actually starting.
             bool ranged = Function.Call<bool>(Hash.IS_PED_ARMED, target.Handle, 4)   // gun
                           || Function.Call<bool>(Hash.IS_PED_ARMED, target.Handle, 2); // projectile
+            if (mode == "unarmed")
+            {
+                // The mode is about HIS hands, and it decides the branch too: an armed target
+                // would otherwise route a deliberate fist fight into CTaskCombat, which draws
+                // whatever he is carrying back out and undoes the selection above.
+                ranged = false;
+            }
+            else if (mode == "armed" && WeaponState.CurrentHash(ped) != WeaponHash.Unarmed)
+            {
+                ranged = true;
+            }
 
             if (ranged)
             {
@@ -1065,6 +1595,225 @@ namespace WastedBridge
             // player wins), at which point the next Update() sees target.IsDead or gone.
         }
 
+        // ======================================================================================
+        // Bridge 1.7.0 (fix-opus-b, T6) — the targeted-violence verbs and the passenger seat.
+        //
+        // EVERY NATIVE HERE WAS VERIFIED AGAINST THE PINNED SHVDN before it was written, by
+        // reading the wrapper's IL out of bridge/lib/ScriptHookVDotNet3.dll (assembly 3.7.0.189)
+        // with System.Reflection.Metadata and checking which 8-byte native hash it pushes:
+        //
+        //   GTA.TaskInvoker.ShootAt(Ped, int, FiringPattern)   -> 0x08DA95E8298AE772
+        //                                                         TASK_SHOOT_AT_ENTITY
+        //   GTA.TaskInvoker.EnterVehicle(Vehicle, VehicleSeat,
+        //       int, float, EnterVehicleFlags)                 -> 0xC20E50AA46D09CA8
+        //                                                         TASK_ENTER_VEHICLE
+        //   GTA.Entity.IsInAir                                 -> 0x886E37EC497200B6
+        //                                                         IS_ENTITY_IN_AIR  (SnapshotBuilder)
+        //
+        // TASK_DRIVE_BY (0x2F8AF0E82773A171) HAS NO SHVDN WRAPPER in the pinned build — the hash
+        // is in GTA.Native.Hash, but nothing in TaskInvoker calls it — so it is called RAW, and
+        // its argument list comes from citizenfx/natives (TASK/TaskDriveBy.md, fetched
+        // 2026-09-03), the same source bridge/src already cites for TASK_VEHICLE_TEMP_ACTION:
+        //
+        //   void TASK_DRIVE_BY(Ped driverPed, Ped targetPed, Vehicle targetVehicle,
+        //                      float x, float y, float z, float distanceToShoot,
+        //                      int pedAccuracy, BOOL p8, Hash firingPattern)
+        //
+        // ** UNVERIFIED, AND FLAGGED RATHER THAN HIDDEN. ** That same page says the native
+        // "doesn't seem to do anything" reliably, and docs/research/brief-combat-natives.json
+        // records the direct conflict in its own NOT-CONFIRMED list: "TASK_DRIVE_BY on a player
+        // ped (NativeDB says it does nothing, TwoPlayerMod uses it successfully)". It ships
+        // because the alternative is no drive-by at all, and because the harness goal that uses
+        // it (behavior.roam.drive_by_run) is graded on ROUNDS ACTUALLY SPENT — so a native that
+        // quietly does nothing produces a timeout and a log line, which is the evidence the
+        // operator needs, instead of a completion nobody earned.
+        //
+        // pedAccuracy is 40, NOT the 75-100 the native's own docs suggest: the combat research
+        // brief's fairness list names "SET_PED_ACCURACY>=75" among the cheats to refuse, and a
+        // drive-by is spray-and-pray when a human does it too.
+        private const float DriveByShootDistM = 60f;
+        private const int DriveByAccuracy = 40;
+
+        /// <summary>How long a shoot_at/drive_by burst runs before it is Done. The task is graded
+        /// on TIME, not on the target dying: "did he kill him" is not a question /state can
+        /// answer for an arbitrary ped, and a burst that ends because the target ran away is a
+        /// finished burst, not a failure.</summary>
+        private const int FireTaskMinMs = 500;
+
+        /// <summary>enter_vehicle_seat's own budget. Longer than enter_nearest_vehicle's because
+        /// the walk to a specific stopped cab is a real walk, and shorter than walk_to's five
+        /// minutes because a cab that has not been boarded in ninety seconds has driven off.</summary>
+        private const int EnterSeatTimeoutMs = 90000;
+
+        /// <summary>
+        /// shoot_at Start(): stand where you are and fire at ONE named ped.
+        ///
+        /// Weapon SELECTION happens here rather than in the harness because the rule is a
+        /// function of RANGE at the instant the task starts (pump shotgun inside 10 m, pistol
+        /// beyond), and the harness's most recent snapshot is up to a poll period old — the same
+        /// argument fight_ped already makes for re-reading the target's weapon class. Selection
+        /// is HAS_PED_GOT_WEAPON-guarded inside WeaponState: nothing is ever conjured, and with
+        /// empty hands this is a man pointing at somebody, which is honest and which
+        /// `player.weapon` lets the harness see coming.
+        /// </summary>
+        private void StartShootAt(Ped ped, TaskRequest req)
+        {
+            Ped target = Entity.FromHandle(req.Handle) as Ped;
+            if (target == null || !target.Exists())
+            {
+                Fail("target_lost");
+                return;
+            }
+            if (target.IsDead)
+            {
+                Done("");
+                return;
+            }
+            float dist = DistanceXY(ped.Position, target.Position.X, target.Position.Y);
+            WeaponHash selected = WeaponState.SelectForRange(ped, dist);
+            int durationMs = (int)(req.DurationS * 1000f);
+            ped.Task.ShootAt(target, durationMs, WeaponState.PatternFor(selected));
+            // Wraps TASK_SHOOT_AT_ENTITY -> the "ShootAtEntity" script-task hash, which is a
+            // member of the pinned ScriptTaskNameHash enum (verified by reflection, value
+            // 0x0A01F8B8) — so this task gets the v1.10 liveness check like the others.
+            SetExpectedHash(ScriptTaskNameHash.ShootAtEntity);
+            BridgeLog.Info("task " + req.Id + " (shoot_at): " + selected + " at " + dist.ToString("F1")
+                           + " m for " + durationMs + " ms");
+        }
+
+        /// <summary>
+        /// drive_by Start(): fire out of the car window at ONE named ped while still driving.
+        /// Raw TASK_DRIVE_BY — see the block comment above for the sourced signature and for why
+        /// its behaviour on a PLAYER ped is flagged unverified rather than assumed.
+        /// </summary>
+        private void StartDriveBy(Ped ped, TaskRequest req)
+        {
+            Vehicle veh = CurrentVehicle(ped);
+            if (veh == null)
+            {
+                Fail("not_in_vehicle");
+                return;
+            }
+            Ped target = Entity.FromHandle(req.Handle) as Ped;
+            if (target == null || !target.Exists())
+            {
+                Fail("target_lost");
+                return;
+            }
+            if (target.IsDead)
+            {
+                Done("");
+                return;
+            }
+            WeaponHash selected = WeaponState.SelectForDriveBy(ped);
+            Vector3 at = target.Position;
+            Function.Call(Hash.TASK_DRIVE_BY, ped.Handle, target.Handle, 0,
+                at.X, at.Y, at.Z, DriveByShootDistM, DriveByAccuracy, false,
+                (uint)FiringPattern.BurstFireDriveby);
+            // No SetExpectedHash: the pinned ScriptTaskNameHash enum HAS a `DriveBy` member
+            // (0x7D711E7D), but whether a raw TASK_DRIVE_BY on a PLAYER ped actually produces it
+            // is exactly the thing that is unverified. Arming the v1.10 liveness check on a guess
+            // would fail every drive-by after ~1 s with "cleared_by_game" and bury the real
+            // answer under a wrong diagnosis; the duration bound below ends the task instead.
+            BridgeLog.Info("task " + req.Id + " (drive_by): " + selected + " out of "
+                           + veh.DisplayName + " for " + (int)(req.DurationS * 1000f)
+                           + " ms — UNVERIFIED native on a player ped; if ammo does not drop, it did nothing");
+        }
+
+        /// <summary>
+        /// shoot_at / drive_by Update(): both are bounded bursts, so both are Done on the clock.
+        /// A minimum of half a second stops a task posted and graded inside one tick from
+        /// completing before the engine has issued anything.
+        /// </summary>
+        private void UpdateTimedFire(int elapsed)
+        {
+            int budget = (int)(_req.DurationS * 1000f);
+            if (elapsed >= System.Math.Max(FireTaskMinMs, budget))
+            {
+                Done("");
+            }
+        }
+
+        /// <summary>
+        /// enter_vehicle_seat Start(): get in as a PASSENGER. This is the taxi verb — the harness
+        /// sets a waypoint first, then puts him in the back and the game's own cab AI drives.
+        ///
+        /// VehicleSeat is mapped from the wire's 0/1/2 explicitly rather than cast, because the
+        /// pinned enum's numbering is not the obvious one (Driver = -1, RightFront = Passenger = 0,
+        /// LeftRear = 1, RightRear = 2 — verified by reflection over the pinned DLL), and a cast
+        /// would silently turn a future wire value into a seat nobody meant.
+        /// </summary>
+        private void StartEnterVehicleSeat(Ped ped, TaskRequest req)
+        {
+            Vehicle veh = Entity.FromHandle(req.Handle) as Vehicle;
+            if (veh == null || !veh.Exists() || !veh.IsDriveable)
+            {
+                Fail("target_lost");
+                return;
+            }
+            VehicleSeat seat;
+            switch (req.Seat)
+            {
+                case 0: seat = VehicleSeat.RightFront; break;
+                case 1: seat = VehicleSeat.LeftRear; break;
+                default: seat = VehicleSeat.RightRear; break;
+            }
+            if (!veh.IsSeatFree(seat))
+            {
+                // Riding as a passenger means taking an EMPTY seat. Jacking somebody out of one
+                // is a different act with a different consequence, and it is not what a task
+                // named "get in the back" should quietly do.
+                Fail("seat_occupied");
+                return;
+            }
+            _targetVehicleHandle = veh.Handle;
+            // EnterVehicleFlags.None, not JackAnyone / WarpIn: no teleport into the seat
+            // (CLAUDE.md rule 5) and no pulling anyone out. -1 timeout leaves the engine's own
+            // budget alone; EnterSeatTimeoutMs below is the bridge's.
+            ped.Task.EnterVehicle(veh, seat, -1, 2f, EnterVehicleFlags.None);
+            // Wraps TASK_ENTER_VEHICLE -> EnterVehicle, the same hash enter_nearest_vehicle uses.
+            SetExpectedHash(ScriptTaskNameHash.EnterVehicle);
+        }
+
+        /// <summary>
+        /// enter_vehicle_seat Update(): done once he is in THAT vehicle and somebody else has the
+        /// wheel. "In the car" alone is not enough — if the entry turned into a jack he is now
+        /// the driver, which is a different outcome and the harness grades a taxi ride on exactly
+        /// this distinction (behavior.roam.taxi_ride).
+        /// </summary>
+        private void UpdateEnterVehicleSeat(Ped ped, int elapsedMs)
+        {
+            Vehicle veh = CurrentVehicle(ped);
+            if (veh != null && veh.Handle == _targetVehicleHandle)
+            {
+                Ped driver = veh.Driver;
+                if (driver != null && driver.Exists() && driver.Handle != ped.Handle)
+                {
+                    Done("");
+                    return;
+                }
+                if (driver == null || !driver.Exists())
+                {
+                    // He is aboard, but nobody is driving: an empty cab goes nowhere, and
+                    // reporting "done" would tell the harness a ride had started.
+                    Fail("no_driver");
+                    return;
+                }
+                Fail("took_the_wheel");
+                return;
+            }
+            Entity target = Entity.FromHandle(_targetVehicleHandle);
+            if (target == null || !target.Exists())
+            {
+                Fail("target_lost");
+                return;
+            }
+            if (elapsedMs > EnterSeatTimeoutMs)
+            {
+                Fail("timeout");
+            }
+        }
+
         /// <summary>
         /// answer_call / reject_call Start() (CONTRACTS v1.13).
         ///
@@ -1104,15 +1853,23 @@ namespace WastedBridge
                 return;
             }
 
+            // T8: fresh episode, always starts on the primary group; the fallback (if any) is
+            // decided in UpdatePhoneInput once enough of the timeout has passed with no result.
+            _phoneActiveGroup = PhoneControlGroupPrimary;
+            _phoneFallbackTried = false;
+
             // Logged once per task, at INFO, naming the group actually used: this is the one
-            // number that cannot be verified off the server (see PhoneControlGroup), so the live
-            // log has to say which one produced whatever the operator sees on screen.
+            // number that cannot be verified off the server (see the fallback-ordering note
+            // above), so the live log has to say which one produced whatever the operator sees on
+            // screen.
             BridgeLog.Info("task " + req.Id + " (" + req.Type + "): injecting control "
                            + (answering ? PhoneAnswerControl : PhoneRejectControl)
                            + " (" + (answering ? "PhoneSelect" : "PhoneCancel")
-                           + ") in control group " + PhoneControlGroup
-                           + " every tick for up to " + PhoneInputTimeoutMs + " ms");
-            InjectPhoneControl(answering);
+                           + ") in control group " + _phoneActiveGroup
+                           + " every tick for up to " + PhoneInputTimeoutMs + " ms"
+                           + " (falls back to group " + PhoneControlGroupFallback
+                           + " at the halfway point if nothing has moved)");
+            InjectPhoneControl(answering, _phoneActiveGroup);
         }
 
         /// <summary>
@@ -1140,12 +1897,16 @@ namespace WastedBridge
             {
                 if (phone.InCall)
                 {
+                    BridgeLog.Info("task " + _req.Id + " (" + _req.Type + "): connected via "
+                                   + "control group " + _phoneActiveGroup);
                     Done("");
                     return;
                 }
             }
             else if (!phone.Ringing && !phone.InCall)
             {
+                BridgeLog.Info("task " + _req.Id + " (" + _req.Type + "): line cleared via "
+                               + "control group " + _phoneActiveGroup);
                 Done("");
                 return;
             }
@@ -1155,7 +1916,19 @@ namespace WastedBridge
                 Fail(answering ? "unanswered" : "unrejectable");
                 return;
             }
-            InjectPhoneControl(answering);
+
+            // T8: halfway through the bound with no result yet — try the other control group for
+            // the remainder. Once per episode; StartPhoneInput resets both fields on the next task.
+            if (!_phoneFallbackTried && elapsed > PhoneInputTimeoutMs / 2)
+            {
+                _phoneFallbackTried = true;
+                _phoneActiveGroup = PhoneControlGroupFallback;
+                BridgeLog.Info("task " + _req.Id + " (" + _req.Type + "): control group "
+                               + PhoneControlGroupPrimary + " has not registered after "
+                               + (PhoneInputTimeoutMs / 2) + " ms; falling back to control group "
+                               + _phoneActiveGroup);
+            }
+            InjectPhoneControl(answering, _phoneActiveGroup);
         }
 
         /// <summary>
@@ -1163,15 +1936,171 @@ namespace WastedBridge
         /// system latches a single control per frame, so injecting answer and reject together (or
         /// adding a Control.Phone press alongside) loses one of them. The game raises the handset
         /// by itself for an incoming call, so no Control.Phone press is needed or wanted here.
+        /// `controlGroup` is T8's fallback ordering (see the constants above) — the caller decides
+        /// which group is active this tick, this only injects into it.
         /// </summary>
-        private static void InjectPhoneControl(bool answer)
+        private static void InjectPhoneControl(bool answer, int controlGroup)
         {
-            Function.Call(Hash.SET_CONTROL_VALUE_NEXT_FRAME, PhoneControlGroup,
+            Function.Call(Hash.SET_CONTROL_VALUE_NEXT_FRAME, controlGroup,
                 answer ? PhoneAnswerControl : PhoneRejectControl, PhoneControlValue);
+        }
+
+        /// <summary>
+        /// T8 (findings.md R6) — the phone-UI-stuck watchdog. R1's own evidence was a story call
+        /// CONNECTED the whole time, taking the ped's task for the phone UI; this is the general
+        /// case of the same failure — the UI can be raised (running CTaskMobilePhone) with NEITHER
+        /// `ringing` NOR `in_call` true, whether or not this bridge ever posted answer_call/
+        /// reject_call for it, and nothing else in this engine notices.
+        ///
+        /// IS_PED_RUNNING_MOBILE_PHONE_TASK (0x2AFE52F782F25775, BOOL(Ped)) is the proxy: true
+        /// while CTaskMobilePhone is running on the ped, which is the UI being up. Verified present
+        /// in the pinned SHVDN v3.7.0.189 GTA.Native.Hash enum the same way every other raw phone
+        /// hash in this file is (reflection over the PE metadata of lib/ScriptHookVDotNet3.dll,
+        /// reading the Hash field's own constant blob rather than trusting a string match) — no
+        /// typed SHVDN wrapper exists for it (there is no GTA.Phone class at all; see
+        /// PhoneState.cs), so this is another raw Function.Call. DESTROY_MOBILE_PHONE
+        /// (0x3BC861DF703E5097, void(), verified the same way) is the documented way this engine's
+        /// own scripts dismiss the handset; its exact parameterless void signature is NOT
+        /// independently confirmed against the running game (there is no typed wrapper to check it
+        /// against), so this is called exactly like every other bare Hash member with no arguments
+        /// in this file (e.g. Hash.SCRIPT_THREAD_ITERATOR_RESET) and the behaviour is listed in this
+        /// ticket's NOT VERIFIED — see the T8 report.
+        ///
+        /// Runs on EVERY tick from Update(), independent of whatever `_status`/`_req` currently are
+        /// — the stuck UI is not necessarily something an answer_call/reject_call task ever posted,
+        /// so gating this on a running phone task (as the rest of Update() does) would mean it never
+        /// runs while idle, which is most of the time. Does nothing while `ringing`/`in_call` is
+        /// live: an active ring or a connected call is legitimately using the phone task, and
+        /// destroying it there would hang up a call `_phone_reflex` might still want.
+        /// </summary>
+        private void UpdatePhoneUiWatchdog(Ped ped)
+        {
+            bool uiUp = Function.Call<bool>(Hash.IS_PED_RUNNING_MOBILE_PHONE_TASK, ped.Handle);
+            PhoneDto phone = PhoneState.Read(ped);
+
+            if (!uiUp || phone.Ringing || phone.InCall)
+            {
+                _phoneUiIdleSince = null;
+                return;
+            }
+
+            int now = Game.GameTime;
+            if (_phoneUiIdleSince == null)
+            {
+                _phoneUiIdleSince = now;
+                return;
+            }
+            if (unchecked(now - _phoneUiIdleSince.Value) < PhoneUiStuckTimeoutMs)
+            {
+                return;
+            }
+            // Rate-limited: DESTROY_MOBILE_PHONE is a blunt instrument, and if it does not clear
+            // the UI there is nothing more this native can say — retrying every tick would just be
+            // noise. One attempt per PhoneUiStuckTimeoutMs while the condition keeps holding.
+            if (unchecked(now - _lastPhoneUiDestroyAt) < PhoneUiStuckTimeoutMs)
+            {
+                return;
+            }
+            _lastPhoneUiDestroyAt = now;
+            BridgeLog.Warn("phone UI has been open with no ring and no call for at least "
+                           + PhoneUiStuckTimeoutMs + " ms; calling DESTROY_MOBILE_PHONE "
+                           + "(see UpdatePhoneUiWatchdog)");
+            Function.Call(Hash.DESTROY_MOBILE_PHONE);
+        }
+
+        // ---- T1: the on-foot movement steps -----------------------------------------------------
+
+        /// <summary>
+        /// walk_to's native call, factored out so the no-progress watchdog's escalation can
+        /// re-issue exactly the same order (same reason as <see cref="IssueDriveTo"/>).
+        ///
+        /// TWO CHANGES from the original one-liner, both from the ticket's "on-foot equivalents":
+        ///
+        /// 1. SET_PED_MOVE_RATE_OVERRIDE(ped, 1.0) (0x085BF80FA50A39D1, void(Ped, float); no SHVDN
+        ///    wrapper - no P:/M: entry in lib/Docs/ScriptHookVDotNet3.xml, hash confirmed present in
+        ///    GTA.Native.Hash by MetadataLoadContext over the pinned DLL - so raw Function.Call,
+        ///    same pattern as SET_DRIVER_ABILITY). Set to exactly 1.0 and never above: 1.0 is the
+        ///    game's own default, so this RESTORES a normal walking speed that a mission script,
+        ///    an injury reaction or a previous task may have scaled down. A value above 1.0 would
+        ///    make the agent move faster than a human can, which CLAUDE.md rule 5 forbids.
+        ///
+        /// 2. `run: true` is PedMoveBlendRatio.Sprint (3.0f per the pinned XML's own wording,
+        ///    "returns the same struct as new PedMoveBlendRatio(3.0f)"), not Run (2.0f) - the
+        ///    ticket's "TASK_FOLLOW_NAV_MESH_TO_COORD at 3.0". This is a bridge-side tuning of what
+        ///    the frozen `run` flag MEANS, not a contract change: CONTRACTS §1 gives walk_to
+        ///    `{x,y,z,run}` and an arrival radius, and says nothing about the blend ratio, exactly
+        ///    as it leaves the driving-style bit values to this side.
+        /// </summary>
+        private void IssueWalkTo(Ped ped)
+        {
+            Function.Call(Hash.SET_PED_MOVE_RATE_OVERRIDE, ped.Handle, 1f);
+            ped.Task.FollowNavMeshTo(new Vector3(_req.X, _req.Y, _req.Z),
+                _req.Run ? PedMoveBlendRatio.Sprint : PedMoveBlendRatio.Walk);
+            // Wraps TASK_FOLLOW_NAV_MESH_TO_COORD -> FollowNavMeshToCoord.
+            SetExpectedHash(ScriptTaskNameHash.FollowNavMeshToCoord);
+        }
+
+        /// <summary>
+        /// flee_ped: run away from ONE named ped, the on-foot counterpart of fight_ped and the
+        /// answer the reflex ladder needs when hitting back is not the move.
+        ///
+        /// TASK_SMART_FLEE_PED through the SHVDN wrapper `TaskInvoker.FleeFrom(Ped otherPed, float
+        /// safeDistance, int duration)` - overload confirmed present in the pinned DLL by
+        /// MetadataLoadContext, and docs/research/brief-natives.json fact (6) names
+        /// TASK_SMART_FLEE_PED/COORD as exactly what Ped.Task.FleeFrom wraps. This is the PED
+        /// overload, so it polls as ScriptTaskNameHash.SmartFleePed (1805844857 in the pinned enum),
+        /// NOT flee_police's SmartFleePoint - the two are separate members for this reason.
+        ///
+        /// NOT ON THE WIRE YET. CONTRACTS §1 is frozen at v1.13 and this type is not in it, so the
+        /// harness cannot post it: brain/schemas.py's BRIDGE_TASKS and brain/prompts/
+        /// action_catalog.md are fix-opus-b's files under findings.md T6 and tests/test_prompts.py
+        /// binds the two together. The exact three-line harness change and the proposed CONTRACTS
+        /// changelog entry are in this package's report; until they land, this branch is reachable
+        /// only from a hand-made POST /task and BridgeRouter validates it like any other type.
+        /// </summary>
+        private void StartFleePed(Ped ped, TaskRequest req)
+        {
+            Ped target = Entity.FromHandle(req.Handle) as Ped;
+            if (target == null || !target.Exists())
+            {
+                Fail("target_lost");
+                return;
+            }
+            // Same reasoning as IssueWalkTo: restore the default move rate (never raise it) so a
+            // scaled-down one cannot turn fleeing into an amble.
+            Function.Call(Hash.SET_PED_MOVE_RATE_OVERRIDE, ped.Handle, 1f);
+            ped.Task.FleeFrom(target, FleeSafeDistanceM, -1);
+            SetExpectedHash(ScriptTaskNameHash.SmartFleePed);
+        }
+
+        /// <summary>flee_ped's Update(): done once he is clear of the threat, or the threat is gone.
+        /// A target that despawns mid-flight is a success, not a failure, for the same reason
+        /// fight_ped treats it that way - there is nothing left to run from.</summary>
+        private void UpdateFleePed(Ped ped, int elapsedMs)
+        {
+            Ped target = Entity.FromHandle(_req.Handle) as Ped;
+            if (target == null || !target.Exists() || target.IsDead)
+            {
+                Done("");
+                return;
+            }
+            if (ped.Position.DistanceTo(target.Position) >= FleeSafeDistanceM)
+            {
+                Done("");
+                return;
+            }
+            if (elapsedMs > FleePedTimeoutMs)
+            {
+                Fail("timeout");
+            }
         }
 
         private void IssueFlee(Ped ped)
         {
+            // Same default-move-rate restore as IssueWalkTo/StartFleePed: 1.0 exactly, never above
+            // (CLAUDE.md rule 5). Running from the police at a scaled-down move rate is the one
+            // place a leftover override would be most expensive.
+            Function.Call(Hash.SET_PED_MOVE_RATE_OVERRIDE, ped.Handle, 1f);
             Vector3 threat = Game.Player.Wanted.LastPositionSpottedByPolice;
             // A Vector3 target routes through the TaskInvoker.FleeFrom(Vector3, ...) overload,
             // which wraps TASK_SMART_FLEE_COORD (verified against scripthookvdotnet source) - NOT
