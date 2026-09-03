@@ -7,6 +7,8 @@ and `drive` expands to the one recovery that always moves him.
 
 from __future__ import annotations
 
+import time
+
 import pytest
 from fastapi import FastAPI
 from fastapi.testclient import TestClient
@@ -38,7 +40,9 @@ class FakeClock:
 
 def test_the_vocabulary_is_exactly_five_shapes() -> None:
     assert {"nudge", "goal", "task", "stop"} == COMMANDS  # + status, which is a GET
-    assert NUDGE_TYPE_BAN_S == 90.0
+    # 30 s, not 90: a 90 s ban on `enter_nearest_vehicle` left him on foot for
+    # good, the same failure `recovery.IDLE_TYPE_BAN_S` was cut for.
+    assert NUDGE_TYPE_BAN_S == 30.0
 
 
 def test_unknown_command_is_refused_with_the_menu() -> None:
@@ -236,3 +240,64 @@ def test_apply_bookkeeping_is_visible_to_status() -> None:
     q.applied(d, "goal closed, force_pick armed")
     assert q.last_refusal is None
     assert q.last_applied == "nudge (goal closed, force_pick armed)"
+
+
+# --- the operator's goal is held until it is actually offerable -------------------
+
+
+def _choice_harness(offered: list[str]):
+    """Just enough Harness to exercise `_operator_choice`, via the `object.__new__`
+    idiom the other main-loop tests use: __init__ demands a live bridge."""
+    from types import SimpleNamespace
+
+    from wasted_harness.main import Harness
+
+    h = Harness.__new__(Harness)
+    h.roam = SimpleNamespace(offered_ids=lambda: list(offered))
+    h._operator_goal = None
+    h._operator_goal_until = 0.0
+    return h
+
+
+def test_an_operator_goal_that_is_offered_is_taken_and_spent() -> None:
+    h = _choice_harness(["roam_the_block", "armed_rampage_block"])
+    h._operator_goal = "armed_rampage_block"
+    h._operator_goal_until = time.monotonic() + 300.0
+    assert h._operator_choice("roam_the_block") == "armed_rampage_block"
+    assert h._operator_goal is None  # spent, so it fires exactly once
+
+
+def test_an_operator_goal_off_the_menu_is_held_not_thrown_away() -> None:
+    """The 2026-09-03 swap, in a test.
+
+    `armed_rampage_block` needs him ON FOOT. An un-stick put him in a car between
+    the command and the pick, the old code consumed the choice anyway, and the
+    operator silently got `roam_the_block` instead — twice.
+    """
+    h = _choice_harness(["roam_the_block"])  # in a car: no rampage on offer
+    h._operator_goal = "armed_rampage_block"
+    h._operator_goal_until = time.monotonic() + 300.0
+
+    # This block carries on with the model's own choice...
+    assert h._operator_choice("roam_the_block") == "roam_the_block"
+    # ...but the human's choice is STILL ARMED, not discarded.
+    assert h._operator_goal == "armed_rampage_block"
+
+    # He gets out of the car; rampage is offerable again and now it fires.
+    h.roam.offered_ids = lambda: ["roam_the_block", "armed_rampage_block"]
+    assert h._operator_choice("roam_the_block") == "armed_rampage_block"
+    assert h._operator_goal is None
+
+
+def test_an_operator_goal_is_dropped_once_its_window_has_passed() -> None:
+    h = _choice_harness(["roam_the_block"])
+    h._operator_goal = "armed_rampage_block"
+    h._operator_goal_until = time.monotonic() - 1.0  # already expired
+    assert h._operator_choice("roam_the_block") == "roam_the_block"
+    assert h._operator_goal is None  # not left armed to surprise him later
+
+
+def test_no_operator_goal_leaves_the_models_choice_alone() -> None:
+    h = _choice_harness(["roam_the_block", "honk_run"])
+    assert h._operator_choice("honk_run") == "honk_run"
+    assert h._operator_choice(None) is None

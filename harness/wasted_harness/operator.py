@@ -62,9 +62,19 @@ from .logsetup import get_logger
 log = get_logger("wasted.operator")
 
 #: How long the task type that was running when the operator nudged stays banned.
-#: Same figure the idle watchdog uses (`recovery.IDLE_TYPE_BAN_S`): long enough
-#: that the planner cannot immediately re-post the thing that was not working.
-NUDGE_TYPE_BAN_S = 90.0
+#: Same figure the idle watchdog uses (`recovery.IDLE_TYPE_BAN_S`), and for the
+#: same reason it was cut from 90 s: a ban this long locked `enter_nearest_vehicle`
+#: out of the planner entirely and left him on foot for good. It is also only
+#: spent on a task that actually FAILED — see `_apply_one_operator_directive`.
+NUDGE_TYPE_BAN_S = 30.0
+
+#: How long an operator-chosen goal stays armed while it waits to appear on his
+#: menu. Catalog `needs` predicates are state-dependent (`armed_rampage_block`
+#: wants him ON FOOT, `drive_by_run` wants him in a car with an SMG), so the
+#: goal a human picks is often unofferable for a few ticks. Beyond this window
+#: the state has moved on enough that firing it would be a surprise, not a
+#: command, so it is dropped and logged.
+OPERATOR_GOAL_WINDOW_S = 300.0
 
 #: The closed vocabulary. Anything else is a 400, by construction.
 COMMANDS: frozenset[str] = frozenset({"nudge", "goal", "task", "stop"})

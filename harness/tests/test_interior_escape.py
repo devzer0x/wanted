@@ -59,6 +59,7 @@ class _LoopStub(_ReflexStub):
     """
 
     _drive_activities = Harness._drive_activities
+    _operator_choice = Harness._operator_choice
     _judge_roam_goal = Harness._judge_roam_goal
     _advance_roam_goal = Harness._advance_roam_goal
     _begin_roam_goal = Harness._begin_roam_goal
@@ -70,6 +71,7 @@ class _LoopStub(_ReflexStub):
         self.rng = random.Random(7)
         # Operator overrides read by the roam pick path; never armed here.
         self._operator_goal = None
+        self._operator_goal_until = 0.0
         self._operator_force_pick = False
 
 

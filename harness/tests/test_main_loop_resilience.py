@@ -870,15 +870,34 @@ def test_operator_drive_posts_a_car_then_wander_once_seated() -> None:
     assert h._operator_followup is None
 
 
-def test_operator_nudge_bans_the_stalled_task_and_arms_a_pick() -> None:
+def test_operator_nudge_bans_a_failed_task_and_arms_a_pick() -> None:
     h, _ = _op_harness()
     h.operator.submit("nudge")
-    h._apply_operator(_rich_state(task_type="walk_to", task_status="running"))
+    h._apply_operator(_rich_state(task_type="walk_to", task_status="failed"))
     assert h.idle_breaker.bans("walk_to")
     assert h._operator_force_pick is True
     assert h.operator.last_refusal is None
     assert h.operator.last_applied and h.operator.last_applied.startswith("nudge")
     assert any(t == "unstick" and p.get("cmd") == "nudge" for t, p in h.writer.events)
+
+
+def test_operator_nudge_does_not_ban_a_task_that_was_merely_running() -> None:
+    """The 2026-09-03 lockout, in a test.
+
+    Banning whatever happened to be RUNNING is how `enter_nearest_vehicle` got
+    refused for good: he is nudged precisely when he is standing still, which is
+    exactly when he needs a car, so the ban took every vehicle away from him and
+    left him on foot permanently. Only a FAILURE earns a ban.
+    """
+    h, _ = _op_harness()
+    h.operator.submit("nudge")
+    h._apply_operator(
+        _rich_state(task_type="enter_nearest_vehicle", task_status="running")
+    )
+    assert not h.idle_breaker.bans("enter_nearest_vehicle")
+    # The rest of the nudge still happens: he is still made to pick something new.
+    assert h._operator_force_pick is True
+    assert h.operator.last_applied and "nothing banned" in h.operator.last_applied
 
 
 def test_operator_command_is_refused_not_swallowed_during_a_cutscene() -> None:

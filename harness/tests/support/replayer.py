@@ -373,6 +373,8 @@ class ReplayHarness:
     _game_control_reason = Harness._game_control_reason
     _reflex_act = Harness._reflex_act
     _break_the_idle = Harness._break_the_idle
+    _operator_choice = Harness._operator_choice
+    _going_nowhere_quietly = Harness._going_nowhere_quietly
     _roam_preempted = Harness._roam_preempted
     _mission_preempted = Harness._mission_preempted
     _day_plan_preempted = Harness._day_plan_preempted
@@ -451,6 +453,7 @@ class ReplayHarness:
         # Operator overrides read by the roam pick path (`_begin_roam_goal`):
         # never armed in a replay/unit tick, but the attributes must exist.
         self._operator_goal = None
+        self._operator_goal_until = 0.0
         self._operator_force_pick = False
         self.stranded = StrandedEscalator(clock=self.clock)
         self.threat_latch = ThreatLatch(clock=self.clock)

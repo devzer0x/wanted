@@ -1039,6 +1039,7 @@ class _ActivityStub:
         self._roam_token = None
         # Operator overrides read by the roam pick path; never armed here.
         self._operator_goal = None
+        self._operator_goal_until = 0.0
         self._operator_force_pick = False
         #: `(tick, owner, action_type)` for every task that reached the game.
         self.posted_owners: list[tuple[int, str, str]] = []
@@ -1046,6 +1047,7 @@ class _ActivityStub:
         #: named an offered id. Nothing has been said yet on this stub.
         self.current_goal = "see the city"
 
+    _operator_choice = Harness._operator_choice
     _roam_preempted = Harness._roam_preempted
 
     def _execute_action(
