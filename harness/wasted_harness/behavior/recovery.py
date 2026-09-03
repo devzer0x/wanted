@@ -827,6 +827,64 @@ DAMAGE_WINDOW_S = 4.0
 #: 1-2 s model call, not merely advise one.
 LOW_HEALTH_FRACTION = 0.30
 
+#: `nearby.peds[].weapon_class` values that mean "hurts from range". The
+#: attacker's class decides two things in :func:`threat_action`: whether fists
+#: (or an empty gun) are any answer at all (rung 3), and whether "break
+#: contact" means run or take cover (rung 1). `projectile` sits with `gun`: a
+#: grenade is not something to run at either.
+RANGED_WEAPON_CLASSES: frozenset[str] = frozenset({"gun", "projectile"})
+#: ...and the two that mean "he has to reach me to hurt me". `unknown`/None
+#: are deliberately in neither set: an attacker the snapshot cannot classify
+#: gets the pre-existing answer (fight at full health, cover when hurt).
+MELEE_WEAPON_CLASSES: frozenset[str] = frozenset({"unarmed", "melee"})
+
+#: The bridge's own `weapon: "armed"` selection rule
+#: (`WeaponState.SelectForRange`, bridge 1.7.0): pump shotgun in his hands at
+#: or inside this range, pistol beyond it. Mirrored here ONLY so the harness
+#: can predict which of the two the bridge is about to pick and check that
+#: one for rounds; the selection itself stays bridge-side.
+SHOTGUN_RANGE_M = 10.0
+#: The attacker is closing, the snapshot is up to a poll period old, and the
+#: bridge re-measures the range when the task starts. Inside this margin the
+#: shotgun is assumed to be the pick, so a dry shotgun plus a loaded pistol at
+#: 12 m reads as "not armed" rather than gambling on the boundary.
+SHOTGUN_RANGE_MARGIN_M = 4.0
+
+
+def loaded_gun_for(state: GameState, distance_m: float | None) -> bool:
+    """Would ``fight_ped {weapon: "armed"}`` / ``shoot_at`` put a gun WITH
+    ROUNDS in his hands against a target ``distance_m`` away?
+
+    Why this exists (live, 2026-09-03): `player.weapon.owned` maps a weapon
+    NAME to its AMMO COUNT, and the bridge's `HAS_PED_GOT_WEAPON` guard is
+    satisfied by a weapon with zero rounds — a Busted strips the magazines
+    and leaves the guns. So "he owns a pistol" was true while he had nothing
+    to fire, and every armed goal (and any `weapon: "armed"` request) would
+    have put an empty gun in his hands. The bridge picks
+    (`WeaponState.SelectForRange`): pump shotgun if owned and the target is
+    inside :data:`SHOTGUN_RANGE_M`, else pistol if owned, else whatever is
+    already in his hands. This predicts that pick from the snapshot and asks
+    whether THAT weapon has a round in it.
+
+    ``distance_m`` is None when the target is not in `nearby.peds` (beyond the
+    top 8 by distance); the shotgun is then assumed, the conservative reading.
+    False on a pre-1.7.0 bridge (`player.weapon` absent): it cannot vouch for
+    rounds it cannot see, and the caller falls back to the unarmed answer.
+    """
+    w = state.player.weapon
+    if w is None:
+        return False
+    owned = w.owned or {}
+    shotgun = owned.get("PumpShotgun")
+    pistol = owned.get("Pistol")
+    close = distance_m is None or distance_m <= SHOTGUN_RANGE_M + SHOTGUN_RANGE_MARGIN_M
+    if shotgun is not None and close:
+        return shotgun > 0
+    if pistol is not None:
+        return pistol > 0
+    # Owns neither tracked handgun: the bridge leaves whatever he is holding.
+    return w.weapon_class == "gun" and w.ammo > 0
+
 
 @dataclass
 class DamageTracker:
@@ -934,6 +992,20 @@ def threat_action(
        (upside down, in the water, a burnt-out shell, or one the vehicle
        state machine has measured as not moving) breaking contact by driving
        is a lie, so that case falls back to ``seek_cover``.
+
+       On foot with a NAMED attacker (`threat.attacker_handle`, v1.11) whose
+       `weapon_class` is in :data:`MELEE_WEAPON_CLASSES`, "break contact" is
+       ``flee_ped`` at that handle (v1.14) rather than ``seek_cover``. The
+       bridge's ``seek_cover`` is TASK_SEEK_COVER_FROM_POS from his OWN
+       position when he is not wanted — cover from bullets, which a man with
+       fists does not fire. Crouching behind a wall while the puncher walks
+       round it is how a "break contact" rung produced a death; running from
+       the specific ped is what the rung always meant. A gunman keeps the
+       cover answer (running across open ground from a gun is worse), and
+       so does an attacker the snapshot cannot classify or does not list.
+       This is NOT cowardice by design: at full health rung 3 below still
+       fights, and a loaded gun makes that fight short — this rung only
+       exists for the fight that has already gone wrong.
     2. **Being beaten in a car that can leave** — `under_attack`,
        `player.in_vehicle`, the car is drivable and STATIONARY, and no
        mission is active -> ``wander_drive``. THE OPERATOR'S RULE, and a
@@ -1087,6 +1159,39 @@ def threat_action(
     away is answered by leaving, never by `fight_ped` — the bridge already
     tells the engine not to let him get out to fight, and this module is the
     other half of that rule.
+
+    **Bridge 1.7.0 — the weapon, and the fight he cannot win.** Being attacked
+    is lethal, so the named-handle `fight_ped` asks for ``weapon: "armed"``
+    whenever :func:`loaded_gun_for` says the gun the bridge would select
+    actually has rounds in it. That is the difference between "answer in
+    kind" (the v1.11 ``auto``: a puncher gets fists, a fight that takes ten
+    seconds and can be lost) and shooting the man who started it, which is
+    the required behaviour: fight back FAST and actually kill the
+    attacker. The rounds check is against AMMO, not ownership —
+    `player.weapon.owned` is a name->ammo map and a Busted leaves every gun
+    owned with 0 rounds, which is exactly what he was carrying when he lost a
+    `fight_ped` on 2026-09-03. With nothing loaded the param is omitted
+    (``auto``), so a pre-1.7.0 bridge sees the v1.11 wire shape.
+
+    Two consequences worth knowing about. A ped who is attacking him and
+    happens to be police IS fought this way — that is defending against an
+    attack already under way, which rules.md rule 6 ("never initiate combat
+    with police") permits; rung 4 already engaged a hostile cop through the
+    engine's own combat task before this change, so no new police policy is
+    introduced here, only a named target and a chosen weapon. And a ped he
+    picked a FIST fight with (`roam.pick_a_fight`, ``weapon: "unarmed"``)
+    who punches back is, by the bridge's `attacking_me`, an attacker: while
+    the goal's own `fight_ped` is running, :class:`ThreatLatch` holds this
+    rung's armed one (same verb already running), so the bit stays a fist
+    fight; only if the engine drops that task mid-brawl does this rung
+    re-post with a gun. Acceptable — the man is hitting him — but it is a
+    real edge and it is written down.
+
+    The other half: a named attacker with a `weapon_class` in
+    :data:`RANGED_WEAPON_CLASSES` when he has NOTHING loaded is not a fight,
+    it is a charge across open ground at a gun (the bridge's ranged arm plus
+    CanFightArmedPedsWhenNotArmed). Rung 3 takes cover for that case instead
+    — rung 5's own answer to damage he cannot return.
     """
     player = state.player
     if player.dead or player.arrested:
@@ -1140,14 +1245,40 @@ def threat_action(
     if target_handle is None:
         target_handle = state.threat.being_jacked_by
 
+    # Who the named attacker is, as far as this snapshot knows him. `nearby.
+    # peds` is the top 8 by distance and the NEAREST attacker is what the
+    # bridge names, so he is almost always in it; when he is not, both facts
+    # below are simply unknown and the rungs use their pre-existing answers.
+    attacker = None
+    if target_handle is not None:
+        attacker = next((p for p in state.nearby.peds if p.handle == target_handle), None)
+    attacker_distance = attacker.distance if attacker is not None else None
+    attacker_ranged = attacker is not None and attacker.weapon_class in RANGED_WEAPON_CLASSES
+    attacker_melee = attacker is not None and attacker.weapon_class in MELEE_WEAPON_CLASSES
+    #: `weapon: "armed"` would put a LOADED gun in his hands (see
+    #: :func:`loaded_gun_for` for why "owns a pistol" is not that).
+    armed = loaded_gun_for(state, attacker_distance)
+
     def fight_action() -> dict[str, Any]:
         if target_handle is not None:
-            return {"type": "fight_ped", "params": {"handle": target_handle}}
+            params: dict[str, Any] = {"handle": target_handle}
+            if armed:
+                # Bridge 1.7.0: select the loadout gun by range BEFORE the
+                # combat task. Left out (the v1.11 `auto`) when he has nothing
+                # to fire — `auto` never touches what is in his hands.
+                params["weapon"] = "armed"
+            return {"type": "fight_ped", "params": params}
         return fight
 
-    # 1. Too hurt to trade more hits.
+    # 1. Too hurt to trade more hits. On foot with a NAMED attacker who has to
+    #    reach him to hurt him, breaking contact means running from THAT ped
+    #    (`flee_ped`, v1.14): cover is for bullets, and a man crouched behind a
+    #    wall is still a man being punched. A gunman, or an attacker the
+    #    snapshot cannot classify, keeps the cover answer.
     max_health = player.max_health if player.max_health > 0 else 200
     if player.health <= max_health * LOW_HEALTH_FRACTION:
+        if not player.in_vehicle and target_handle is not None and attacker_melee:
+            return {"type": "flee_ped", "params": {"handle": target_handle}}
         return break_contact()
 
     # Damage arriving right now, from any detector: the sliding window (a
@@ -1172,6 +1303,25 @@ def threat_action(
     #    A named handle needs no proximity check of its own: the bridge has
     #    already vouched for it (v1.11 `attacking_me`/`threat`). Without one,
     #    the pre-v1.11 rule applies unchanged — damage plus somebody in reach.
+    #
+    #    One exception, and it is the one that kills him: a named attacker
+    #    who SHOOTS, when he has nothing loaded to shoot back with. `fight_ped`
+    #    would answer a gun with fists (the bridge's ranged arm plus
+    #    CanFightArmedPedsWhenNotArmed is a charge across open ground), so
+    #    that case takes cover instead, rung 5's own answer to damage he
+    #    cannot return.
+    if (
+        target_handle is not None
+        and not (player.in_vehicle and can_leave)
+        and attacker_ranged
+        and not armed
+    ):
+        if player.wanted > 0 and free_roam:
+            # The gun is a police gun (or he has stars regardless): rung 6's
+            # own answer. The bridge's `seek_cover` hides from the last spot
+            # the police saw him, which is how a man gets arrested, not away.
+            return {"type": "flee_police", "params": {}}
+        return break_contact()
     if not (player.in_vehicle and can_leave) and (
         (taking_damage and target_handle is not None)
         or (taking_damage and _attacker_close(state))
@@ -1243,11 +1393,21 @@ class ThreatLatch:
     Nothing here holds across a change of intent: the action TYPE is the
     intent, so a health drop that turns `combat_hated_targets_around` into
     `seek_cover`/`wander_drive` is issued on the very next tick.
+
+    One refinement for the target-explicit verbs (`fight_ped`/`flee_ped`,
+    v1.11/v1.14): the named `handle` is PART of the intent, but only once the
+    engine has stopped running the last one. The bridge ends `fight_ped` on
+    its own when its target is dead or gone, and with two men on him the
+    second attacker becomes `threat.attacker_handle` the same tick — holding
+    that for :data:`THREAT_HOLD_S` is four seconds of being hit for nothing.
+    A running task is never preempted to switch targets, though: that would
+    be the restart-before-a-shot-lands thrash under a new name.
     """
 
     hold_s: float = THREAT_HOLD_S
     clock: Any = time.monotonic
     _last_type: str | None = None
+    _last_handle: int | None = None
     _last_issued_at: float = 0.0
 
     def should_issue(self, action: dict[str, Any], state: GameState) -> bool:
@@ -1255,22 +1415,43 @@ class ThreatLatch:
         lt = state.last_task
         if lt.status == "running" and lt.type == action_type:
             # The engine is already doing exactly this. Posting again would
-            # preempt it (CONTRACTS §1) and restart it from scratch.
+            # preempt it (CONTRACTS §1) and restart it from scratch. This
+            # holds even when the NAMED target differs: switching targets
+            # mid-fight by preempting is the exact restart-before-a-shot-lands
+            # thrash this class exists to stop, and the bridge's `fight_ped`
+            # ends on its own the moment its target is dead or gone.
             return False
         if self._last_type == action_type:
             now = self.clock()
             if now - self._last_issued_at < self.hold_s:
-                return False
+                handle = _target_handle(action)
+                if handle is None or self._last_handle is None or handle == self._last_handle:
+                    return False
+                # Same verb, DIFFERENT named target, and the engine is not
+                # running the last one (the check above would have held): the
+                # first fight ended and somebody else is on him. That is a new
+                # intent, not a retry, so it goes out now rather than after
+                # the hold-down — measured in seconds, that is the difference
+                # between answering the second attacker and absorbing him.
         return True
 
     def issued(self, action: dict[str, Any]) -> None:
         self._last_type = str(action["type"])
+        self._last_handle = _target_handle(action)
         self._last_issued_at = self.clock()
 
     def reset(self) -> None:
         """Forget the last threat action (new game process, respawn)."""
         self._last_type = None
+        self._last_handle = None
         self._last_issued_at = 0.0
+
+
+def _target_handle(action: dict[str, Any]) -> int | None:
+    """The named ped a threat action is aimed at (`fight_ped`/`flee_ped`), or None."""
+    params = action.get("params") or {}
+    handle = params.get("handle")
+    return int(handle) if handle is not None else None
 
 
 # --- death / arrest recovery --------------------------------------------------

@@ -302,6 +302,13 @@ def _tick_event_reason(
 #: always something a viewer would actually want to see again.
 CLIP_EVENTS: frozenset[str] = frozenset({"death", "busted"})
 
+#: How far the world slows for the moment before a clip is saved, and for how
+#: long. The OBS replay buffer is a TRAILING window, so a dip taken here lands
+#: inside the clip that is about to be written. Cheap: it reuses `/timescale`,
+#: which already exists, and `_guard_timescale` already owns putting it back.
+DEATH_SLOWMO_SCALE = 0.3
+DEATH_SLOWMO_S = 2.5
+
 
 # --------------------------------------------------------------------------- #
 #  --check                                                                    #
@@ -1230,6 +1237,39 @@ class Harness:
         self.writer.record_event(type_, payload, screenshot_url=screenshot_url)
         return None
 
+    def _slow_the_death(self) -> None:
+        """Dip the world to slow motion for the couple of seconds before a clip
+        is saved, so the replay buffer contains the crash in slow motion.
+
+        WHY THIS IS SAFE, given the history. `/timescale` left at 0.15 is the
+        bug `_guard_timescale` exists to clean up (four stuck restores in one
+        session). This does not add a new way to get stuck: it restores in a
+        `finally`, and even if the restore POST fails, `_guard_timescale` reads
+        `world.timescale` every tick and puts it back. That guard is the reason
+        this is a two-line garnish rather than a risk.
+
+        Off the loop thread on purpose — it sleeps. Bounded, best-effort, and
+        never allowed to raise: a missed slow-mo is a worse clip, a raised
+        exception here would be a missed death.
+        """
+        if self.bridge is None:
+            return
+        try:
+            self.bridge.set_timescale(DEATH_SLOWMO_SCALE)
+            time.sleep(DEATH_SLOWMO_S)
+        except Exception as exc:
+            log.info(
+                "death slow-mo skipped",
+                extra={"kv": {"error": f"{type(exc).__name__}: {exc}"[:200]}},
+            )
+        finally:
+            try:
+                self.bridge.set_timescale(1.0)
+            except Exception:
+                # `_guard_timescale` re-reads `world.timescale` every tick and
+                # restores it, so a failed restore here is already covered.
+                log.warning("death slow-mo restore failed; the tick guard will catch it")
+
     def _capture_clip_async(
         self, event_type: str, caption: str, event_id: int | None = None
     ) -> None:
@@ -1242,6 +1282,9 @@ class Harness:
 
         def worker() -> None:
             try:
+                # Slow motion FIRST: the replay buffer is a trailing window, so
+                # the dip has to happen before the save to be inside the clip.
+                self._slow_the_death()
                 self.clips.capture_clip(
                     event_id=event_id, event_type=event_type, caption=caption
                 )

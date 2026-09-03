@@ -21,10 +21,27 @@ Vercel), `infra/` (Supabase), `docs/` (plan, status, contracts, runbook).
    server once, provide API keys, approve the production deploy. Batch these into short checklists.
    Never block on a question answerable by reading docs or running a command. Nobody but the human
    ever types their passwords or 2FA codes; they do that in the remote-desktop session.
-5. **Story Mode only, no cheats.** The bridge refuses to run if a network session is active. The agent
-   gets no god mode, no teleports across the map, no free money, no invincible cars. A human can't
-   do those things, so neither can he. (Narrow exception: an "unstick" nudge of a few meters when
-   wedged, logged and announced in commentary.)
+5. **Story Mode only. Cheats allowed, on purpose, since 2026-09-04.** The bridge still refuses to
+   run if a network session is active, and the agent still never plays anywhere but single-player
+   Story Mode. That part is not negotiable and never will be.
+
+   What CHANGED: this rule used to end "no cheats — a human can't do those things, so neither can
+   he." That was lifted on 2026-09-04, for the show rather than for the player: comedy and
+   shareability now outrank the fair-play constraint. So god mode, spawned vehicles, gravity
+   and similar effects are now legitimate material for deliberately absurd bits.
+
+   The guardrails that survive the change, because they are what keep it honest rather than what
+   kept it hard:
+   * **Say so.** Anything cheat-driven is announced in commentary and carried in the event payload,
+     the same way the unstick nudge always has been. The audience is never told he did something
+     unaided when he did not. Rule 7's "the agent is an AI" honesty applies to how he plays, too.
+   * **No typed cheat codes.** The harness has no text entry and no menu navigation, so effects
+     come from the bridge calling natives. Rule 6 still applies in full: do not guess a native or
+     an SHVDN signature, verify against the installed version.
+   * **Deliberate, not ambient.** A cheat belongs to a named bit with a `done_when`, not to his
+     baseline. A permanently invincible the agent is not a character, and there is no jeopardy left to
+     be funny about.
+   * The old "unstick nudge of a few metres when wedged" exception is unchanged and still logged.
 6. **Do not guess APIs.** ScriptHookVDotNet signatures, native function hashes, Claude model IDs and
    pricing, Supabase and Vercel behavior: verify against the installed version / official docs
    before writing code. Model IDs and prices live in `harness/config/pricing.yaml`, sourced from the

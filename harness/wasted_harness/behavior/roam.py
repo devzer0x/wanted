@@ -70,7 +70,7 @@ from .activities import (
     Activity,
 )
 from .navigation import planar_distance
-from .recovery import STALL_MOVE_M
+from .recovery import STALL_MOVE_M, loaded_gun_for
 
 log = get_logger("wasted.roam")
 
@@ -196,6 +196,51 @@ def is_motorcycle(vehicle_class: str | None) -> bool:
     return (vehicle_class or "").strip().lower() == "motorcycles"
 
 
+#: Things with wheels that have no business on a freeway. Model names are
+#: `VehicleHash` members lowercased, with the SAME provenance and the same
+#: UNVERIFIED caveat as :data:`BUS_MODELS`: they are read off the bridge's
+#: `v.Model` string, and a name that does not match the pinned DLL simply never
+#: matches anything.
+#:
+#: A WRONG NAME HERE IS SAFE, which is why the list is allowed to be generous.
+#: `needs` and `done_when` share :func:`is_slow_model`, so a misspelling costs an
+#: OFFER (the goal is never proposed) and can never produce a false completion —
+#: he cannot be credited with a mower run he did in a Sultan. Both plausible
+#: spellings of the lawnmower are listed for exactly that reason: it is the
+#: headline vehicle, the pinned enum's member may be `Mower` or `Lawnmower`, and
+#: carrying both costs nothing while guessing one risks losing the whole bit.
+SLOW_MODELS: frozenset[str] = frozenset(
+    {
+        "mower", "lawnmower",
+        "tractor", "tractor2", "tractor3",
+        "forklift", "caddy", "caddy2", "caddy3",
+        "faggio", "faggio2", "faggio3",
+        "docktug", "airtug", "scrap", "bulldozer", "handler",
+    }
+)
+
+#: The one vehicle CLASS that is slow all the way through. `utility` and
+#: `industrial` are NOT here on purpose: they hold tow trucks and dump trucks,
+#: which are freeway-capable and therefore not the joke.
+SLOW_CLASSES: frozenset[str] = frozenset({"cycles"})
+
+
+def is_slow_model(model: str | None, vehicle_class: str | None) -> bool:
+    """Is this the slowest thing on the block?"""
+    return (
+        (vehicle_class or "").strip().lower() in SLOW_CLASSES
+        or (model or "").strip().lower() in SLOW_MODELS
+    )
+
+
+def slow_vehicle(state: GameState) -> NearbyVehicle | None:
+    """The nearest unattended mower/tractor/bike worth taking on a motorway."""
+    for v in empty_vehicles(state, ON_FOOT_RESCUE_RADIUS_M):
+        if is_slow_model(v.model, v.vehicle_class):
+            return v
+    return None
+
+
 def player_pos(state: GameState) -> tuple[float, float, float]:
     p = state.player.pos
     return (p.x, p.y, p.z)
@@ -282,6 +327,17 @@ def weapon_ammo(state: GameState, name: str) -> int | None:
     if w is None:
         return None
     return (w.owned or {}).get(name)
+
+
+def smg_loaded(state: GameState) -> bool:
+    """The micro SMG is owned AND has rounds — the `drive_by` precondition.
+
+    `owns_weapon` is deliberately not enough: `owned` maps a name to its ammo
+    count, a Busted strips the ammo and leaves the gun, and the bridge's
+    `SelectForDriveBy` is `HAS_PED_GOT_WEAPON`-guarded, not ammo-guarded, so an
+    owned-but-empty SMG would be put in his hands and pointed out of the window.
+    """
+    return (weapon_ammo(state, "MicroSMG") or 0) > 0
 
 
 def air_reported(state: GameState) -> bool:
@@ -976,15 +1032,37 @@ def _plan_pick_a_fight(state, view):
     # whatever he happens to be carrying. Without it, the same goal on a the agent
     # who picked up a pistol is an execution, and the show is not that.
     steps.append({"type": "fight_ped", "params": {"handle": mark.handle, "weapon": "unarmed"}})
-    return steps, {"mark": mark.handle}
+    # `task_before`: the task id on the wire at pick time, so `done_when` can
+    # tell a `fight_ped` that finished DURING this goal from one that finished
+    # before it (the reflex fights too, and its `done` may still be the last
+    # task when this goal is picked). Survives `replan` (setdefault merge).
+    return steps, {"mark": mark.handle, "task_before": state.last_task.id}
 
 
 def _done_pick_a_fight(state: GameState, snap: dict[str, Any]) -> bool:
-    """Over when the mark is no longer standing in front of him: dead, fled, or
-    streamed out. `nearby.peds` is top-8 by distance, so absence is the honest
-    proxy for "he is not a problem any more" — there is no ped-health field."""
+    """Over when the mark is no longer a problem: dead, fled, or streamed out.
+
+    Two signals, because neither alone covers the win. `nearby.peds` is top-8
+    by distance, so ABSENCE is the honest proxy for "fled or streamed out" —
+    there is no ped-health field. But the bridge's ped scan does not drop dead
+    peds, so a mark he actually beat stays in the list as a corpse at his feet
+    and absence never fires; the plan then runs out, replans onto the same
+    corpse, and the fight he WON is graded as a failure. The bridge's own
+    `fight_ped` reports `done` only when its target is dead or gone (CONTRACTS
+    §1), so a `fight_ped` that reached `done` after this goal was picked is
+    that fact on the wire — the id check keeps a pre-pick `done` (the reflex
+    finishing somebody else) from ending the goal before it starts.
+    """
     handle = snap.get("mark")
-    return all(p.handle != handle for p in state.nearby.peds)
+    if all(p.handle != handle for p in state.nearby.peds):
+        return True
+    last = state.last_task
+    return (
+        last.type == "fight_ped"
+        and last.status == "done"
+        and last.id is not None
+        and last.id != snap.get("task_before")
+    )
 
 
 def _needs_gang_trouble(state: GameState, view: RoamView) -> bool:
@@ -1206,6 +1284,52 @@ def _done_freeway_run(state: GameState, snap: dict[str, Any]) -> bool:
     return planar_distance(player_pos(state), snap["start"]) >= FREEWAY_RUN_DISTANCE_M
 
 
+def _needs_slow_freeway(state: GameState, view: RoamView) -> bool:
+    """A mower within reach, and he is not already on one.
+
+    The last clause matters: without it the goal is offered while he is already
+    riding the mower down the motorway, and re-picking it mid-run resets the
+    displacement snapshot so the 1.5 km can never be completed.
+    """
+    if state.player.wanted > 0 or state.mission.active:
+        return False
+    if state.player.in_vehicle:
+        v = state.vehicle
+        if v is not None and is_slow_model(v.model, v.vehicle_class):
+            return False
+    return slow_vehicle(state) is not None
+
+
+def _plan_slow_freeway(state, view):
+    v = slow_vehicle(state)
+    assert v is not None
+    here = player_pos(state)
+    # Same haul `freeway_run` takes — the farthest landmark is the longest
+    # straight-ish run on the map — because the joke is the VEHICLE, not the
+    # route. Asking for `rushed` at 34 m/s on a machine that does 12 is the
+    # point: he is giving it everything he has.
+    name = max(LANDMARKS, key=lambda n: planar_distance(here, LANDMARKS[n]))
+    pos = LANDMARKS[name]
+    steps = _approach_then_enter(v, "any", PROXIMITY_SEARCH_RADIUS_M)
+    steps += [_waypoint(pos), _drive_to(pos, 34.0, "rushed", 25.0), _wander("rushed")]
+    return steps, {"start": here, "target": name, "model": v.model}
+
+
+def _done_slow_freeway(state: GameState, snap: dict[str, Any]) -> bool:
+    """The full freeway distance, still aboard the slow thing.
+
+    Both halves are required. Covering 1.5 km after abandoning the mower for a
+    Sultan is `freeway_run`, and crediting it here would be scoring the bit he
+    did not do.
+    """
+    v = state.vehicle
+    if not state.player.in_vehicle or v is None:
+        return False
+    if not is_slow_model(v.model, v.vehicle_class):
+        return False
+    return float(snap.get("_from_start_m", 0.0)) >= FREEWAY_RUN_DISTANCE_M
+
+
 def _needs_lose_the_cops(state: GameState, view: RoamView) -> bool:
     return state.player.wanted > 0
 
@@ -1240,17 +1364,17 @@ def _plan_two_stars(state, view):
     the old plan: jack an occupied car, which is a star by itself.
     """
     steps: list[dict[str, Any]] = []
-    armed = weapon_reported(state) and any(
-        owns_weapon(state, n) for n in ("Pistol", "MicroSMG", "PumpShotgun")
-    )
+    # ROUNDS, not ownership: `owned` maps a name to its ammo count and a
+    # Busted leaves every loadout gun owned with 0 — the 2026-09-03 state that
+    # had every armed goal opening with an empty weapon.
     if state.player.in_vehicle:
         mark = _drive_by_target(state)
-        if armed and owns_weapon(state, "MicroSMG") and mark is not None:
+        if smg_loaded(state) and mark is not None:
             steps.append({"type": "drive_by", "params": {"handle": mark.handle, "duration_s": 8.0}})
         steps.append(_wander("ignore_lights"))
         return steps, {}
     mark = nearest_mark(state)
-    if armed and mark is not None:
+    if mark is not None and loaded_gun_for(state, mark.distance):
         steps.append({"type": "shoot_at", "params": {"handle": mark.handle, "duration_s": 5.0}})
     v = occupied_vehicle(state)
     if v is not None:
@@ -1309,6 +1433,78 @@ def _plan_random_event(state, view):
 
 def _done_random_event(state: GameState, snap: dict[str, Any]) -> bool:
     return state.mission.active or not state.mission.random_event_active
+
+
+#: How much altitude he has to gain before the position counts as open. Chosen
+#: against the map's own relief rather than a summit height: the observatory and
+#: the Vinewood sign sit ~300 m above the city floor and Chiliad ~760 m, so 250 m
+#: is a real climb up any of the three and is reachable from the streets below
+#: each of them.
+UP_ONLY_CLIMB_M = 250.0
+
+#: How much of the climb he has to give back before the position counts as
+#: closed. Deliberately most of it: a car park that slopes ten metres is not a
+#: drawdown, and the joke only works if he visibly comes all the way down.
+UP_ONLY_DROP_M = 200.0
+
+
+def _needs_up_only(state: GameState, view: RoamView) -> bool:
+    """Offered when there is a real climb available from where he is standing.
+
+    The gate is the RELIEF between him and the nearest hill, not his absolute
+    altitude, so it cannot be fooled by a coordinate table that has never been
+    checked against the running game (`activities.LANDMARKS` is marked
+    UNVERIFIED, and the knowledge base disagrees with it about Chiliad by
+    thirty metres). If the hill's authored height is wrong, this offer is
+    wrong in the same direction as the goal's own completion test, which is
+    the consistent failure rather than the confusing one.
+    """
+    if state.player.wanted > 0 or state.mission.active:
+        return False
+    if state.player.in_vehicle:
+        if state.vehicle is None or (
+            (state.vehicle.vehicle_class or "").strip().lower() in AIRCRAFT_CLASSES
+        ):
+            # Flying up a mountain is not a climb, it is a cutscene.
+            return False
+    elif not empty_vehicles(state, BLOCK_VEHICLE_RADIUS_M):
+        return False
+    _, pos = _nearest_hill(state)
+    return (pos[2] - player_pos(state)[2]) >= UP_ONLY_CLIMB_M
+
+
+def _plan_up_only(state, view):
+    name, pos = _nearest_hill(state)
+    steps: list[dict[str, Any]] = []
+    if not state.player.in_vehicle:
+        steps.append(_enter("any", BLOCK_VEHICLE_RADIUS_M))
+    steps += [_waypoint(pos), _drive_to(pos, 22.0, "normal", HILL_ARRIVE_M)]
+    # THE DUMP, as an explicit step. Leaving the descent to `wander_drive`
+    # would let him mill about the summit car park until the timeout, and the
+    # whole bit is that the way down is not optional.
+    down = min(LANDMARKS, key=lambda n: LANDMARKS[n][2])
+    steps += [_waypoint(LANDMARKS[down]), _drive_to(LANDMARKS[down], 30.0, "rushed", 25.0)]
+    return steps, {
+        "hill": name,
+        "target": pos,
+        "start": player_pos(state),
+        "start_z": state.player.pos.z,
+        "floor": down,
+    }
+
+
+def _done_up_only(state: GameState, snap: dict[str, Any]) -> bool:
+    """Up, and then all the way back down.
+
+    Both halves are read off his OWN trajectory (`_climb_m` / `_drop_from_peak_m`
+    in `_fold_goal_progress`), never off an authored summit height. The goal
+    called "up only" is therefore the one goal in the catalog that cannot be
+    completed without the drawdown, which is the entire joke.
+    """
+    return (
+        float(snap.get("_climb_m", 0.0)) >= UP_ONLY_CLIMB_M
+        and float(snap.get("_drop_from_peak_m", 0.0)) >= UP_ONLY_DROP_M
+    )
 
 
 def _needs_bike_hills(state: GameState, view: RoamView) -> bool:
@@ -1524,8 +1720,7 @@ def _drive_by_target(state: GameState) -> Any | None:
 
 def _needs_drive_by(state: GameState, view: RoamView) -> bool:
     return (
-        weapon_reported(state)
-        and owns_weapon(state, "MicroSMG")
+        smg_loaded(state)
         and state.player.in_vehicle
         and state.player.wanted == 0
         and state.player.health >= GANG_MIN_HEALTH
@@ -1665,10 +1860,11 @@ def _needs_shoot_and_run(state: GameState, view: RoamView) -> bool:
         return False
     if state.player.in_vehicle or state.player.health < GANG_MIN_HEALTH:
         return False
-    armed = armed_with_a_gun(state) or any(
-        owns_weapon(state, n) for n in ("Pistol", "MicroSMG", "PumpShotgun")
-    )
-    return armed and nearest_mark(state) is not None
+    mark = nearest_mark(state)
+    # `shoot_at` selects by range exactly as `fight_ped{weapon:"armed"}` does,
+    # so the same rounds check applies: the weapon the bridge is about to put
+    # in his hands must have something in it, or this is a man pointing.
+    return mark is not None and loaded_gun_for(state, mark.distance)
 
 
 def _plan_shoot_and_run(state, view):
@@ -1703,10 +1899,11 @@ def _needs_rampage(state: GameState, view: RoamView) -> bool:
         return False
     if state.player.wanted > 0 or state.player.health < GANG_MIN_HEALTH:
         return False
-    armed = armed_with_a_gun(state) or any(
-        owns_weapon(state, n) for n in ("Pistol", "MicroSMG", "PumpShotgun")
-    )
-    return armed and nearest_mark(state) is not None
+    mark = nearest_mark(state)
+    # Rounds, not ownership — see `loaded_gun_for`. Offering this with every
+    # gun owned and every magazine empty is how one arrest turned a 240 s
+    # "rampage" into four minutes of standing still with an empty pistol.
+    return mark is not None and loaded_gun_for(state, mark.distance)
 
 
 def _plan_rampage(state, view):
@@ -1979,6 +2176,45 @@ CATALOG: tuple[Goal, ...] = (
         timeout_s=360.0,
         cooldown_s=25 * 60.0,
         chaos_cost=0.25,
+    ),
+    Goal(
+        id="slowest_thing_fastest_road",
+        category="stunt",
+        description="take the slowest thing on the block onto the freeway",
+        why="it has wheels",
+        needs=_needs_slow_freeway,
+        plan=_plan_slow_freeway,
+        done_when=_done_slow_freeway,
+        # 1.5 km at 8-12 m/s is ~150-190 s of driving, before the walk to the
+        # mower and the engine's own on-ramp pathing. `up_only` already uses 600
+        # for a two-leg goal.
+        timeout_s=600.0,
+        # Slow vehicles are rare and the bit is one-note: it should be an event,
+        # not a rotation staple. Between `steal_cop_car` (20 min) and
+        # `up_only` (40 min).
+        cooldown_s=30 * 60.0,
+        # No bodies, but a real chance of being rear-ended at 120 on the
+        # carriageway: above `freeway_run` (0.25), level with `hijack_bus`.
+        chaos_cost=0.5,
+        # L1 is the ladder's own "nuisance with no bodies. Cars, hills, buses,
+        # distance", which is exactly this.
+        level=1,
+    ),
+    Goal(
+        id="up_only",
+        category="scenic",
+        description="drive to the top; the top is always in",
+        why="up only",
+        needs=_needs_up_only,
+        plan=_plan_up_only,
+        done_when=_done_up_only,
+        # Long: it is a climb out of the city and the whole way back down. The
+        # descent is a step in the plan, not an afterthought, so the budget has
+        # to cover both legs.
+        timeout_s=600.0,
+        cooldown_s=40 * 60.0,
+        chaos_cost=0.25,
+        calm=True,
     ),
     Goal(
         id="freeway_run",
@@ -2953,6 +3189,8 @@ class RoamEngine:
         "_from_start_m",
         "_held3_s",
         "_ammo_spent",
+        "_climb_m",
+        "_drop_from_peak_m",
     )
 
     def _fold_goal_progress(self, state: GameState, locked: LockedGoal) -> None:
@@ -2994,6 +3232,22 @@ class RoamEngine:
         # and duplicating that rule here would be two owners of one decision.
         # Only DECREASES count, so picking ammo up mid-goal cannot go negative
         # and cannot mask a shot already fired.
+        # Altitude, measured against HIS OWN trajectory rather than against a
+        # coordinate somebody typed in. `LANDMARKS` is marked UNVERIFIED in
+        # `activities.py` and the knowledge base carries an unresolved
+        # disagreement about Mount Chiliad's height (797.1 m per the wiki
+        # against our 766.5), so "did he reach the summit" is not a question
+        # this code can honestly ask. "Did he climb 300 m, and has he since
+        # given 200 m of it back" is answerable from two readings of `pos.z`
+        # and is true whatever the mountain actually measures.
+        start_z = snap.get("start_z")
+        if start_z is not None:
+            here_z = state.player.pos.z
+            peak = max(float(snap.get("_peak_z", start_z)), here_z)
+            snap["_peak_z"] = peak
+            snap["_climb_m"] = peak - float(start_z)
+            snap["_drop_from_peak_m"] = peak - here_z
+
         ammo_start = snap.get("ammo_start")
         if isinstance(ammo_start, dict):
             spent = 0

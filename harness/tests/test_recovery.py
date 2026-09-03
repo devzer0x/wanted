@@ -49,6 +49,7 @@ from wasted_harness.behavior.recovery import (
     WaterEscalator,
     classify_api_failure,
     flipped_action,
+    loaded_gun_for,
     threat_action,
 )
 from wasted_harness.bridge_client import BridgeApiError, BridgeTransientError, GameState, Vec3
@@ -110,6 +111,12 @@ def make_state(**over) -> GameState:
         # the pre-v1.11-bridge state every existing test in this file predates.
         "threat": over.pop("threat", {"attacker_handle": None, "being_jacked_by": None}),
     }
+    # Bridge 1.7.0 `player.weapon`. Absent by default, so every test that
+    # predates it keeps exercising the pre-1.7.0 shape (no weapon = the
+    # harness cannot vouch for rounds = the unarmed answers).
+    weapon = over.pop("weapon", None)
+    if weapon is not None:
+        body["player"]["weapon"] = weapon
     assert not over, f"unused overrides: {sorted(over)}"
     return GameState.model_validate(body)
 
@@ -1845,3 +1852,352 @@ def test_going_nowhere_s_resets_once_he_actually_travels() -> None:
 
 def test_going_nowhere_s_is_zero_before_anything_is_observed() -> None:
     assert IdleBreaker(clock=FakeClock()).going_nowhere_s() == 0.0
+
+
+# --- fighting back with a gun that actually has rounds in it -----------------
+#
+# Live, 2026-09-03: `fight_ped failed: player_dead` — he lost a fight — and the
+# same session had every loadout gun `owned` with ammo 0/0/0 after an arrest.
+# `owned` maps a NAME to an AMMO COUNT, so "owns a pistol" was true with nothing
+# to fire. These pin the rule that the retaliation asks for a gun only when the
+# gun the bridge would pick is loaded, and that a gunman is not charged with
+# fists.
+
+
+def _loadout(pistol: int = 60, smg: int = 90, shotgun: int = 24, *, holding: str = "Unarmed") -> dict:
+    """A bridge-1.7.0 `player.weapon`, shaped like the DTO."""
+    return {
+        "name": holding,
+        "class": "unarmed" if holding == "Unarmed" else "gun",
+        "ammo": 0,
+        "owned": {"Pistol": pistol, "MicroSMG": smg, "PumpShotgun": shotgun},
+        "loadout": "ammunation",
+    }
+
+
+def _attacker(distance: float, handle: int = 9012, weapon_class: str | None = "unarmed") -> dict:
+    body = {
+        "handle": handle,
+        "model": "a_m_y_skater_01",
+        "distance": distance,
+        "relationship": "neutral",
+        "attacking_me": True,
+    }
+    if weapon_class is not None:
+        body["weapon_class"] = weapon_class
+    return body
+
+
+ATTACKED_BY_9012 = {"attacker_handle": 9012, "being_jacked_by": None}
+
+
+def test_loaded_gun_for_predicts_the_bridge_pick_and_checks_that_gun_for_rounds() -> None:
+    # Everything loaded: armed at any range.
+    assert loaded_gun_for(make_state(weapon=_loadout()), 3.0) is True
+    assert loaded_gun_for(make_state(weapon=_loadout()), 30.0) is True
+    # Every magazine empty (the post-arrest state): never armed, whatever is owned.
+    assert loaded_gun_for(make_state(weapon=_loadout(0, 0, 0)), 3.0) is False
+    assert loaded_gun_for(make_state(weapon=_loadout(0, 0, 0)), 30.0) is False
+    # Dry shotgun, loaded pistol: inside shotgun range (plus the closing margin)
+    # the bridge would put the EMPTY shotgun in his hands, so that is "not
+    # armed"; beyond it the pistol is the pick and it is loaded.
+    dry_shotgun = _loadout(pistol=60, smg=0, shotgun=0)
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), 3.0) is False
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), 12.0) is False
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), 25.0) is True
+    # Unknown range (attacker not in the top-8 list): the conservative reading.
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), None) is False
+    # The SMG alone is never the range pick, so 90 SMG rounds do not make him armed.
+    assert loaded_gun_for(make_state(weapon=_loadout(0, 90, 0)), 3.0) is False
+    # A pre-1.7.0 bridge (no `player.weapon` at all): cannot vouch for rounds.
+    assert loaded_gun_for(make_state(), 3.0) is False
+
+
+def test_loaded_gun_for_trusts_a_loaded_gun_in_hand_when_no_loadout_gun_is_owned() -> None:
+    """`loadout: off`, a rifle picked up in-game: the bridge selects nothing
+    and leaves what he holds, so what he holds is what counts."""
+    carbine = {"name": "CarbineRifle", "class": "gun", "ammo": 30, "owned": {}, "loadout": "off"}
+    assert loaded_gun_for(make_state(weapon=carbine), 3.0) is True
+    empty = dict(carbine, ammo=0)
+    assert loaded_gun_for(make_state(weapon=empty), 3.0) is False
+
+
+def test_threat_action_answers_an_attacker_with_a_loaded_gun() -> None:
+    """The headline: named attacker, rounds in the gun -> `fight_ped` at that
+    handle with `weapon: "armed"`, not "answer in kind"."""
+    state = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(),
+        nearby_peds=[_attacker(2.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012, "weapon": "armed"},
+    }
+
+
+def test_threat_action_never_asks_for_a_gun_with_empty_magazines() -> None:
+    """Every gun owned, every magazine empty (the state read off the live
+    bridge after an arrest): the wire shape is the v1.11 `auto`, byte for
+    byte — no `weapon` key at all."""
+    state = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(0, 0, 0),
+        nearby_peds=[_attacker(2.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012},
+    }
+
+
+def test_threat_action_stays_unarmed_when_the_bridge_would_pick_the_dry_shotgun() -> None:
+    """Loaded pistol, empty shotgun, attacker at 3 m: the bridge's range rule
+    would select the shotgun, so the harness must not call that "armed"."""
+    state = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(pistol=60, smg=0, shotgun=0),
+        nearby_peds=[_attacker(3.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True)["params"] == {"handle": 9012}
+    # Same loadout, attacker well beyond shotgun range: the pistol is the pick.
+    far = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(pistol=60, smg=0, shotgun=0),
+        nearby_peds=[_attacker(25.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(far, NO_DANGER_DELTA, True)["params"] == {"handle": 9012, "weapon": "armed"}
+
+
+def test_threat_action_takes_cover_from_a_gunman_when_there_is_nothing_to_shoot_back_with() -> None:
+    """Fists against a gun is not a fight, it is a charge across open ground."""
+    state = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(0, 0, 0),
+        nearby_peds=[_attacker(12.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "seek_cover",
+        "params": {"duration_s": 10},
+    }
+    # ...but with rounds, a gunman is exactly who to shoot first.
+    loaded = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(),
+        nearby_peds=[_attacker(12.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(loaded, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012, "weapon": "armed"},
+    }
+    # A projectile counts as ranged too.
+    grenade = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(0, 0, 0),
+        nearby_peds=[_attacker(12.0, weapon_class="projectile")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(grenade, NO_DANGER_DELTA, True)["type"] == "seek_cover"
+
+
+def test_threat_action_still_fights_an_unclassified_attacker_with_fists() -> None:
+    """Attacker not in `nearby.peds` (or class unknown) and nothing loaded:
+    the pre-existing answer, `fight_ped` auto, not cover — the snapshot has
+    given no reason to think he is outgunned."""
+    unlisted = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(0, 0, 0), threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(unlisted, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012},
+    }
+    unknown = make_state(
+        health=185, in_vehicle=False, weapon=_loadout(0, 0, 0),
+        nearby_peds=[_attacker(2.0, weapon_class="unknown")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(unknown, NO_DANGER_DELTA, True)["type"] == "fight_ped"
+
+
+def test_threat_action_arms_the_retaliation_from_a_car_that_cannot_leave() -> None:
+    """The working-car reversal is untouched (rung 2 leaves); a car that
+    cannot leave fights back, and it fights back with the gun."""
+    shell = {
+        "handle": 1, "model": "adder", "display_name": "Adder", "class": "Super",
+        "speed": 0.0, "health": 0.0, "upside_down": False, "in_water": False,
+        "stopped_for_s": 3.0,
+    }
+    stuck = make_state(
+        health=185, in_vehicle=True, vehicle=shell, weapon=_loadout(),
+        nearby_peds=[_attacker(2.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(stuck, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012, "weapon": "armed"},
+    }
+    working = dict(shell, health=900.0)
+    parked = make_state(
+        health=185, in_vehicle=True, vehicle=working, weapon=_loadout(),
+        nearby_peds=[_attacker(2.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(parked, NO_DANGER_DELTA, True) == {
+        "type": "wander_drive",
+        "params": {"style": "avoid_traffic"},
+    }
+
+
+def test_threat_action_arms_the_fight_inside_a_mission_too() -> None:
+    state = make_state(
+        health=185, in_vehicle=False, mission_active=True, weapon=_loadout(),
+        nearby_peds=[_attacker(6.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012, "weapon": "armed"},
+    }
+
+
+# --- breaking contact when losing: run from fists, hide from guns --------------
+
+
+def test_threat_action_runs_from_a_melee_attacker_when_badly_hurt() -> None:
+    """Rung 1 on foot with a named puncher: `flee_ped` at him, not `seek_cover`
+    — cover is for bullets, and a man crouched behind a wall is still a man
+    being punched. Survival still outranks the loaded gun."""
+    state = make_state(
+        health=40, in_vehicle=False, weapon=_loadout(),
+        nearby_peds=[_attacker(2.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "flee_ped",
+        "params": {"handle": 9012},
+    }
+    bat = make_state(
+        health=40, in_vehicle=False,
+        nearby_peds=[_attacker(2.0, weapon_class="melee")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(bat, NO_DANGER_DELTA, True)["type"] == "flee_ped"
+
+
+def test_threat_action_keeps_cover_when_badly_hurt_by_a_gunman() -> None:
+    state = make_state(
+        health=40, in_vehicle=False,
+        nearby_peds=[_attacker(12.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "seek_cover",
+        "params": {"duration_s": 10},
+    }
+
+
+def test_threat_action_keeps_cover_when_badly_hurt_by_someone_it_cannot_classify() -> None:
+    """No handle, or a handle the list does not carry a class for: the
+    pre-existing answer, unchanged."""
+    nobody_named = make_state(health=40, in_vehicle=False, nearby_peds=[_neutral(2.0)])
+    assert threat_action(nobody_named, NO_DANGER_DELTA, True)["type"] == "seek_cover"
+    unlisted = make_state(health=40, in_vehicle=False, threat=ATTACKED_BY_9012)
+    assert threat_action(unlisted, NO_DANGER_DELTA, True)["type"] == "seek_cover"
+    unknown = make_state(
+        health=40, in_vehicle=False,
+        nearby_peds=[_attacker(2.0, weapon_class=None)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(unknown, NO_DANGER_DELTA, True)["type"] == "seek_cover"
+
+
+def test_threat_action_hurt_in_a_working_car_still_drives_off_from_a_puncher() -> None:
+    """`flee_ped` is on-foot only; in a car the vehicle rungs own the answer."""
+    working = {
+        "handle": 1, "model": "adder", "display_name": "Adder", "class": "Super",
+        "speed": 0.0, "health": 900.0, "upside_down": False, "in_water": False,
+        "stopped_for_s": 3.0,
+    }
+    state = make_state(
+        health=40, in_vehicle=True, vehicle=working,
+        nearby_peds=[_attacker(2.0)], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(state, NO_DANGER_DELTA, True) == {
+        "type": "wander_drive",
+        "params": {"style": "avoid_traffic"},
+    }
+
+
+# --- ThreatLatch and named targets ---------------------------------------------
+
+FIGHT_A = {"type": "fight_ped", "params": {"handle": 9012, "weapon": "armed"}}
+FIGHT_B = {"type": "fight_ped", "params": {"handle": 9013, "weapon": "armed"}}
+
+
+def test_latch_lets_a_second_attacker_through_once_the_first_fight_has_ended() -> None:
+    """Two men on him. The bridge ends `fight_ped` on its own when its target is
+    dead, the other one is named the same tick, and the hold-down must not
+    cost him four seconds of being hit for nothing."""
+    clock = FakeClock()
+    latch = ThreatLatch(clock=clock)
+    assert latch.should_issue(FIGHT_A, make_state(task_status="idle")) is True
+    latch.issued(FIGHT_A)
+    clock.t += 1.0
+    first_done = make_state(task_status="done", task_type="fight_ped")
+    assert latch.should_issue(FIGHT_B, first_done) is True
+
+
+def test_latch_still_holds_the_same_named_target_after_it_ended() -> None:
+    """Same handle inside the hold-down is a retry, not a new intent: the
+    snapshot can name a dead man for a tick, and the bridge's immediate
+    `done` on a dead target would otherwise be re-posted at the poll rate."""
+    clock = FakeClock()
+    latch = ThreatLatch(clock=clock)
+    latch.issued(FIGHT_A)
+    clock.t += 1.0
+    first_done = make_state(task_status="done", task_type="fight_ped")
+    assert latch.should_issue(FIGHT_A, first_done) is False
+    clock.t += THREAT_HOLD_S
+    assert latch.should_issue(FIGHT_A, first_done) is True
+
+
+def test_latch_never_preempts_a_running_fight_to_switch_targets() -> None:
+    """Switching targets mid-fight by preempting is the restart-before-a-shot-
+    lands thrash under a new name. While the engine runs a `fight_ped`, no
+    `fight_ped` goes out, whoever it names."""
+    clock = FakeClock()
+    latch = ThreatLatch(clock=clock)
+    latch.issued(FIGHT_A)
+    running = make_state(task_status="running", task_type="fight_ped")
+    for _ in range(10):
+        clock.t += 1.0
+        assert latch.should_issue(FIGHT_B, running) is False
+
+
+def test_latch_change_of_class_still_goes_out_immediately_with_named_targets() -> None:
+    """Fight -> run from the same man: a different verb is a different intent."""
+    clock = FakeClock()
+    latch = ThreatLatch(clock=clock)
+    latch.issued(FIGHT_A)
+    running = make_state(task_status="running", task_type="fight_ped")
+    flee = {"type": "flee_ped", "params": {"handle": 9012}}
+    assert latch.should_issue(flee, running) is True
+
+
+def test_latch_reset_forgets_the_named_target_too() -> None:
+    clock = FakeClock()
+    latch = ThreatLatch(clock=clock)
+    latch.issued(FIGHT_A)
+    latch.reset()
+    assert latch.should_issue(FIGHT_A, make_state(task_status="idle")) is True
+
+
+def test_threat_action_runs_from_the_police_when_shot_at_with_nothing_loaded() -> None:
+    """Outgunned AND wanted, outside a mission: the ordinary chase response,
+    not cover — the bridge's `seek_cover` hides from the last spot the police
+    saw him, which is an arrest, not an escape. Inside a mission the cover
+    answer stands (situations.md: fight a scripted firefight, don't flee)."""
+    wanted = make_state(
+        health=185, in_vehicle=False, wanted=2, weapon=_loadout(0, 0, 0),
+        nearby_peds=[_attacker(15.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(wanted, NO_DANGER_DELTA, True) == {"type": "flee_police", "params": {}}
+    mission = make_state(
+        health=185, in_vehicle=False, wanted=2, mission_active=True, weapon=_loadout(0, 0, 0),
+        nearby_peds=[_attacker(15.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(mission, NO_DANGER_DELTA, True)["type"] == "seek_cover"
+    # With rounds, a cop who is already shooting at him is fought — defending,
+    # not initiating (rules.md rule 6), exactly as rung 4 already did.
+    loaded = make_state(
+        health=185, in_vehicle=False, wanted=2, weapon=_loadout(),
+        nearby_peds=[_attacker(15.0, weapon_class="gun")], threat=ATTACKED_BY_9012,
+    )
+    assert threat_action(loaded, NO_DANGER_DELTA, True) == {
+        "type": "fight_ped",
+        "params": {"handle": 9012, "weapon": "armed"},
+    }

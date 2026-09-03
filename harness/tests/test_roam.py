@@ -18,6 +18,7 @@ from typing import Any
 
 import pytest
 
+from wasted_harness.behavior.activities import LANDMARKS
 from wasted_harness.behavior.roam import (
     BOREDOM_S,
     BREADCRUMB_M,
@@ -30,7 +31,11 @@ from wasted_harness.behavior.roam import (
     GOAL_STUCK_S,
     GOAL_STUCK_STRIKES,
     GOALS_BEFORE_MISSION,
+    FREEWAY_RUN_DISTANCE_M,
     GOALS_BY_ID,
+    UP_ONLY_CLIMB_M,
+    UP_ONLY_DROP_M,
+    is_slow_model,
     HOLD_THREE_S,
     INDOOR_STILL_S,
     MAX_ESCAPE_RUNGS,
@@ -358,6 +363,11 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
             nearby_vehicles=[veh(88, "polmav", "Helicopters", 25.0, pos=(25.0, 0.0, 0.0))],
         ),
         "taxi_ride": taxi_kerb,
+        # On foot with a mower at the kerb: the whole offer is "there is
+        # something absurd within walking distance".
+        "slowest_thing_fastest_road": make_state(
+            nearby_vehicles=[veh(91, "mower", "Utility", 12.0, pos=(12.0, 0.0, 0.0))],
+        ),
     }
     jacked_view = RoamView(rng=random.Random(1), stolen_from=(5, (6.0, 0.0, 0.0)))
     for goal in CATALOG:
@@ -2104,3 +2114,247 @@ def test_the_chaos_level_can_be_pinned_from_the_environment(monkeypatch) -> None
     assert RoamEngine(random.Random(1), clock=FakeClock()).ladder.level == 2
     monkeypatch.delenv("WASTED_CHAOS_LEVEL")
     assert RoamEngine(random.Random(1), clock=FakeClock()).ladder.level == 2
+
+
+# --- rounds, not ownership: the armed goals after an arrest ---------------------
+#
+# Read off the live bridge 2026-09-03: all three loadout guns `owned`, ammo
+# 0/0/0. `owned` is a name -> ammo map, so every "is he armed" gate that asked
+# about ownership was true with nothing to fire, and the armed goals opened with
+# an empty gun in his hands.
+
+
+def test_armed_goals_need_rounds_in_the_gun_the_bridge_would_pick() -> None:
+    dry = {"Pistol": 0, "MicroSMG": 0, "PumpShotgun": 0}
+    mark_close = ped(handle=41, model="a_m_y_hipster_01", distance=7.0, pos=(7.0, 0.0, 0.0))
+    mark_far = ped(handle=41, model="a_m_y_hipster_01", distance=16.0, pos=(16.0, 0.0, 0.0))
+
+    def offered(state: GameState) -> set[str]:
+        e3 = RoamEngine(random.Random(3), clock=FakeClock(), level=3)
+        e3.observe(state)
+        return {o.id for o in e3.available(state)}
+
+    empty = armed_state(
+        in_vehicle=False, health=200, nearby_peds=[mark_close],
+        weapon=_weapon(name="Unarmed", weapon_class="unarmed", ammo=0, owned=dry),
+    )
+    assert not {"armed_rampage_block", "shoot_and_run"} & offered(empty)
+
+    # Loaded pistol, dry shotgun, mark at 7 m: the bridge's range rule would
+    # put the EMPTY shotgun in his hands, so still not on the menu...
+    pistol_only = dict(dry, Pistol=60)
+    close = armed_state(
+        in_vehicle=False, health=200, nearby_peds=[mark_close],
+        weapon=_weapon(name="Unarmed", weapon_class="unarmed", ammo=0, owned=pistol_only),
+    )
+    assert not {"armed_rampage_block", "shoot_and_run"} & offered(close)
+    # ...and beyond shotgun range the pistol is the pick, and it is loaded.
+    far = armed_state(
+        in_vehicle=False, health=200, nearby_peds=[mark_far],
+        weapon=_weapon(name="Unarmed", weapon_class="unarmed", ammo=0, owned=pistol_only),
+    )
+    assert {"armed_rampage_block", "shoot_and_run"} <= offered(far)
+
+
+def test_drive_by_needs_rounds_in_the_smg_not_just_the_smg() -> None:
+    gang_ped = ped(handle=60, model="g_m_y_ballasout_01", distance=12.0, pos=(12.0, 0.0, 0.0))
+
+    def offered(owned: dict[str, int]) -> set[str]:
+        state = armed_state(
+            in_vehicle=True,
+            vehicle={"class": "Sedans", "model": "sultan", "speed": 14.0},
+            health=200,
+            weapon=_weapon(owned=owned),
+            nearby_peds=[gang_ped],
+        )
+        e3 = RoamEngine(random.Random(3), clock=FakeClock(), level=3)
+        e3.observe(state)
+        return {o.id for o in e3.available(state)}
+
+    assert "drive_by_run" in offered({"Pistol": 60, "MicroSMG": 90, "PumpShotgun": 24})
+    assert "drive_by_run" not in offered({"Pistol": 60, "MicroSMG": 0, "PumpShotgun": 24})
+
+
+def test_earn_two_stars_does_not_open_with_an_empty_gun() -> None:
+    """The provocation step is only planned when it can actually fire; dry, the
+    plan is the old jack-an-occupied-car one, which draws a star on its own."""
+    dry = {"Pistol": 0, "MicroSMG": 0, "PumpShotgun": 0}
+    mark = ped(handle=41, model="a_m_y_hipster_01", distance=7.0, pos=(7.0, 0.0, 0.0))
+    occupied = veh(5, "sultan", "Sedans", 10.0, driver="npc", pos=(10.0, 0.0, 0.0))
+
+    def plan_types(owned: dict[str, int], **over: Any) -> list[str]:
+        e = RoamEngine(random.Random(11), clock=FakeClock(), level=2)
+        state = armed_state(
+            health=200, nearby_peds=[mark], nearby_vehicles=[occupied],
+            weapon=_weapon(name="Unarmed", weapon_class="unarmed", ammo=0, owned=owned), **over,
+        )
+        e.observe(state)
+        picked = e.pick(state, goal_id="earn_two_stars")
+        assert picked is not None and picked[0].goal.id == "earn_two_stars"
+        return [s["type"] for s in picked[0].plan]
+
+    assert "shoot_at" not in plan_types(dry, in_vehicle=False)
+    assert "shoot_at" in plan_types({"Pistol": 60, "MicroSMG": 0, "PumpShotgun": 24}, in_vehicle=False)
+    seated = {"class": "Sedans", "model": "sultan", "speed": 0.0}
+    assert "drive_by" not in plan_types(dict(dry, Pistol=60), in_vehicle=True, vehicle=seated)
+    assert "drive_by" in plan_types(dict(dry, MicroSMG=90), in_vehicle=True, vehicle=seated)
+
+
+# --- pick_a_fight: finishing it counts ------------------------------------------
+
+
+def test_pick_a_fight_is_won_when_the_bridge_reports_the_mark_dead() -> None:
+    """The bridge's ped scan does not drop dead peds, so a mark he beat stays in
+    `nearby.peds` as a corpse and "absent" never fires. `fight_ped` reports
+    `done` only when its target is dead or gone, and a `done` that arrived
+    AFTER the pick is that fact on the wire."""
+    e, _ = engine(seed=7)
+    mark = ped(handle=41, model="a_m_y_hipster_01", distance=6.0, pos=(6.0, 0.0, 0.0))
+    # The reflex finished somebody else a moment ago and that is still the
+    # last task on the wire when this goal is picked.
+    stale_done = {"task_id": "t-earlier", "task_type": "fight_ped", "task_status": "done"}
+    picked = e.pick(observed(e, make_state(nearby_peds=[mark], **stale_done)), goal_id="pick_a_fight")
+    assert picked is not None and picked[0].goal.id == "pick_a_fight"
+    assert picked[0].snapshot["task_before"] == "t-earlier"
+    # Still standing there, stale `done` still the last task: not over.
+    assert e.judge(observed(e, make_state(nearby_peds=[mark], **stale_done))) is None
+    # His own fight, running: not over.
+    running = {"task_id": "t-brawl", "task_type": "fight_ped", "task_status": "running"}
+    assert e.judge(observed(e, make_state(nearby_peds=[mark], **running))) is None
+    # Dead at his feet — the corpse is STILL in the list — and the bridge said so.
+    won = {"task_id": "t-brawl", "task_type": "fight_ped", "task_status": "done"}
+    assert e.judge(observed(e, make_state(nearby_peds=[mark], **won))) == "done"
+
+
+def test_pick_a_fight_is_still_over_when_the_mark_simply_leaves() -> None:
+    e, _ = engine(seed=7)
+    mark = ped(handle=41, model="a_m_y_hipster_01", distance=6.0, pos=(6.0, 0.0, 0.0))
+    e.pick(observed(e, make_state(nearby_peds=[mark])), goal_id="pick_a_fight")
+    assert e.judge(observed(e, make_state(nearby_peds=[mark]))) is None
+    assert e.judge(observed(e, make_state(nearby_peds=[]))) == "done"
+
+
+# --- up_only: the goal that cannot close without the drawdown --------------------
+
+
+def _up_snap(climb: float, drop: float) -> dict[str, Any]:
+    return {"_climb_m": climb, "_drop_from_peak_m": drop}
+
+
+def test_up_only_is_not_done_at_the_top() -> None:
+    """The whole joke, as an assertion.
+
+    He has made the climb and he is standing on the summit. Every other goal in
+    the catalog would call that arrival and close. This one does not: the
+    position is still open until he gives it back.
+    """
+    done = GOALS_BY_ID["up_only"].done_when
+    assert done(make_state(pos=(0.0, 0.0, 300.0)), _up_snap(UP_ONLY_CLIMB_M, 0.0)) is False
+
+
+def test_up_only_is_done_only_after_the_whole_way_back_down() -> None:
+    done = GOALS_BY_ID["up_only"].done_when
+    # Partway down is not down.
+    assert done(make_state(), _up_snap(UP_ONLY_CLIMB_M, UP_ONLY_DROP_M - 1.0)) is False
+    assert done(make_state(), _up_snap(UP_ONLY_CLIMB_M, UP_ONLY_DROP_M)) is True
+
+
+def test_up_only_never_closes_on_a_descent_he_did_not_earn() -> None:
+    """Driving DOWN out of the hills without climbing first is not the bit."""
+    done = GOALS_BY_ID["up_only"].done_when
+    assert done(make_state(), _up_snap(0.0, 400.0)) is False
+
+
+def test_up_only_is_offered_only_where_there_is_a_real_climb() -> None:
+    view = RoamView(rng=random.Random(1))
+    needs = GOALS_BY_ID["up_only"].needs
+    # On the city floor with a car to hand: the observatory is a long way up.
+    low = make_state(pos=(-438.8, 900.0, 20.0), nearby_vehicles=[veh(1, "sultan", "Sedans", 8.0, pos=(8.0, 0.0, 0.0))])
+    assert needs(low, view) is True
+    # Already most of the way up the same hill: nothing left to climb.
+    high = make_state(pos=(-438.8, 900.0, 330.0), nearby_vehicles=[veh(1, "sultan", "Sedans", 8.0, pos=(8.0, 0.0, 0.0))])
+    assert needs(high, view) is False
+
+
+def test_up_only_stands_down_when_wanted_or_on_a_mission() -> None:
+    view = RoamView(rng=random.Random(1))
+    needs = GOALS_BY_ID["up_only"].needs
+    base = dict(pos=(-438.8, 900.0, 20.0), nearby_vehicles=[veh(1, "sultan", "Sedans", 8.0, pos=(8.0, 0.0, 0.0))])
+    assert needs(make_state(**base), view) is True
+    assert needs(make_state(**base, wanted=2), view) is False
+    assert needs(make_state(**base, mission_active=True), view) is False
+
+
+def test_up_only_plan_ends_by_driving_back_down() -> None:
+    """The descent is a STEP, not a hope. Left to `wander_drive` he would mill
+    about the summit car park until the timeout."""
+    state = make_state(pos=(-438.8, 900.0, 20.0), nearby_vehicles=[veh(1, "sultan", "Sedans", 8.0, pos=(8.0, 0.0, 0.0))])
+    steps, snap = GOALS_BY_ID["up_only"].plan(state, RoamView(rng=random.Random(1)))
+    assert [s["type"] for s in steps][-1] == "drive_to"
+    assert snap["start_z"] == 20.0
+    # The last drive_to goes somewhere LOWER than the hill it just climbed.
+    assert LANDMARKS[snap["floor"]][2] < snap["target"][2]
+
+
+# --- slowest_thing_fastest_road -------------------------------------------------
+
+
+def test_a_tow_truck_is_not_the_joke() -> None:
+    """`utility` and `industrial` hold tow trucks and dump trucks, which are
+    freeway-capable. Gating on those classes would offer the goal for an
+    ordinary truck and the bit would not read at all."""
+    assert is_slow_model("towtruck", "Utility") is False
+    assert is_slow_model("rubble", "Industrial") is False
+    assert is_slow_model("sultan", "Sports") is False
+
+
+def test_the_slow_things_are_recognised_by_model_or_by_class() -> None:
+    assert is_slow_model("mower", "Utility") is True       # by model
+    assert is_slow_model("tractor2", "Industrial") is True  # by model
+    assert is_slow_model("bmx", "Cycles") is True           # by class alone
+
+
+def test_both_lawnmower_spellings_are_carried() -> None:
+    """The pinned DLL's member may be `Mower` or `Lawnmower` and it is the
+    headline vehicle. Carrying both costs nothing; guessing one risks the bit."""
+    assert is_slow_model("mower", None) is True
+    assert is_slow_model("lawnmower", None) is True
+
+
+def test_slow_freeway_is_not_offered_while_he_is_already_on_the_mower() -> None:
+    """Re-picking mid-run resets the displacement snapshot, so the 1.5 km could
+    never complete."""
+    needs = GOALS_BY_ID["slowest_thing_fastest_road"].needs
+    view = RoamView(rng=random.Random(1))
+    nearby = [veh(1, "mower", "Utility", 8.0, pos=(8.0, 0.0, 0.0))]
+    on_foot = make_state(nearby_vehicles=nearby)
+    assert needs(on_foot, view) is True
+    aboard = make_state(
+        nearby_vehicles=nearby, in_vehicle=True, vehicle={"model": "mower", "class": "Utility"}
+    )
+    assert needs(aboard, view) is False
+
+
+def test_slow_freeway_only_completes_while_still_aboard_the_slow_thing() -> None:
+    """Covering the distance after swapping to a fast car is `freeway_run`;
+    crediting it here would score a bit he did not do."""
+    done = GOALS_BY_ID["slowest_thing_fastest_road"].done_when
+    far = {"_from_start_m": FREEWAY_RUN_DISTANCE_M}
+    aboard = make_state(in_vehicle=True, vehicle={"model": "mower", "class": "Utility"})
+    swapped = make_state(in_vehicle=True, vehicle={"model": "sultan", "class": "Sports"})
+    assert done(aboard, far) is True
+    assert done(swapped, far) is False
+    assert done(make_state(), far) is False  # on foot
+    # Aboard but not far enough yet.
+    assert done(aboard, {"_from_start_m": FREEWAY_RUN_DISTANCE_M - 1.0}) is False
+
+
+def test_slow_freeway_plan_gets_him_to_the_mower_then_across_the_map() -> None:
+    state = make_state(nearby_vehicles=[veh(1, "mower", "Utility", 20.0, pos=(20.0, 0.0, 0.0))])
+    steps, snap = GOALS_BY_ID["slowest_thing_fastest_road"].plan(
+        state, RoamView(rng=random.Random(1))
+    )
+    types = [s["type"] for s in steps]
+    assert "enter_nearest_vehicle" in types
+    assert types[-1] == "wander_drive"
+    assert snap["model"] == "mower"
