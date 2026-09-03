@@ -210,13 +210,15 @@ namespace WastedBridge
                 SyncLeaveVehicleAttribute(playerPed);
             }
 
-            // v1.7.0: keep the loadout topped up at session start and after every death. A no-op
-            // (not one native call) unless WASTED_BRIDGE_LOADOUT=ammunation - see WeaponState for
-            // why that is the default. Wrapped like every other per-tick maintenance call: a
-            // weapon-inventory failure must never cost the snapshot.
+            // v1.7.0: keep the loadout topped up at session start and after every death, and
+            // (2026-09-03) after every ARREST — Busted strips his ammo without killing him, so the
+            // death edge alone left him permanently unarmed. A no-op (not one native call) unless
+            // WASTED_BRIDGE_LOADOUT=ammunation - see WeaponState for why that is the default.
+            // Wrapped like every other per-tick maintenance call: a weapon-inventory failure must
+            // never cost the snapshot.
             try
             {
-                WeaponState.Maintain(playerPed, dead);
+                WeaponState.Maintain(playerPed, dead, arrested);
             }
             catch (Exception ex)
             {

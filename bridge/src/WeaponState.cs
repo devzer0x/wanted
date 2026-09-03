@@ -80,6 +80,7 @@ namespace WastedBridge
         private static string _mode;
         private static bool _modeLogged;
         private static bool _wasDead;
+        private static bool _wasArrested;
         private static bool _prepared;
 
         /// <summary>"off" | "ammunation", read once from the environment and logged once.</summary>
@@ -124,12 +125,21 @@ namespace WastedBridge
         }
 
         /// <summary>
-        /// Called once per tick from the script's Tick handler, with the same `dead` flag the
-        /// snapshot is built from. Applies the loadout at session start and again on every
-        /// death->alive edge (the game strips weapons on respawn), and does nothing at all —
-        /// not one native call — while the mode is off.
+        /// Called once per tick from the script's Tick handler, with the same `dead` and
+        /// `arrested` flags the snapshot is built from. Applies the loadout at session start and
+        /// again on every death->alive AND arrest->free edge, and does nothing at all — not one
+        /// native call — while the mode is off.
+        ///
+        /// WHY ARREST COUNTS. Busted does not kill him, so the death edge never fires — but the
+        /// game STRIPS AMMO on arrest while leaving the weapons themselves in his inventory.
+        /// Observed live 2026-09-03: `player.weapon` reported all three weapons `owned` with
+        /// ammo 0/0/0 and class "unarmed", and it stayed that way indefinitely because only a
+        /// death re-applied the loadout. Every armed free-roam goal gates on being armed, so one
+        /// arrest silently removed the whole violence half of the catalog for the rest of the
+        /// session. This is a top-up of the SAME modest loadout on an edge that already strips
+        /// it, not a new grant: the "no weapon-giving" safety rule is untouched.
         /// </summary>
-        internal static void Maintain(Ped ped, bool dead)
+        internal static void Maintain(Ped ped, bool dead, bool arrested)
         {
             if (!_modeLogged)
             {
@@ -148,13 +158,24 @@ namespace WastedBridge
                 return;
             }
             bool respawned = _wasDead && !dead;
+            bool released = _wasArrested && !arrested;
             _wasDead = dead;
-            if (dead)
+            _wasArrested = arrested;
+            if (dead || arrested)
             {
                 return;
             }
-            if (_prepared && !respawned)
+            if (_prepared && !respawned && !released)
             {
+                return;
+            }
+            if (released && !respawned && !StrippedOfAmmo(ped))
+            {
+                // IS_PLAYER_BEING_ARRESTED can flicker true for a frame during a chase without
+                // an actual Busted. Re-giving on every such blip would be a top-up loop, and a
+                // top-up loop is infinite ammo wearing a different hat — the one thing the
+                // loadout's own comment promises it is not. A real arrest always leaves him
+                // with nothing in the magazine, so that, not the edge alone, is the condition.
                 return;
             }
             _prepared = true;
@@ -166,7 +187,7 @@ namespace WastedBridge
             ped.Weapons.Give(WeaponHash.MicroSMG, SmgAmmo, false, true);
             ped.Weapons.Give(WeaponHash.PumpShotgun, ShotgunAmmo, false, true);
             BridgeLog.Info("weapon loadout applied ("
-                           + (respawned ? "after death" : "session start")
+                           + (respawned ? "after death" : released ? "after arrest" : "session start")
                            + "): Pistol " + PistolAmmo + ", MicroSMG " + SmgAmmo
                            + ", PumpShotgun " + ShotgunAmmo + "; no infinite ammo, nothing equipped");
         }
@@ -231,6 +252,34 @@ namespace WastedBridge
                 default:
                     return FiringPattern.Default;
             }
+        }
+
+        /// <summary>True when all three tracked weapons are carrying zero rounds — what the game
+        /// leaves behind after a Busted (weapons kept, ammo stripped). Never throws: on a native
+        /// failure it answers false, so the loadout is NOT re-applied and he simply keeps what he
+        /// has, which is the same safe direction every other read in this file degrades in.</summary>
+        private static bool StrippedOfAmmo(Ped ped)
+        {
+            try
+            {
+                return AmmoFor(ped, WeaponHash.Pistol) == 0
+                       && AmmoFor(ped, WeaponHash.MicroSMG) == 0
+                       && AmmoFor(ped, WeaponHash.PumpShotgun) == 0;
+            }
+            catch (System.Exception)
+            {
+                return false;
+            }
+        }
+
+        private static int AmmoFor(Ped ped, WeaponHash hash)
+        {
+            if (!ped.Weapons.HasWeapon(hash))
+            {
+                return 0;
+            }
+            Weapon w = ped.Weapons[hash];
+            return w == null ? 0 : w.Ammo;
         }
 
         internal static WeaponHash CurrentHash(Ped ped)
