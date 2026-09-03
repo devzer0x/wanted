@@ -22,6 +22,7 @@ from wasted_harness.behavior.roam import (
     BREADCRUMB_M,
     CALM_HEALTH_FRACTION,
     CATALOG,
+    FALLBACK_GOAL_ID,
     GOAL_STUCK_S,
     GOAL_STUCK_STRIKES,
     GOALS_BEFORE_MISSION,
@@ -521,7 +522,9 @@ def test_three_completed_goals_force_the_job_as_the_only_option() -> None:
         clock.tick(1.0)
         e.observe(state)
     assert e.mission_forced()
-    assert [o.id for o in e.available(state)] == ["start_nearest_mission"]
+    offers = [o.id for o in e.available(state)]
+    assert offers[0] == "start_nearest_mission", "the job is what he picks"
+    assert FALLBACK_GOAL_ID in offers, "never a menu of one goal that cannot move him"
 
 
 def test_a_failed_goal_does_not_count_toward_the_three() -> None:
@@ -542,7 +545,13 @@ def test_fifteen_minutes_of_roam_forces_the_job_too() -> None:
     assert not e.mission_forced()
     clock.tick(2.0)
     assert e.mission_forced()
-    assert [o.id for o in e.available(state)] == ["start_nearest_mission"]
+    offers = [o.id for o in e.available(state)]
+    assert offers[0] == "start_nearest_mission", "the job is what he picks"
+    assert FALLBACK_GOAL_ID in offers, (
+        "the forced menu must still carry the fallback: start_nearest_mission posts NOTHING "
+        "itself (it hands the trip to DayPlanner), so a menu of one goal that cannot move him "
+        "is a man standing in the street until the 420 s timeout"
+    )
 
 
 def test_a_forced_job_falls_through_when_there_is_no_job_he_can_start() -> None:
@@ -1019,3 +1028,38 @@ def test_every_pickable_goal_id_is_a_real_catalog_entry() -> None:
     for goal_id in PICKABLE_GOAL_IDS:
         assert not GOALS_BY_ID[goal_id].override_only
         assert not GOALS_BY_ID[goal_id].fallback
+
+
+def test_earn_two_stars_survives_its_own_first_star() -> None:
+    """The wanted override fires on `wanted > 0` — a state this goal deliberately
+    creates. Without the exemption it is killed at ONE star and can never reach its
+    own done_when of two: a goal that can never complete, shipped in the catalog."""
+    e, clock = engine()
+    state = observed(e, make_state(in_vehicle=True, health=200))
+    e.pick(state, goal_id="earn_two_stars")
+    clock.tick(2.0)
+    one_star = observed(e, make_state(in_vehicle=True, health=200, wanted=1))
+    assert e.judge(one_star) != "wanted_override", "one star is progress, not a reason to quit"
+    two = observed(e, make_state(in_vehicle=True, health=200, wanted=2))
+    assert e.judge(two) == "done"
+
+
+def test_every_other_goal_still_yields_to_the_cops() -> None:
+    e, clock = engine()
+    state = observed(e, make_state(in_vehicle=True, health=200))
+    e.pick(state, goal_id="roam_the_block")
+    clock.tick(2.0)
+    hot = observed(e, make_state(in_vehicle=True, health=200, wanted=1))
+    assert e.judge(hot) == "wanted_override"
+
+
+def test_the_fallback_walks_when_there_is_no_car_to_take() -> None:
+    """The goal that guarantees "never stand still" used to post
+    enter_nearest_vehicle then wander_drive. On foot with no car in reach the entry
+    fails, wander_drive needs a vehicle, and the floor left him standing still."""
+    e, _ = engine()
+    state = observed(e, make_state(in_vehicle=False, nearby_vehicles=[]))
+    picked = e.pick(state, goal_id="roam_the_block")
+    assert picked is not None, "the floor must always produce an action"
+    _locked, step = picked
+    assert step["type"] == "walk_to", f"on foot with no car he walks; got {step}"

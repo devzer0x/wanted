@@ -267,6 +267,16 @@ VEHICLE_STILL_S = 1.5
 #: a proxy in the goal's own description.
 FREEWAY_RUN_DISTANCE_M = 1500.0
 
+#: The one goal that is always offerable, exempt from cooldown, category
+#: alternation and the health gate. Named here so the forced-mission menu and
+#: the ordinary filter cannot disagree about which goal is the floor.
+FALLBACK_GOAL_ID = "roam_the_block"
+
+#: How far `roam_the_block` will look for a car before it gives up and walks.
+#: 50 m is the same reach the goal used before; the change is that not finding
+#: one is now a branch rather than a dead end.
+BLOCK_VEHICLE_RADIUS_M = 50.0
+
 #: `roam_the_block` completes on displacement too — it is the never-stand-still
 #: fallback, so "he actually went somewhere" is the whole success condition.
 BLOCK_RUN_DISTANCE_M = 400.0
@@ -515,6 +525,13 @@ class Goal:
     #: Never filtered out (cooldown, category, health). The one guaranteed
     #: option, so `available()` is never empty and he is never out of ideas.
     fallback: bool = False
+    #: This goal's whole point is to attract police attention, so the
+    #: wanted-level override must not kill it the moment it starts working.
+    #: Without this, `earn_two_stars` is killed at ONE star — the override fires
+    #: on `wanted > 0`, which is a state the goal deliberately creates — and it
+    #: can never reach its own `done_when` of two. A goal that can never
+    #: complete is worse than one that does not exist.
+    wants_heat: bool = False
     #: Posts no actions of its own: another owner (the day planner) does the
     #: work and `done_when` watches for its result.
     handoff: bool = False
@@ -773,14 +790,35 @@ def _done_start_mission(state: GameState, snap: dict[str, Any]) -> bool:
 
 
 def _plan_roam_the_block(state, view):
+    """The floor. This goal is on every menu, so it must ALWAYS produce motion.
+
+    The first version posted `enter_nearest_vehicle` then `wander_drive` and was
+    unreachable on foot with no car around: the entry fails, `wander_drive`
+    needs a vehicle, and the one goal guaranteeing "never stand still" left him
+    standing still. So the on-foot branch now depends on whether a car is
+    actually there, and walks when one is not.
+    """
     steps: list[dict[str, Any]] = []
+    here = player_pos(state)
     if not state.player.in_vehicle:
-        # Nothing to walk to in particular: the nearest car is the nearest thing
-        # that turns standing into moving.
-        steps.append(_enter("any", 50.0))
+        reachable = [
+            v for v in state.nearby.vehicles
+            if v.driver == "empty" and v.distance <= BLOCK_VEHICLE_RADIUS_M
+        ]
+        if reachable:
+            # The nearest car is the nearest thing that turns standing into moving.
+            steps.append(_enter("any", BLOCK_VEHICLE_RADIUS_M))
+            style = "ignore_lights" if view.mood in ("hyped", "bored") else view.mood_style
+            steps.append(_wander(style))
+            return steps, {"start": here}
+        # No car in reach. Walking is slower television than driving, but it is
+        # television; standing in an empty street is not. A landmark is used only
+        # as a bearing — `done_when` is displacement, so he does not have to
+        # arrive for this to count.
+        _, target = _landmark_choice(state, view)
+        return [_walk_to(target, run=True)], {"start": here}
     style = "ignore_lights" if view.mood in ("hyped", "bored") else view.mood_style
-    steps.append(_wander(style))
-    return steps, {"start": player_pos(state)}
+    return [_wander(style)], {"start": here}
 
 
 def _done_roam_the_block(state: GameState, snap: dict[str, Any]) -> bool:
@@ -890,6 +928,7 @@ CATALOG: tuple[Goal, ...] = (
         timeout_s=180.0,
         cooldown_s=60 * 60.0,
         chaos_cost=2.0,
+        wants_heat=True,
     ),
     Goal(
         id="lose_the_cops",
@@ -1286,8 +1325,19 @@ class RoamEngine:
         # 2. The story has to move.
         job = GOALS_BY_ID["start_nearest_mission"]
         if self.mission_forced() and job.needs(state, view):
+            # The fallback rides along even here, and it is not decoration.
+            # `start_nearest_mission` posts NOTHING itself — picking it hands the
+            # trip to DayPlanner. If the planner declines (its own health gate)
+            # or is between phases, a menu of one goal that posts nothing is a
+            # man standing in the street until the 420 s timeout expires. That is
+            # the exact failure this whole engine exists to prevent, so the menu
+            # is never allowed to be "one goal that cannot move him". The job
+            # stays at index 0, so it is still what he picks.
             self._offers = [Offer(job, "let's get paid", triggered=True)]
-            self._offered = (job.id,)
+            fallback = GOALS_BY_ID[FALLBACK_GOAL_ID]
+            if fallback.needs(state, view):
+                self._offers.append(Offer(fallback, "while I get there", triggered=False))
+            self._offered = tuple(o.goal.id for o in self._offers)
             return list(self._offers)
 
         # 3. The ordinary filter.
@@ -1478,9 +1528,14 @@ class RoamEngine:
             return "done"
         if state.player.dead or state.player.arrested:
             return "player_down"
-        if locked.goal.id != "lose_the_cops" and state.player.wanted > 0:
+        if (
+            locked.goal.id != "lose_the_cops"
+            and not locked.goal.wants_heat
+            and state.player.wanted > 0
+        ):
             # The wanted-level override: the goal he has stops being the goal he
-            # needs the moment the cops are involved.
+            # needs the moment the cops are involved — unless attracting them was
+            # the goal. See `Goal.wants_heat`.
             return "wanted_override"
         if locked.elapsed(self._clock()) >= locked.goal.timeout_s:
             return "timeout"
