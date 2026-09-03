@@ -35,6 +35,7 @@ from wasted_harness.behavior.recovery import (
     BlockingScreenWatchdog,
     BridgeDownTracker,
     BridgeStallTracker,
+    ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
@@ -377,6 +378,7 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     h._interior_token = None
     h.stuck = StuckDetector()
     h.task_stall = TaskStallDetector()
+    h.cleared_backoff = ClearedByGameBackoff()
     h.stranded = StrandedEscalator()
     h.threat_latch = ThreatLatch()
     h.damage = DamageTracker()

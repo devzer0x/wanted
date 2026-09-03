@@ -1157,6 +1157,21 @@ class MovementWheel:
     def taken(self) -> bool:
         return self._holder is not None
 
+    @property
+    def posted_this_tick(self) -> bool:
+        """Has a bridge task already gone out on this tick?
+
+        The read-only half of what `acquire()` already enforces internally, for
+        the one caller that does NOT go through `acquire()`: CONTRACTS v1.13's
+        phone reflex posts `reject_call`/`answer_call` without a token (they
+        move nobody, so they take no wheel), but `POST /task` is still one slot
+        at a time bridge-side — so it must not fire on a tick where the
+        survival ladder has just posted, or it would preempt the very action
+        that was chosen over it. Deferring costs one poll interval and the
+        phone is still ringing.
+        """
+        return self._posted_tick == self._tick
+
     def taken_by_reflex(self) -> bool:
         """Did the reflex layer act this tick? The successor to
         `main._threat_has_the_wheel`, and it means the same thing to the three

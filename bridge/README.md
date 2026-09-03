@@ -360,6 +360,69 @@ changing the field's shape.
   entry plus 20 s of stillness) that fires late and on false positives. This is the fact instead
   of the guess.
 
+### CONTRACTS v1.13: `phone`, `answer_call`, `reject_call` (bridge **1.6.0**)
+
+Built because the operator watched Simeon call the agent on stream and the harness had no phone
+capability at all: the call rang out, unseen. Answering a **story** call **starts a mission**, so
+this is the control the harness's missions-off switch needs in order to mean anything.
+
+- **`phone`** = `{"ringing": bool, "in_call": bool}`. Always a present object.
+- **`ringing` is a sound-level PROXY, not a flag the game exposes.** There is no native that
+  reports "an incoming call is ringing" — the game keeps it in a build-specific script global,
+  and reading a hard-coded global index would break silently on the next game update.
+  `CAN_PHONE_BE_SEEN_ON_SCREEN` is not the answer either: it is hard-coded to return 1. So:
+
+  ```
+  ringing := IS_PED_RINGTONE_PLAYING(playerPed) AND NOT IS_MOBILE_PHONE_CALL_ONGOING()
+  in_call := IS_MOBILE_PHONE_CALL_ONGOING()
+  ```
+
+  **The `AND NOT` is load-bearing.** `IS_PED_RINGTONE_PLAYING` (`0x1E8E5E20937E3137`,
+  `BOOL(Ped)`) means "this ped's phone is making ringtone noise", which is *also* true while
+  the agent **dials out** and while a custom ringtone plays. Alone it would tell the harness
+  "someone is calling you" during his own outgoing call and the reject reflex would hang up on
+  him. `IS_MOBILE_PHONE_CALL_ONGOING` (`0x7497D2CE2C30D24C`, `BOOL()`) separates "making noise,
+  nobody picked up" from "a call is live". Both hashes verified present in the pinned SHVDN
+  v3.7.0.189 `GTA.Native.Hash` enum by reflection over `lib/ScriptHookVDotNet3.dll`, values
+  matching alloc8or's NativeDB. Neither has a typed SHVDN wrapper → raw `Function.Call`, the same
+  pattern `IS_PED_BEING_JACKED`/`GET_PEDS_JACKER` already use.
+- **Guarded** (`SnapshotBuilder.ReadPhoneSafe`) the way `FindObjectiveBlipSafe` is. On an
+  exception it serves `ringing: false, in_call: false` — deliberately **not** the last measured
+  value, unlike `player.interior`: both-false is the state in which the harness does nothing, i.e.
+  the pre-1.6.0 behaviour of letting a call ring out, whereas a stale `ringing: true` would have
+  the reflex layer post `reject_call` at a silent phone forever.
+- **`answer_call` / `reject_call` drive the game's own CONTROL layer**, not a keypress, so they
+  are independent of whatever the phone is bound to: `SET_CONTROL_VALUE_NEXT_FRAME`
+  (`0xE8A25867FBA3B05E`, `BOOL(int control, int action, float value)`) with value `1.0`.
+  Answer = `Control.PhoneSelect` (176), reject/hang-up = `Control.PhoneCancel` (177). Both are
+  read through a **compile-time** cast (`private const int … = (int)Control.PhoneSelect`), so an
+  SHVDN bump that renames or removes either member breaks the **build** rather than injecting the
+  wrong control at runtime — the same reasoning `DrivingStyles` and `player.interior` document.
+  (This build has no `Cellphone*` control member at all; the names are `PhoneSelect`,
+  `PhoneCancel`, `Phone`.)
+- **Injected every tick, not once.** The input only registers once the handset has risen on
+  screen. The game raises it by itself for an incoming call, so neither task presses
+  `Control.Phone` first — but a single frame of injection lands before the phone is up and does
+  nothing. Exactly **one** control is injected per frame: the phone input system latches one per
+  frame, so two would lose one.
+- **Bounded at ~6 s.** Some story calls **cannot be rejected** — the game hides the reject soft
+  key — and there is no native that says which. "Still ringing after the bound" is reported as
+  `failed` / `"unrejectable"` (answer: `"unanswered"`) and the task stops, rather than mashing a
+  control at a call the game will not let go of. `reject_call` also completes when the line goes
+  clear because the caller gave up; `PhoneCancel` doubles as hang-up, so a call that connects
+  anyway mid-reject is still ended by the same input.
+- **Preconditions are re-read fresh at task start**, not taken from the harness's snapshot:
+  `answer_call` while already connected → `done`; `answer_call` with nothing ringing → `failed` /
+  `"not_ringing"` immediately (injecting `PhoneSelect` at a phone that is not up would otherwise
+  spend 6 s poking the app grid); `reject_call` with nothing ringing and no call → `done`.
+- **No engine ped-task is issued**, so `_expectedTaskHash` stays null and the v1.10 liveness check
+  correctly does not apply — there is no script task for the game to clear.
+- **UNVERIFIED until the live smoke test** (nothing on a dev machine can settle these): whether
+  control **group 0** registers or the phone needs group **2** (FRONTEND) — the group actually
+  used is logged at INFO on every phone task start, so the live log answers it and hot-reload
+  makes the flip cheap; whether the ringtone proxy is clean on this build (custom ringtones,
+  ambient NPC phones); and how an un-rejectable story call actually behaves.
+
 
 ## Build
 

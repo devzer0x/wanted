@@ -1309,7 +1309,8 @@ def test_a_locked_goal_names_the_exact_value_to_return() -> None:
 
 
 def _car_state(**kw):
-    kw.setdefault("in_vehicle", True); kw.setdefault("health", 200)
+    kw.setdefault("in_vehicle", True)
+    kw.setdefault("health", 200)
     kw.setdefault("vehicle", {"class": "Sports", "model": "banshee", "speed": 5.0})
     return make_state(**kw)
 

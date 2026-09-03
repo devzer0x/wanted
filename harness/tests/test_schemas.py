@@ -37,7 +37,7 @@ def test_mood_enum_exact() -> None:
 
 
 def test_action_catalog_exact() -> None:
-    assert len(BRIDGE_TASKS) == 12  # CONTRACTS v1.11 adds fight_ped
+    assert len(BRIDGE_TASKS) == 14  # v1.11 adds fight_ped; v1.13 adds answer_call + reject_call
     assert PRIMITIVES == (
         "look_around",
         "brake_tap",

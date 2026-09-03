@@ -42,6 +42,7 @@ from wasted_harness.behavior.missions import (
 from wasted_harness.behavior.planner import ROAM_BLOCK_S, DayPlanner
 from wasted_harness.behavior.recovery import (
     THREAT_HOLD_S,
+    ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
     StrandedEscalator,
@@ -51,7 +52,7 @@ from wasted_harness.behavior.recovery import (
 )
 from wasted_harness.behavior.roam import HouseEscape, InteriorEscape, RoamEngine
 from wasted_harness.behavior.vehicle import MovementWheel, VehicleController
-from wasted_harness.brain.schemas import BRIDGE_TASKS
+from wasted_harness.brain.schemas import BRIDGE_TASKS, MOVEMENT_TASKS
 from wasted_harness.brain.vision import MissionOutcome
 from wasted_harness.bridge_client import BridgeApiError, GameState
 from wasted_harness.main import INITIAL_GOAL, Harness
@@ -470,6 +471,7 @@ def _bare_harness(cutscene_active: bool, player_down: bool = False) -> Harness:
     #: THE GATE. A §1 bridge task without the wheel's current token never
     #: reaches the bridge, so a harness that can post one has to have a wheel.
     h.wheel = MovementWheel()
+    h.cleared_backoff = ClearedByGameBackoff()
     return h
 
 
@@ -488,12 +490,16 @@ def _holding(h: Harness, owner: str = "brain") -> Any:
 
 
 def test_execute_action_refuses_any_bridge_task_without_the_wheel() -> None:
-    """The gate itself. The operator's spec put this assertion in the bridge;
+    """CONTRACTS v1.13: `answer_call`/`reject_call` issue no ped task and move nobody, so
+    they are exempt from movement arbitration by design — the gate is MOVEMENT_TASKS, not
+    every bridge task.
+
+    The gate itself. The operator's spec put this assertion in the bridge;
     it lives here instead because the harness is the bridge's only client and
     this method is the only funnel — same guarantee, no wire change."""
     h = _bare_harness(cutscene_active=False)
     h.wheel.begin_tick()
-    for task_type in BRIDGE_TASKS:
+    for task_type in MOVEMENT_TASKS:
         assert Harness._execute_action(h, task_type, {}) is None
     assert h.bridge.posted == [], "no task may reach the game without the wheel"
 
@@ -570,6 +576,7 @@ class _RecordingStub:
         #: follower's step carries the holder's token or it never reaches the
         #: game, and the log can answer "who was driving on that tick".
         self.wheel = MovementWheel()
+        self.cleared_backoff = ClearedByGameBackoff()
         self.wheel.begin_tick()
         self._mission_token = None
         self.posted: list[tuple[str, dict[str, Any]]] = []
@@ -663,6 +670,7 @@ class _ReflexStub:
         #: than race the wall clock.
         self.vehicle = VehicleController(clock=self.clock)
         self.wheel = MovementWheel(clock=self.clock)
+        self.cleared_backoff = ClearedByGameBackoff()
         #: Production wiring: what losing the wheel MEANS for each owner.
         self.wheel.on_preempt("roam", self._roam_preempted)
         self.wheel.on_preempt("mission", self._mission_preempted)
@@ -2293,6 +2301,8 @@ class _ContextStub:
         self._screen_blocked = screen_blocked
         # Set once per tick by `_reflex`; `_dynamic_context` reads it to steer knowledge
         # retrieval toward combat when he is being hit by a ped /state calls `neutral`.
+        # `_dynamic_context` now reads `settings.missions_enabled` for the PHONE line.
+        self.settings = SimpleNamespace(missions_enabled=True)
         self._under_attack = False
 
     @property
@@ -2522,3 +2532,18 @@ def test_the_dot_on_the_map_beats_a_stale_last_seen_position() -> None:
         round(step["params"].get("x", 0)) == 220
     ), f"must target the blip (handle or its position), got {step}"
     assert "Lamar" in f.note(), f"the note should name him from the blip: {f.note()!r}"
+
+# The real `_reflex` now consults the phone reflex and the game-cleared backoff every tick.
+# Stubs get a quiet phone and an open backoff so every existing scenario is unchanged.
+def _quiet_phone(self, state):
+    return False
+
+
+_ReflexStub._phone_reflex = _quiet_phone  # type: ignore[attr-defined]
+_ReflexStub.cleared_backoff = ClearedByGameBackoff()  # type: ignore[attr-defined]
+def _quiet_phone(self, state):
+    return False
+
+
+_RecordingStub._phone_reflex = _quiet_phone  # type: ignore[attr-defined]
+_RecordingStub.cleared_backoff = ClearedByGameBackoff()  # type: ignore[attr-defined]

@@ -19,7 +19,7 @@ log = get_logger("wasted.brain.schemas")
 Mood = Literal["chill", "bored", "hyped", "scared", "smug"]
 MOODS: tuple[str, ...] = ("chill", "bored", "hyped", "scared", "smug")
 
-# 11 bridge task types (CONTRACTS §1) + v1 harness-side manual-control
+# 14 bridge task types (CONTRACTS §1) + v1 harness-side manual-control
 # primitives (CONTRACTS §2). Adding a primitive bumps the contract version.
 BRIDGE_TASKS: tuple[str, ...] = (
     "drive_to",
@@ -34,7 +34,33 @@ BRIDGE_TASKS: tuple[str, ...] = (
     "fight_ped",
     "set_waypoint",
     "stop",
+    # CONTRACTS v1.13, the phone. Bridge tasks like the rest — they go out as
+    # POST /task and they preempt the running task — but see PHONE_TASKS below
+    # for the one way they are handled differently.
+    "answer_call",
+    "reject_call",
 )
+
+#: CONTRACTS v1.13. The two bridge tasks that MOVE NOBODY: they inject one
+#: phone control per frame and issue no engine ped-task at all.
+#:
+#: They are split out because `main._execute_action`'s movement gate refuses
+#: every :data:`BRIDGE_TASKS` entry that does not carry the movement wheel's
+#: current token, and a ringing phone must be answerable or refusable
+#: whatever owns the wheel. Making the phone ask `roam` or `mission` for
+#: permission to hang up on Simeon would mean the missions-off switch quietly
+#: stops working exactly when a goal is locked — which is most of the time.
+#: So these two are on the primitive-like side of that gate: no token, no
+#: wheel, no preempt hook. They still go through every OTHER refusal in that
+#: choke point (cutscene, dead/arrested, blocking screen), because a task
+#: posted then reaches nobody regardless of what it does.
+PHONE_TASKS: tuple[str, ...] = ("answer_call", "reject_call")
+
+#: The bridge tasks that DO compete for the movement wheel — i.e. everything
+#: that actually moves him. This, not :data:`BRIDGE_TASKS`, is what the
+#: movement gate, `_reflex_act`, `_apply_decision` and
+#: `RoamEngine.blocks_foreign_action` classify on.
+MOVEMENT_TASKS: tuple[str, ...] = tuple(t for t in BRIDGE_TASKS if t not in PHONE_TASKS)
 PRIMITIVES: tuple[str, ...] = (
     "look_around",
     "brake_tap",
@@ -60,6 +86,8 @@ ActionType = Literal[
     "fight_ped",
     "set_waypoint",
     "stop",
+    "answer_call",
+    "reject_call",
     "look_around",
     "brake_tap",
     "swerve",
@@ -339,6 +367,11 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "fight_ped": ("handle",),
     "set_waypoint": ("x", "y"),
     "stop": (),
+    # CONTRACTS v1.13: no params at all. Which call is ringing is not something
+    # the caller gets to name — no native exposes the caller's identity — so
+    # there is nothing to pass and no key to invent.
+    "answer_call": (),
+    "reject_call": (),
     "look_around": (),
     "brake_tap": (),
     "swerve": ("direction",),

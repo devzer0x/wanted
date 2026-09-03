@@ -32,6 +32,7 @@ from wasted_harness.behavior.humanizer import MoodModel
 from wasted_harness.behavior.missions import MissionTracker
 from wasted_harness.behavior.planner import DayPlanner
 from wasted_harness.behavior.recovery import (
+    ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
     StrandedEscalator,
@@ -348,3 +349,12 @@ def test_reflex_does_not_wander_at_l3() -> None:
     stub = StubHarness(level=3)
     _reflex(stub, make_state(task_status="idle"))
     assert stub.posted == [], f"L3 must stay parked, posted {stub.posted}"
+
+# The real `_reflex` now consults the phone reflex and the game-cleared backoff every tick.
+# Stubs get a quiet phone and an open backoff so every existing scenario is unchanged.
+def _quiet_phone(self, state):
+    return False
+
+
+StubHarness._phone_reflex = _quiet_phone  # type: ignore[attr-defined]
+StubHarness.cleared_backoff = ClearedByGameBackoff()  # type: ignore[attr-defined]

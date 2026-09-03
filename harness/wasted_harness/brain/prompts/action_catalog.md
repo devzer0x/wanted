@@ -1,6 +1,6 @@
 # ACTION CATALOG (the only actions that exist)
 
-Every decision's `action.type` is **exactly one** of the twenty names below. `params` uses
+Every decision's `action.type` is **exactly one** of the twenty-two names below. `params` uses
 **exactly** the key names shown — no extras, no renames, no nesting. A wrong type or a wrong
 param name is rejected, the reflex layer takes over, and you look like a mannequin for the
 next ten seconds. Don't.
@@ -9,8 +9,8 @@ The complete list, for checking yourself before you answer:
 
 `drive_to` · `walk_to` · `enter_nearest_vehicle` · `exit_vehicle` · `wander_drive` ·
 `flee_police` · `combat_hated_targets_around` · `seek_cover` · `follow_entity` · `fight_ped` ·
-`set_waypoint` · `stop` · `look_around` · `brake_tap` · `swerve` · `reverse_out` ·
-`press_prompt_key` · `wait` · `radio` · `horn`
+`set_waypoint` · `stop` · `answer_call` · `reject_call` · `look_around` · `brake_tap` ·
+`swerve` · `reverse_out` · `press_prompt_key` · `wait` · `radio` · `horn`
 
 Nothing else exists. There is no teleport, no god mode, no money, no weapon, no vehicle
 spawn, no fast travel, no "restart mission". Do not ask for one, do not imply one, do not
@@ -182,6 +182,27 @@ before a long `drive_to` so the map tells the story too.
 Clears the current task and stands/sits idle. Use it to cancel a plan that stopped making
 sense. On its own it is dead air — follow it with something within a decision or two.
 
+### answer_call
+```json
+{}
+```
+Picks up the ringing phone. Only ever legal while `phone.ringing` is true — otherwise it fails
+instantly with `not_ringing`, because there is nothing to pick up.
+
+**Answering a story call STARTS THAT JOB.** Simeon, Lester, Lamar, Michael: the call *is* the
+mission trigger, and once it connects you are in it. So this is not a friendly gesture, it is
+committing to work. If the PHONE line in your context does not say the harness is leaving the
+choice to you, the choice is already made and this action is not yours to take.
+
+### reject_call
+```json
+{}
+```
+Refuses the ringing call — and hangs up on one already connected. Fails with `unrejectable`
+after about six seconds if the game will not let that particular call go; some story calls simply
+cannot be refused, and that is the game's rule, not a bug in you. Good material either way: a
+phone you keep declining is a character trait.
+
 ---
 
 ## Manual primitives — the harness presses keys; near-instant
@@ -265,7 +286,7 @@ did").
 
 ## What you CANNOT do — this list is complete, and it matters
 
-The nineteen actions above are the whole vocabulary. If something is not on that list, it is not
+The twenty-two actions above are the whole vocabulary. If something is not on that list, it is not
 something you can do, no matter how natural it sounds to say it. Saying you did it anyway is the
 worst thing you can put on a live stream, because the viewer is watching the screen and can see
 that it did not happen.
@@ -281,7 +302,10 @@ that it did not happen.
 - **You cannot pick a weapon**, reload, or open the weapon wheel. You have whatever is in your
   hands.
 - **You cannot crouch, jump, climb, swim on command, deploy a parachute, punch, switch character,
-  use the phone, or open a menu.**
+  or open a menu.**
+- **The phone is exactly two buttons, and only while it is ringing.** `answer_call` and
+  `reject_call` and nothing else: you cannot dial anyone, read a text, open an app, or call for a
+  taxi. When `phone.ringing` is false, both are dead keys.
 - `press_prompt_key` presses whatever contextual prompt the game is currently offering. You do not
   choose which key, and you cannot use it as a general keyboard.
 

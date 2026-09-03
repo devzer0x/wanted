@@ -226,6 +226,27 @@ namespace WastedBridge
         [JsonProperty("being_jacked_by")] public int? BeingJackedBy;
     }
 
+    /// <summary>
+    /// CONTRACTS v1.13 <c>phone</c>: the cellphone, as two booleans.
+    ///
+    /// Exists because the operator watched Simeon call the agent on stream and the harness had no
+    /// phone capability at all — the call simply rang out, unseen and unanswerable. Answering a
+    /// STORY call starts a mission, so this is the field the "accept / reject a call" control is
+    /// built on.
+    ///
+    /// Always a present object (never itself null); the two booleans inside carry the state. The
+    /// derivation, the natives behind it and the reason the two are ANDed live on
+    /// <see cref="PhoneState"/>.
+    /// </summary>
+    internal sealed class PhoneDto
+    {
+        // True while the phone is making incoming-call noise and nobody has picked up:
+        // IS_PED_RINGTONE_PLAYING(player) AND NOT IS_MOBILE_PHONE_CALL_ONGOING().
+        [JsonProperty("ringing")] public bool Ringing;
+        // IS_MOBILE_PHONE_CALL_ONGOING() — a call is CONNECTED (incoming or outgoing).
+        [JsonProperty("in_call")] public bool InCall;
+    }
+
     internal sealed class LastTaskDto
     {
         // CONTRACTS v1.2: id and type are NULL — key present, value null — until the first task is
@@ -257,6 +278,9 @@ namespace WastedBridge
         // v1.11: always a present object (see ThreatDto); defaulted so a builder that forgets to
         // set it still serializes the documented shape.
         [JsonProperty("threat")] public ThreatDto Threat = new ThreatDto();
+        // v1.13: always a present object (see PhoneDto); defaulted the same way threat is, so a
+        // builder that forgets to set it still serializes the documented shape rather than null.
+        [JsonProperty("phone")] public PhoneDto Phone = new PhoneDto();
         [JsonProperty("last_task")] public LastTaskDto LastTask;
         [JsonProperty("bridge")] public BridgeInfoDto Bridge;
     }

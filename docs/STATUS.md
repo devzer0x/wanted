@@ -3,6 +3,62 @@
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
 run log, or URL) noted next to it. Last updated: 2026-09-03.
 
+## 2026-09-03 — live: missions off, the stranded livelock, and the phone
+
+**the agent is live on bridge 1.5.0, deployed by HOT RELOAD** — the DLL swapped 1.2.0 → 1.5.0 with the
+game running and the stream never dropping. First time it has worked; every bridge fix from here is
+a hot swap, not a game restart. `ReloadKeyBinding=Insert` in `ScriptHookVDotNet.ini` is what made
+it possible.
+
+**Missions switched OFF** by operator call ("not ready yet"): `WASTED_MISSIONS_ENABLED=false` on the
+server. `start_nearest_mission` is never offered, never forced at 3 goals / 15 min, and the day
+planner never schedules or accepts a mission block. Free roam is the whole show; 14 goals on the
+menu, `pick_a_fight` and `gang_trouble` included now that `fight_ped{handle}` exists.
+
+**Livelock found by the new wheel log, minutes after deploy, and fixed:** `stranded` is
+reflex-class, so it outranked roam and preempted every goal ~2 s after it was picked — including
+`roam_the_block`, whose own plan IS `enter_nearest_vehicle`. It preempted a goal to do the thing
+the goal was already doing, forever. A live roam goal now stands the stranded ladder down; the goal
+has its own stuck watchdog. The log that exposed it:
+`wheel preempted owner=roam by=stranded` / `roam goal ended outcome=preempted duration_s=0.3`.
+
+**`goal_fallback` fired on every pick:** the model wrote prose in the `goal` field ("cruise
+around, find a bike, aim for a hill"). The prompt-file fix was not enough; the menu line itself now
+names the field and shows the bare ids. Behaviour was never wrong (the fallback takes the top
+offer), but his one genuine free-roam decision was being discarded. Deploys with the phone build.
+
+**Phone calls — in progress (bridge 1.6.0, CONTRACTS v1.13).** Simeon called on stream; answering a
+story call starts a mission. Researched, not guessed: there is NO native for "ringing" (it lives in
+a build-specific script global), so the proxy is `IS_PED_RINGTONE_PLAYING(player) AND NOT
+IS_MOBILE_PHONE_CALL_ONGOING()`. Answer/reject inject `Control.PhoneSelect` (176) /
+`Control.PhoneCancel` (177) via `SET_CONTROL_VALUE_NEXT_FRAME` — keybinding-independent, names
+verified against the pinned DLL. Policy: missions off → the reflex layer rejects; missions on → the
+brain gets a `PHONE: ringing` line and chooses. Live-only unknowns, stated as such: whether control
+group 0 or 2 registers, whether the ringtone proxy is clean on this build, how un-rejectable story
+calls behave.
+
+**Free roam variety + three new goals (17 total).** Novelty memory: the same goal id is never
+offered twice running, and anything from the last four picks sinks to the back of the menu while a
+triggered offer keeps the front. New and genuinely expressible: `chase_that_car` (follow_entity on
+a moving fast car), `jack_a_driver` (enter_nearest_vehicle on an OCCUPIED car within 12 m is a jack
+by construction), `honk_run` (wander + the horn primitive). Still impossible, unchanged:
+rob_store, buy_gun, taxi_ride, big_jump.
+
+**The retry storm, root-caused from the bridge log:** `enter_nearest_vehicle` started,
+`failed: cleared_by_game` ~1 s later, re-posted within 300 ms by whichever owner got the wheel
+next, with an empty Prairie 2.8 m away, for minutes. The game clears ped tasks for reasons the
+harness cannot see — very likely the ringing phone taking the ped. `ClearedByGameBackoff` (per
+task TYPE, 4 s doubling to 20 s, other types unaffected) is written and tested; the funnel wiring
+lands with the phone build.
+
+**Web: the counters are gone.** Operator: "statistics are not accurate". Replaced by one line —
+how long since the first session ever recorded (`min(sessions.started_at)`, anon-readable, written
+once by the harness and never touched). **Verified on production:** the live site renders
+"8 days, 21 hours since the agent was born". Playwright assertion updated to match.
+
+**715 tests passing, ruff clean.**
+
+
 ## 2026-09-03 — movement ownership, goal ids, and the interior escape
 
 **Fix 1 — MovementWheel now GATES movement instead of recording it.** It was advisory: `claim()`

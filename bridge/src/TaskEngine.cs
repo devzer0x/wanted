@@ -106,6 +106,42 @@ namespace WastedBridge
         private const float MeleeStrafePhaseSync = -1f;
         private const float MeleeTimeInTask = 0f;
 
+        // answer_call / reject_call (CONTRACTS v1.13 — the operator watched Simeon call the agent on
+        // stream with no way to accept or refuse). Both work through the game's own CONTROL layer
+        // rather than a raw keypress, so they are independent of whatever the player has the phone
+        // bound to: SET_CONTROL_VALUE_NEXT_FRAME (0xE8A25867FBA3B05E, BOOL(int control, int action,
+        // float value)) with value 1.0 for one frame.
+        //
+        // THE TWO ACTIONS, from the pinned SHVDN v3.7.0.189 GTA.Control enum (verified by
+        // reflection over lib/ScriptHookVDotNet3.dll: PhoneSelect = 176, PhoneCancel = 177, and
+        // there is NO `Cellphone*` member in this build). Cast to int in a CONST initializer on
+        // purpose: the value is baked in at COMPILE time, so a future SHVDN bump that renames or
+        // removes either member breaks this BUILD instead of silently injecting the wrong control
+        // at runtime — the same reasoning DrivingStyles and player.interior already document.
+        private const int PhoneAnswerControl = (int)Control.PhoneSelect;   // 176
+        private const int PhoneRejectControl = (int)Control.PhoneCancel;   // 177
+
+        // The native's FIRST argument is the control GROUP, not the action: 0 = PLAYER,
+        // 1 = CAMERA, 2 = FRONTEND. The phone reads FRONTEND, but SHVDN's own control helpers pass
+        // 0 throughout and the engine is documented as tolerating it, so 0 is what ships and it is
+        // LOGGED on every task start (see StartPhoneInput) — if the live smoke test shows the input
+        // never registering, this is the one number to flip, and hot-reload means that costs a
+        // rebuild and a script reload, not a game restart. UNVERIFIED against the running game:
+        // nothing on a dev machine can tell 0 from 2 here.
+        private const int PhoneControlGroup = 0;
+        private const float PhoneControlValue = 1f;
+
+        // How long either phone task keeps injecting before giving up. The input only registers
+        // once the phone has RISEN on screen — the game raises it by itself for an incoming call,
+        // which is why neither task presses Control.Phone first — so a single frame of injection
+        // is not enough and both tasks re-inject every tick until the state actually changes.
+        // Bounded because some story calls CANNOT be rejected (the game hides the reject soft key):
+        // "still ringing after this long" is reported as failed/"unrejectable" and the task stops,
+        // rather than mashing a key at a call the game will not let go of. ~6 s is comfortably
+        // longer than the phone's rise animation and short enough that the harness re-plans while
+        // the call is still ringing.
+        private const int PhoneInputTimeoutMs = 6000;
+
         // Watchdog timeouts (bridge-side judgement; contract names "timeout" as a failure detail).
         private const int DriveToTimeoutMs = 600000;
         private const int WalkToTimeoutMs = 300000;
@@ -309,6 +345,11 @@ namespace WastedBridge
                     StartFightPed(ped, req);
                     break;
 
+                case "answer_call":
+                case "reject_call":
+                    StartPhoneInput(ped, req);
+                    break;
+
                 case "set_waypoint":
                     World.WaypointPosition = new Vector3(req.X, req.Y, 0f);
                     Done("");
@@ -461,6 +502,11 @@ namespace WastedBridge
 
                 case "fight_ped":
                     UpdateFightPed();
+                    break;
+
+                case "answer_call":
+                case "reject_call":
+                    UpdatePhoneInput(ped, elapsed);
                     break;
             }
         }
@@ -1017,6 +1063,111 @@ namespace WastedBridge
             // Otherwise runs until preempted (contract) - no timeout: a real fight has no fixed
             // duration and the game's own combat/melee task ends the encounter (flee, death, or the
             // player wins), at which point the next Update() sees target.IsDead or gone.
+        }
+
+        /// <summary>
+        /// answer_call / reject_call Start() (CONTRACTS v1.13).
+        ///
+        /// No engine ped-task is issued at all — these two drive the game's own CONTROL layer, so
+        /// <c>_expectedTaskHash</c> stays null (Start() cleared it) and the v1.10 liveness check
+        /// correctly does not apply: there is no script task for the game to clear.
+        ///
+        /// The preconditions below are checked against a FRESH read rather than the harness's
+        /// snapshot, which is up to a poll period old:
+        ///   answer_call while a call is already connected -> done, it is answered;
+        ///   answer_call with nothing ringing -> failed/"not_ringing", immediately. Injecting
+        ///     PhoneSelect at a phone that is not up would otherwise spend 6 s poking at the
+        ///     handset's app grid for no reason.
+        ///   reject_call with nothing ringing and no call -> done, there is nothing to refuse.
+        /// </summary>
+        private void StartPhoneInput(Ped ped, TaskRequest req)
+        {
+            bool answering = req.Type == "answer_call";
+            PhoneDto phone = PhoneState.Read(ped);
+
+            if (answering)
+            {
+                if (phone.InCall)
+                {
+                    Done("");
+                    return;
+                }
+                if (!phone.Ringing)
+                {
+                    Fail("not_ringing");
+                    return;
+                }
+            }
+            else if (!phone.Ringing && !phone.InCall)
+            {
+                Done("");
+                return;
+            }
+
+            // Logged once per task, at INFO, naming the group actually used: this is the one
+            // number that cannot be verified off the server (see PhoneControlGroup), so the live
+            // log has to say which one produced whatever the operator sees on screen.
+            BridgeLog.Info("task " + req.Id + " (" + req.Type + "): injecting control "
+                           + (answering ? PhoneAnswerControl : PhoneRejectControl)
+                           + " (" + (answering ? "PhoneSelect" : "PhoneCancel")
+                           + ") in control group " + PhoneControlGroup
+                           + " every tick for up to " + PhoneInputTimeoutMs + " ms");
+            InjectPhoneControl(answering);
+        }
+
+        /// <summary>
+        /// answer_call / reject_call Update(): re-inject every tick until the phone state actually
+        /// changes, then stop. Bounded by <see cref="PhoneInputTimeoutMs"/>.
+        ///
+        /// answer_call is done when a call is CONNECTED. If the ringing simply stops without
+        /// connecting (the caller gave up) it keeps trying until the timeout and then reports
+        /// failed/"unanswered" — honest, because the call was not answered.
+        ///
+        /// reject_call is done when the phone is neither ringing nor connected. PhoneCancel is
+        /// both "reject" and "hang up", so if a call connects anyway mid-reject the same input
+        /// keeps working and the task still ends when the line is clear. Its timeout detail is
+        /// "unrejectable": SOME story calls hide the reject soft key entirely and cannot be
+        /// refused, and there is no native that says which — timing out and reporting it is the
+        /// only honest answer, and it is strictly better than looping forever on a call the game
+        /// will not let go of.
+        /// </summary>
+        private void UpdatePhoneInput(Ped ped, int elapsed)
+        {
+            bool answering = _req.Type == "answer_call";
+            PhoneDto phone = PhoneState.Read(ped);
+
+            if (answering)
+            {
+                if (phone.InCall)
+                {
+                    Done("");
+                    return;
+                }
+            }
+            else if (!phone.Ringing && !phone.InCall)
+            {
+                Done("");
+                return;
+            }
+
+            if (elapsed > PhoneInputTimeoutMs)
+            {
+                Fail(answering ? "unanswered" : "unrejectable");
+                return;
+            }
+            InjectPhoneControl(answering);
+        }
+
+        /// <summary>
+        /// One frame's worth of one phone control. ONE per frame on purpose: the phone input
+        /// system latches a single control per frame, so injecting answer and reject together (or
+        /// adding a Control.Phone press alongside) loses one of them. The game raises the handset
+        /// by itself for an incoming call, so no Control.Phone press is needed or wanted here.
+        /// </summary>
+        private static void InjectPhoneControl(bool answer)
+        {
+            Function.Call(Hash.SET_CONTROL_VALUE_NEXT_FRAME, PhoneControlGroup,
+                answer ? PhoneAnswerControl : PhoneRejectControl, PhoneControlValue);
         }
 
         private void IssueFlee(Ped ped)

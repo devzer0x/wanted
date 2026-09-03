@@ -204,7 +204,7 @@ namespace WastedBridge
             return BridgeResponse.FromJson(202, new JObject { ["task_id"] = req.Id });
         }
 
-        /// <summary>Validates params for all 11 CONTRACTS §1 task types; no natives involved.</summary>
+        /// <summary>Validates params for all 14 CONTRACTS §1 task types; no natives involved.</summary>
         private static bool TryBuildTaskRequest(string type, JObject p, out TaskRequest req,
                                                 out string error, out string detail)
         {
@@ -256,6 +256,13 @@ namespace WastedBridge
                 case "exit_vehicle":
                 case "flee_police":
                 case "stop":
+                // CONTRACTS v1.13: the two phone verbs take NO params — which call is ringing is
+                // not something the caller gets to name, because no native exposes the caller's
+                // identity. They are grouped with the other no-param verbs deliberately: an
+                // unknown key in `params` is ignored here exactly as it is for `stop`, so a
+                // harness that grows a param before the bridge does is a no-op, not a 400.
+                case "answer_call":
+                case "reject_call":
                     return true;
                 case "wander_drive":
                 {

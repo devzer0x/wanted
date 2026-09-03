@@ -207,6 +207,14 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("threat.attacker_handle", Kind.Integer, nullable: true),
             new FieldSpec("threat.being_jacked_by", Kind.Integer, nullable: true),
 
+            // CONTRACTS v1.13: the cellphone. Always a present object, both booleans always
+            // present. `ringing` is IS_PED_RINGTONE_PLAYING AND NOT IS_MOBILE_PHONE_CALL_ONGOING
+            // (the AND keeps an OUTGOING dial from reading as an incoming call); `in_call` is
+            // IS_MOBILE_PHONE_CALL_ONGOING on its own.
+            new FieldSpec("phone", Kind.Object),
+            new FieldSpec("phone.ringing", Kind.Boolean),
+            new FieldSpec("phone.in_call", Kind.Boolean),
+
             new FieldSpec("last_task", Kind.Object),
             // CONTRACTS v1.2: present-and-null before the first task, never absent.
             new FieldSpec("last_task.id", Kind.String, nullable: true),

@@ -162,6 +162,8 @@ namespace WastedBridge
                 },
                 Nearby = nearby,
                 Threat = threat,
+                // v1.13: two natives, guarded (see ReadPhoneSafe).
+                Phone = ReadPhoneSafe(ped),
                 LastTask = engine.ToDto(),
                 Bridge = new BridgeInfoDto
                 {
@@ -293,6 +295,40 @@ namespace WastedBridge
             };
             return _lastInterior;
         }
+
+        /// <summary>
+        /// CONTRACTS v1.13 <c>phone</c>, behind its own guard — the same shape as
+        /// <see cref="FindObjectiveBlipSafe"/>: one field degrading is an acceptable loss,
+        /// freezing all of /state is not.
+        ///
+        /// WHAT IT SERVES ON FAILURE, and why it is BOTH-FALSE rather than the last measured
+        /// value (which is what <see cref="TrackInteriorSafe"/> does): "ringing: false" is the
+        /// state in which the harness does nothing at all, i.e. exactly the pre-1.6.0 behaviour
+        /// of letting a call ring out. Repeating a stale "ringing: true" would instead have the
+        /// reflex layer post reject_call at a phone that is not ringing, forever. When this read
+        /// is broken, doing nothing is the only safe direction, and the log says so.
+        /// </summary>
+        private PhoneDto ReadPhoneSafe(Ped ped)
+        {
+            try
+            {
+                return PhoneState.Read(ped);
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastPhoneErrorAt) > 5000)
+                {
+                    _lastPhoneErrorAt = now;
+                    BridgeLog.Error("phone read failed (IS_PED_RINGTONE_PLAYING / "
+                                    + "IS_MOBILE_PHONE_CALL_ONGOING); phone reports ringing=false, "
+                                    + "in_call=false, so calls ring out unanswered", ex);
+                }
+                return new PhoneDto();
+            }
+        }
+
+        private int _lastPhoneErrorAt = int.MinValue;
 
         /// <summary>CONTRACTS v1.7: who the player currently is, from the ped model.</summary>
         private static string ProtagonistName(Ped ped)

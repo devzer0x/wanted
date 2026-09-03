@@ -45,6 +45,7 @@ from .behavior.recovery import (
     BlockingScreenWatchdog,
     BridgeDownTracker,
     BridgeStallTracker,
+    ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
@@ -77,7 +78,12 @@ from .brain.knowledge_base import mission_state_hint, render, select
 from .brain.memory import Memory
 from .brain.mission_knowledge import LearnedScripts, identify_mission_with_source, mission_card
 from .brain.prompts import director_static_prefix, tactical_static_prefix
-from .brain.schemas import ACTION_TYPES, BRIDGE_TASKS, DecisionModel
+from .brain.schemas import (
+    ACTION_TYPES,
+    BRIDGE_TASKS,
+    MOVEMENT_TASKS,
+    DecisionModel,
+)
 from .brain.tactical import (
     BrainUnavailableError,
     DecisionFailedError,
@@ -639,6 +645,41 @@ def _threat_and_blips_line(state: GameState) -> str:
     return " | ".join(bits)
 
 
+def _phone_line(state: GameState, missions_enabled: bool) -> str:
+    """CONTRACTS v1.13 `phone`, as one line — empty when the phone is quiet.
+
+    Two different lines because there are two different situations, and
+    telling the model the wrong one is worse than telling it nothing:
+
+    * **Jobs on.** The decision really is his, so he is told the two verbs and
+      what answering costs. The reflex layer does nothing at all.
+    * **Jobs off.** The harness has already refused it (answering a story call
+      starts a mission). Offering him `answer_call` here would invite an
+      action the reflex has just overruled, and inviting a model to do
+      something that will be undone is how a stream produces narration that
+      does not match the screen. He gets the FACT — it rang, it was refused —
+      which is good material and cannot contradict what the viewer sees.
+
+    A free function, not a method, for the same reason
+    :func:`_threat_and_blips_line` is one: it needs nothing from `self`, and
+    every test standing in a harness for `_dynamic_context` gets it free.
+    """
+    phone = state.phone
+    if phone.in_call:
+        return "PHONE: a call is connected. You cannot see who it is and you did not pick the words."
+    if not phone.ringing:
+        return ""
+    if missions_enabled:
+        return (
+            "PHONE: ringing — answer_call or reject_call. Answering a story call STARTS THAT "
+            "JOB. You cannot see who is calling, so do not name them."
+        )
+    return (
+        "PHONE: ringing — jobs are switched off, so the harness is refusing it for you. You "
+        "did not answer it and you cannot see who it was."
+    )
+
+
 class Harness:
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
@@ -715,6 +756,7 @@ class Harness:
         #: invisible to every observer here (measured: 20 s of RUNNING combat,
         #: 0.2 m of movement).
         self.task_stall = TaskStallDetector()
+        self.cleared_backoff = ClearedByGameBackoff()
         self.stranded = StrandedEscalator()
         self.threat_latch = ThreatLatch()
         #: Health across ticks. The relationship field in `nearby.peds` says
@@ -848,6 +890,13 @@ class Harness:
         #: exists to stop depending on.
         self._threat_has_the_wheel = False
         self._under_attack = False
+        #: CONTRACTS v1.13: has this RING already been refused? Latched by
+        #: `_phone_reflex` on a `reject_call` that actually reached the game,
+        #: cleared the moment `phone.ringing` goes false. One attempt per ring:
+        #: every POST /task preempts the running task, so re-posting a refusal
+        #: at the 2-4 Hz poll rate would cancel whatever he was doing several
+        #: times a second for the length of the ring.
+        self._phone_rejected_this_ring = False
         #: Set each tick from `BlockingScreenWatchdog.blocked`: the game is on
         #: a modal screen (MISSION FAILED / a menu), the SHVDN script thread is
         #: not ticking, and therefore every field in `state` is a frozen lie.
@@ -1317,6 +1366,7 @@ class Harness:
             # post so a stall and a threat landing on the same tick produce
             # one post, not two - and so the type that just deadlocked him is
             # already refused when `threat_action` proposes it again.
+            self.cleared_backoff.feed(state)
             stalled_type = self.task_stall.feed(
                 state,
                 under_attack=under_attack,
@@ -1538,12 +1588,87 @@ class Harness:
                         "L2: reflex drives",
                     )
 
+        # CONTRACTS v1.13 — the phone, LAST in the tick on purpose (see
+        # `_phone_reflex`). It runs even while he is dead or arrested: the only
+        # thing it does in that state is notice the ring ending and re-arm,
+        # because `_execute_action` refuses the post anyway.
+        phone_acted = self._phone_reflex(state)
+
         # The arbiter's answer, published under the name the three planners
         # already read. It means "a REFLEX acted this tick" — either it holds
         # the wheel or it fired a keypress recovery that `state.last_task`
         # cannot show yet — and a day-plan or mission trip posted over the top
         # would put him straight back in the parked convertible.
-        self._threat_has_the_wheel = self.wheel.taken_by_reflex()
+        #
+        # `phone_acted` is ORed in rather than routed through `wheel.note()`:
+        # the phone is not a movement owner and must not become one, but a
+        # `reject_call` posted milliseconds ago is a real task occupying the
+        # bridge's single slot, and a planner posting navigation over it this
+        # tick would cancel the refusal before it landed.
+        self._threat_has_the_wheel = self.wheel.taken_by_reflex() or phone_acted
+
+    def _phone_reflex(self, state: GameState) -> bool:
+        """CONTRACTS v1.13: the missions-off answer to a ringing phone.
+
+        THE POLICY, and it is the operator's: **answering a story call starts a
+        mission.** While `Settings.missions_enabled` is false he is not taking
+        jobs, so a ringing phone gets `reject_call` — no model call, no
+        deliberation, at reflex speed. While missions ARE enabled this does
+        nothing at all: the choice goes to the brain, which is told about it by
+        :func:`_phone_line`.
+
+        RATE LIMIT: **one attempt per ring**, latched until the ring ends.
+        `POST /task` preempts the running task (CONTRACTS §1), so re-posting a
+        refusal at the poll rate would cancel whatever he was doing three times
+        a second for the length of the ring — the same failure `ThreatLatch`
+        exists to prevent for combat. The bridge's own `reject_call` re-injects
+        the control every frame for up to ~6 s, so one post IS the whole
+        attempt; there is nothing for a second one to add.
+
+        The latch is only spent on a post that actually reached the game. A
+        task suppressed mid-cutscene or lost to a bridge blip never happened,
+        and he must be free to ask again on the next tick.
+
+        Returns True when it posted, which is what makes the planners running
+        later in this tick stand down for it.
+        """
+        phone = state.phone
+        if not phone.ringing or phone.in_call:
+            # The ring is over — answered, refused, or the caller gave up — or
+            # a call is connected, in which case there is nothing to refuse
+            # (and `in_call` is checked explicitly rather than trusted to be
+            # excluded by the bridge's own AND, because "do nothing while he
+            # is on a call" is the rule, not an accident of the derivation).
+            # Re-arm for the next ring.
+            self._phone_rejected_this_ring = False
+            return False
+        if self.settings.missions_enabled:
+            return False
+        if self._phone_rejected_this_ring:
+            return False
+        if self.wheel.posted_this_tick:
+            # The survival ladder (or the vehicle reflex) already put a task on
+            # the wire this tick. `reject_call` takes no wheel, so nothing
+            # would refuse it — but bridge-side it is still one task at a time,
+            # and posting now would preempt the action that was chosen over it.
+            # The phone is still ringing next tick; the latch is untouched.
+            log.debug(
+                "phone: ringing, deferring the refusal — a task is already posted this tick"
+            )
+            return False
+        task_id = self._execute_action("reject_call", {})
+        if task_id is None:
+            return False
+        self._phone_rejected_this_ring = True
+        log.info(
+            "phone: ringing and jobs are switched off — refusing the call",
+            extra={"kv": {"task_id": task_id, "tick": self.wheel.tick}},
+        )
+        # No canned line here on purpose. `_phone_line` puts the FACT in the
+        # brain's next context ("it rang, the harness refused it") and he
+        # narrates it in his own words on his own cadence; a fixed string
+        # fired from the reflex would be the same sentence every single call.
+        return True
 
     # -- movement arbitration --------------------------------------------------
 
@@ -1579,14 +1704,14 @@ class Harness:
     ) -> tuple[str | None, bool]:
         """Run one reflex-layer action under `owner`. Returns `(task_id, attempted)`.
 
-        The reflex ladder mixes CONTRACTS §1 bridge tasks (which preempt
-        whatever is running, and therefore need the wheel) with §2 primitives
-        (which post nothing and preempt nothing, and therefore do not).
+        The reflex ladder mixes MOVEMENT tasks (which preempt whatever is
+        running, and therefore need the wheel) with §2 primitives and v1.13's
+        two phone verbs (which move nobody, and therefore do not).
         `attempted` is False only when the wheel REFUSED — the caller must then
         do nothing at all with the result, not even bind a null task id.
         """
         action_type = action["type"]
-        if action_type not in BRIDGE_TASKS:
+        if action_type not in MOVEMENT_TASKS:
             self.wheel.note(owner, f"{action_type}: {reason}")
             return self._execute_action(action_type, action["params"]), True
         token = self.wheel.acquire(owner, f"{action_type}: {reason}")
@@ -2009,6 +2134,10 @@ class Harness:
                 else ""
             ),
             _threat_and_blips_line(state),
+            # CONTRACTS v1.13. Empty (and therefore dropped by the join below)
+            # whenever the phone is quiet, which is nearly always — this rides
+            # in the UNCACHED dynamic half and costs tokens on every call.
+            _phone_line(state, self.settings.missions_enabled),
             self.missions.brain_note(),
             self.mission_follower.note(),
             self.planner.note(),
@@ -2224,10 +2353,14 @@ class Harness:
             )
             time.sleep(reaction_delay(self.rng))
             return
-        if d.action.type not in BRIDGE_TASKS:
+        if d.action.type not in MOVEMENT_TASKS:
             # A primitive posts no task and preempts nothing, so it never asks
             # the wheel: radio, horn, look_around and a short wait keep the
-            # commentary alive even on a tick survival owns.
+            # commentary alive even on a tick survival owns. v1.13's
+            # `answer_call`/`reject_call` come through here too: they are POST
+            # /task, but they move nobody, and a decision to hang up on a
+            # ringing phone must not be dropped because free roam happens to
+            # hold the wheel.
             time.sleep(reaction_delay(self.rng))  # humanizer: 300-900 ms reaction
             self._execute_action(d.action.type, d.action.wire_params())
             return
@@ -2292,8 +2425,28 @@ class Harness:
         `brake_tap`/`swerve`/`reverse_out`/`press_prompt_key` are short raw key
         holds. None of them is a `POST /task`, so none of them preempts a
         running task, so none of them belongs to the wheel.
+
+        CONTRACTS v1.13's `answer_call`/`reject_call` sit on that same
+        primitive-like side even though they ARE `POST /task`
+        (:data:`PHONE_TASKS`): they inject one phone control per frame and move
+        nobody, and a ringing phone has to be answerable or refusable whatever
+        owns the wheel. Making the phone ask `roam` or `mission` for permission
+        to hang up on Simeon would mean the missions-off switch quietly stops
+        working exactly while a goal is locked, which is most of the time. Every
+        OTHER refusal below still applies to them, because a task posted during
+        a cutscene or on a blocking screen reaches nobody whatever it does.
         """
-        if action_type in BRIDGE_TASKS and not self.wheel.holds(token):
+        if action_type in MOVEMENT_TASKS and (wait := self.cleared_backoff.refuses(action_type)) > 0:
+            # The game itself cleared this task type a moment ago. Re-posting it now
+            # is the storm measured live: started, cleared_by_game, re-posted within
+            # 300 ms, for minutes. Other types still go through, so a stuck ped can
+            # try something DIFFERENT — which is the whole point.
+            log.info(
+                "task refused: the game just cleared this type; backing off",
+                extra={"kv": {"action": action_type, "wait_s": round(wait, 1)}},
+            )
+            return None
+        if action_type in MOVEMENT_TASKS and not self.wheel.holds(token):
             # The caller was refused (or never asked) and posted anyway. That is
             # a bug in the caller, not a condition of the world, so it is loud.
             log.error(
@@ -2380,7 +2533,12 @@ class Harness:
                 # structural rather than a property of the call order. Marked on
                 # the ATTEMPT, because a task lost to a bridge blip still used
                 # this tick's one shot and the reflexes will ask again next tick.
-                if token is not None:  # always true: the gate at the top said so
+                # None only for a PHONE_TASKS post, which takes no token by
+                # design (see the docstring) and therefore does not spend the
+                # tick's one movement slot — it moves nobody, so there is
+                # nothing for a later owner to trip over. For everything else
+                # the gate at the top guaranteed a live token.
+                if token is not None:
                     self.wheel.mark_posted(token, action_type)
                 return self.bridge.post_task(action_type, params)
             elif action_type == "radio":
@@ -3013,7 +3171,9 @@ class Harness:
         self._end_activity_if_running("game_restarted")
         self.perceptor = Perceptor()
         self.stuck = StuckDetector()
+        self._phone_rejected_this_ring = False
         self.task_stall = TaskStallDetector()
+        self.cleared_backoff = ClearedByGameBackoff()
         self.stranded = StrandedEscalator()
         # Same rule as every other stateful observer here: a fresh instance.
         # The roam engine's memory is all cross-tick derivations about a world

@@ -13,7 +13,7 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.5.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        public const string BridgeVersion = "1.6.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
         // v1.3.0: CONTRACTS v1.11 (part 1) - mission.entity_blips[] (entity-attached blips,
         // throttled ~4 Hz); driving overhaul: driveAgainstTraffic explicit false on the new
         // StartVehicleMission call, avoid_traffic retuned off the brake-free
@@ -33,6 +33,15 @@ namespace WastedBridge
         // that made the house-escape path effectively unreachable in the live loop. Source is the
         // Entity.CurrentInteriorProxy WRAPPER, not a raw native hash, so an SHVDN bump that removes
         // it breaks this build rather than emitting a garbage id.
+        // v1.6.0: CONTRACTS v1.13 - the phone. /state gains `phone` {ringing, in_call} (see
+        // PhoneState: IS_PED_RINGTONE_PLAYING AND NOT IS_MOBILE_PHONE_CALL_ONGOING - the AND is
+        // what stops an OUTGOING dial reading as an incoming call), and two new §1 task types,
+        // `answer_call` and `reject_call`, which inject Control.PhoneSelect / Control.PhoneCancel
+        // through SET_CONTROL_VALUE_NEXT_FRAME every tick until the phone state changes or a ~6 s
+        // bound expires (failed "unanswered"/"unrejectable" - some story calls cannot be refused
+        // at all). Built because the operator watched Simeon call the agent on stream with no way to
+        // accept or refuse: answering a story call STARTS a mission, so this is the control the
+        // harness's missions-off switch needs in order to mean anything.
 
         private const float UnstickMinStoppedS = 20f;
         private const float UnstickNudgeBackM = 2.5f;   // total displacement stays ≤ 3 m (contract)

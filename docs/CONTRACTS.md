@@ -1,9 +1,55 @@
 # WANTED — CONTRACTS
 
-**Version: 1.12 — FROZEN 2026-09-03.** Executors treat this file as read-only; changes go through
+**Version: 1.13 — FROZEN 2026-09-03.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
 Changelog:
+- v1.13 (additive; bridge 1.5.0 → **1.6.0**). **THE PHONE.** `/state` gains
+  `phone` = `{"ringing": bool, "in_call": bool}`, and §1 gains two task types, `answer_call` and
+  `reject_call`, both `{}`.
+  **Why:** the operator watched Simeon call the agent on stream. The harness had no phone capability
+  at all — the call simply rang out, unseen and unanswerable — and answering a STORY call
+  **starts a mission**. Missions are currently switched off (`Settings.missions_enabled`, env
+  `WASTED_MISSIONS_ENABLED`), so without this the switch is a half-measure: it stops him walking
+  into a start marker but cannot stop a phone call walking him into a job. "Give him a control to
+  accept / reject a call" is the operator's own wording.
+  **`ringing` is a sound-level PROXY, and that is stated here rather than hidden.** There is no
+  native that reports "an incoming call is ringing": the game keeps it in a script global whose
+  index is build-specific, and a hard-coded global index is exactly the kind of guess CLAUDE.md
+  rule 6 forbids — it would break silently on the next game update. `CAN_PHONE_BE_SEEN_ON_SCREEN`
+  is not the answer either; it is hard-coded to return 1 in this engine. So the bridge derives:
+
+  ```
+  ringing := IS_PED_RINGTONE_PLAYING(playerPed)  AND NOT  IS_MOBILE_PHONE_CALL_ONGOING()
+  in_call := IS_MOBILE_PHONE_CALL_ONGOING()
+  ```
+
+  **The `AND NOT` is load-bearing, not tidiness.** `IS_PED_RINGTONE_PLAYING`
+  (`0x1E8E5E20937E3137`, `BOOL(Ped)`) means "this ped's phone is making ringtone noise", which is
+  *also* true while the player **dials out** and while a custom ringtone plays. On its own it
+  would report "someone is calling you" during the agent's own outgoing call, and the reject reflex
+  would hang up on him. `IS_MOBILE_PHONE_CALL_ONGOING` (`0x7497D2CE2C30D24C`, `BOOL()`) is what
+  separates "making noise, nobody has picked up" from "a call is live". Both hashes verified
+  present in the pinned SHVDN v3.7.0.189 `GTA.Native.Hash` enum by reflection over
+  `bridge/lib/ScriptHookVDotNet3.dll`, values matching alloc8or's NativeDB. Neither has a typed
+  SHVDN wrapper, so both are raw `Function.Call` — the same pattern `IS_PED_BEING_JACKED` /
+  `GET_PEDS_JACKER` already use.
+  **`answer_call` / `reject_call` go through the game's own CONTROL layer**, not a keypress, so
+  they are independent of whatever the player has the phone bound to: `SET_CONTROL_VALUE_NEXT_FRAME`
+  (`0xE8A25867FBA3B05E`, `BOOL(int control, int action, float value)`) with value `1.0`. Answer is
+  `Control.PhoneSelect` (176), reject/hang-up is `Control.PhoneCancel` (177) — both read through a
+  **compile-time** cast in the bridge, so an SHVDN bump that renames or removes either member
+  breaks the BUILD rather than injecting the wrong control at runtime (the same reasoning
+  `DrivingStyles` and v1.12's `player.interior` already apply). The input is injected **every tick
+  until the state changes**, one control per frame, because it only registers once the handset has
+  risen on screen (the game raises it by itself for an incoming call, so no `Control.Phone` press
+  is needed). Both are **bounded at ~6 s** and then report `failed`: some story calls cannot be
+  refused at all — the game hides the reject soft key and no native says which — so
+  `"unrejectable"` / `"unanswered"` is the honest end state, not an infinite retry.
+  **These two are `POST /task` like every other §1 verb** (so they preempt the running task, one
+  task at a time, unchanged), but they issue **no engine ped-task** and move nobody: v1.10's
+  task-liveness check therefore does not apply to them, and the harness deliberately exempts them
+  from its own movement arbitration. No new endpoint, no new event type, no `/health` change.
 - v1.12 (additive): `player.interior` = `{"id": <int>, "since_s": <float>}` or **null** when he is
   outdoors, and `player.last_outdoor` = `{x,y,z}` or null — the position captured on the last
   outdoor→indoor transition.
@@ -294,6 +340,15 @@ Field notes:
   retry/checkpoint reload is in progress. Suppress tasks and commentary while true.
 - `threat` (v1.11): `{"attacker_handle": int|null, "being_jacked_by": int|null}`. `attacker_handle`
   is the nearest ped with `attacking_me` true — pass it straight to `fight_ped`.
+- `phone` (v1.13): `{"ringing": bool, "in_call": bool}` — always a present object.
+  `ringing` = the phone is making incoming-call noise and nobody has picked up
+  (`IS_PED_RINGTONE_PLAYING(player)` **and not** `IS_MOBILE_PHONE_CALL_ONGOING()`; the AND is what
+  keeps an OUTGOING dial from reading as an incoming call — see the v1.13 changelog).
+  `in_call` = a call is connected, incoming or outgoing. This is a sound-level PROXY: it cannot
+  tell a story call (answering one starts a mission) from a friend's hang-out invite, and it
+  cannot see the on-screen soft keys, so it cannot know in advance whether a call is rejectable.
+  On a failed native read the bridge serves both false — "let it ring out" is the only safe
+  degradation — and logs it, throttled.
 - `player.switch_in_progress` (v1.11): a protagonist switch is playing. Treat exactly like a
   cutscene: act on nothing, say nothing about "being the wrong character".
 - `last_task.status` lifecycle: `idle` (no task ever / cleared) → `running` → `done` | `failed`.
@@ -328,8 +383,13 @@ values empirically (Phase 3) without a contract change.
 | `fight_ped` | `{handle}` | v1.11. Fight ONE named ped; the bridge picks melee vs combat from the target's `weapon_class`. `failed`/`"target_lost"` if the handle does not resolve; `done` when the target is dead or gone. Needs no relationship setup, unlike `combat_hated_targets_around` |
 | `set_waypoint` | `{x, y}` | immediate (`done` same tick); map waypoint only, no movement |
 | `stop` | `{}` | clears current task → `idle` |
+| `answer_call` | `{}` | v1.13. Answers the RINGING call by injecting `Control.PhoneSelect` every tick until `phone.in_call` is true. `done` when connected; `failed`/`"not_ringing"` immediately if nothing is ringing; `failed`/`"unanswered"` after ~6 s. **Answering a story call starts a mission.** |
+| `reject_call` | `{}` | v1.13. Refuses (or hangs up) the call by injecting `Control.PhoneCancel` every tick until `phone.ringing` and `phone.in_call` are both false. `done` when the line is clear; `failed`/`"unrejectable"` after ~6 s — some story calls hide the reject soft key and cannot be refused |
 
 - `style` enum everywhere: `normal | rushed | ignore_lights | avoid_traffic`.
+- `answer_call`/`reject_call` (v1.13) are `POST /task` like everything else — so they preempt the
+  running task, one task at a time — but they issue **no engine ped-task** and move nobody, so
+  v1.10's task-liveness (`cleared_by_game`) does not apply to them.
 
 ### POST /timescale → 200 `{"value": 0.15}`
 Body `{"value": 0.1–1.0}` (clamped). Used while the brain thinks on a decision that matters;

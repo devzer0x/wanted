@@ -497,6 +497,31 @@ class ThreatState(BaseModel):
     being_jacked_by: int | None = None
 
 
+class PhoneState(BaseModel):
+    """CONTRACTS v1.13 ``phone``: is the cellphone ringing, is a call connected.
+
+    The field the operator asked for after watching Simeon call the agent on
+    stream with no way to accept or refuse. Answering a STORY call **starts a
+    mission**, which is why the harness's missions-off switch acts on this.
+
+    ``ringing`` is a sound-level PROXY the bridge derives as
+    ``IS_PED_RINGTONE_PLAYING(player) and not IS_MOBILE_PHONE_CALL_ONGOING()``.
+    The "and not" is what stops the agent's own OUTGOING dial reading as an
+    incoming call. It cannot tell a story call from a friend's hang-out
+    invite, and it cannot see the on-screen soft keys — so nothing here may
+    claim to know *who* is calling or whether the call is rejectable.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    #: Both default to False so a pre-v1.13 bridge (<= 1.5.0) still parses —
+    #: the same widening rule every v1.x field went through. False/False is
+    #: also exactly the state in which the harness does nothing at all, i.e.
+    #: the pre-1.6.0 behaviour of letting a call ring out, so an old bridge
+    #: degrades to "no phone control" rather than to a wrong action.
+    ringing: bool = False
+    in_call: bool = False
+
+
 class GameState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ts: str
@@ -513,6 +538,11 @@ class GameState(BaseModel):
     #: parses; both handles are then None, which is exactly the "no info yet"
     #: state the DamageTracker fallback path expects.
     threat: ThreatState = ThreatState()
+    #: v1.13. Optional with its own all-false default so a bridge <= 1.5.0
+    #: still parses; "not ringing, not in a call" is the state in which every
+    #: phone policy below is a no-op, which is the correct reading of a bridge
+    #: that cannot see the phone at all.
+    phone: PhoneState = PhoneState()
 
 
 class Health(BaseModel):
