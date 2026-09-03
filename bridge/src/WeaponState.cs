@@ -183,13 +183,52 @@ namespace WastedBridge
             // What he HOLDS is decided by the task he is running (see SelectFor*), and a the agent
             // walking down the street with a shotgun out is a wanted level, not a loadout.
             // isAmmoLoaded: true matches SHVDN's own documented no-op default.
-            ped.Weapons.Give(WeaponHash.Pistol, PistolAmmo, false, true);
-            ped.Weapons.Give(WeaponHash.MicroSMG, SmgAmmo, false, true);
-            ped.Weapons.Give(WeaponHash.PumpShotgun, ShotgunAmmo, false, true);
+            GiveAndLoad(ped, WeaponHash.Pistol, PistolAmmo);
+            GiveAndLoad(ped, WeaponHash.MicroSMG, SmgAmmo);
+            GiveAndLoad(ped, WeaponHash.PumpShotgun, ShotgunAmmo);
             BridgeLog.Info("weapon loadout applied ("
                            + (respawned ? "after death" : released ? "after arrest" : "session start")
                            + "): Pistol " + PistolAmmo + ", MicroSMG " + SmgAmmo
                            + ", PumpShotgun " + ShotgunAmmo + "; no infinite ammo, nothing equipped");
+        }
+
+        /// <summary>Give the weapon AND make sure it has rounds in it.
+        ///
+        /// WHY THE SECOND HALF EXISTS (live, 2026-09-04). The log said "weapon loadout applied:
+        /// Pistol 60, MicroSMG 90, PumpShotgun 24" on every session start and every respawn, and
+        /// `/state` reported all three weapons owned with ammo 0/0/0 the whole time. He walked
+        /// around unable to fire for a day while the bridge insisted it had armed him.
+        ///
+        /// The cause is documented in the pinned SHVDN API itself. `WeaponCollection.Give`:
+        /// "Gives the specified weapon IF THE OWNER DOES NOT HAVE ONE, or selects the weapon if
+        /// they have one". Once he owns a pistol, every later Give is a no-op for ammo — and he
+        /// owns it permanently, because a Busted strips the magazines and leaves the guns. So the
+        /// one code path meant to re-arm him could never re-arm him after the first time.
+        ///
+        /// `Weapon.Ammo` is documented as "Gets or SETS the amount of ammo for this weapon", so
+        /// setting it is the supported way to top a magazine up. This is not infinite ammo: it is
+        /// the same fixed, modest count, written on the same three edges as before (session start,
+        /// respawn, release from arrest) and never touched in between. He still runs dry by firing.
+        /// </summary>
+        private static void GiveAndLoad(Ped ped, WeaponHash hash, int ammo)
+        {
+            // equipNow: false — being handed a gun should not put it in his hands.
+            ped.Weapons.Give(hash, ammo, false, true);
+            try
+            {
+                Weapon w = ped.Weapons[hash];
+                if (w != null && w.Ammo < ammo)
+                {
+                    // `< ammo` on purpose: a top-up, never a trim. If he is carrying more than the
+                    // loadout gives (picked up from a body), taking it away would be a punishment
+                    // for playing well.
+                    w.Ammo = ammo;
+                }
+            }
+            catch (System.Exception ex)
+            {
+                BridgeLog.Error("could not set ammo for " + hash, ex);
+            }
         }
 
         // ---- selection ------------------------------------------------------------------------
@@ -202,17 +241,82 @@ namespace WastedBridge
 
         /// <summary>
         /// The `weapon: "armed"` / shoot_at rule: pump shotgun inside <see cref="ShotgunRangeM"/>,
-        /// pistol beyond it, and whatever he already has in his hands if he owns neither.
-        /// Returns the hash actually selected, for the firing pattern and the log.
+        /// pistol beyond it — but ONLY a gun that has rounds in it. Returns the hash actually
+        /// selected, for the firing pattern and the log.
+        ///
+        /// WHY "LOADED" AND NOT "OWNED" (live, 2026-09-03/04). The old rule was guarded by
+        /// HAS_PED_GOT_WEAPON alone, and the pinned XML for WeaponCollection.HasWeapon says only
+        /// "Gets the value that indicates whether the owner Ped has the weapon" — nothing about
+        /// ammo. A Busted strips magazines and leaves the guns, so for a whole day `/state` read
+        /// `owned {Pistol:0, MicroSMG:0, PumpShotgun:0}` while this method faithfully put an
+        /// EMPTY shotgun in his hands at 7 m and an EMPTY pistol at 20 m, and the engine's combat
+        /// task then had him stand there clicking. With ammo now real (GiveAndLoad) the common
+        /// case is fixed, but the same thing happens the moment ONE gun runs dry mid-fight:
+        /// "shotgun at 7 m" must not mean "the dry shotgun, while a loaded pistol sits in the
+        /// inventory". So every branch below asks for rounds, in this order:
+        ///
+        ///   1. inside <see cref="ShotgunRangeM"/> and the pump shotgun has rounds -> shotgun
+        ///   2. the pistol has rounds                                            -> pistol
+        ///   3. the micro SMG has rounds                                         -> micro SMG
+        ///   4. the pump shotgun has rounds (beyond 10 m: worse than a pistol,   -> shotgun
+        ///      much better than an empty one)
+        ///   5. nothing tracked has rounds                                       -> whatever is in
+        ///      his hands (a mission-issued rifle he picked up is left alone; an empty pistol is
+        ///      not swapped for an empty shotgun)
+        ///
+        /// The harness mirrors this exact order in `recovery.loaded_gun_for` to predict whether
+        /// `weapon: "armed"` will produce a gun that fires. Change one, change both.
+        ///
+        /// Rounds are read through `Weapon.Ammo` — pinned XML: "Gets or sets the amount of ammo
+        /// for this weapon" (and "Will return 1 if Hash is WeaponHash.Unarmed instead of 0", which
+        /// is why Unarmed is never one of the hashes asked about here). The lookup is
+        /// `WeaponCollection.Item(WeaponHash)` — XML: "Gets the Weapon associated with the
+        /// specified WeaponHash ... If the specified WeaponHash is not found, this property will
+        /// return null" — so the null check is the documented not-owned case, not paranoia.
+        /// Selection stays `WeaponCollection.Select(WeaponHash, bool equipNow)` — XML: "Selects the
+        /// specified weapon ... equipNow: Specifies if the owner ped will equip in hands
+        /// immediately. Returns true if the ped has the weapon; otherwise, false" — the same
+        /// HAS_PED_GOT_WEAPON-guarded wrapper the file header documents.
         /// </summary>
         internal static WeaponHash SelectForRange(Ped ped, float distanceM)
         {
-            if (distanceM <= ShotgunRangeM && ped.Weapons.HasWeapon(WeaponHash.PumpShotgun))
+            if (distanceM <= ShotgunRangeM && HasRounds(ped, WeaponHash.PumpShotgun))
             {
                 ped.Weapons.Select(WeaponHash.PumpShotgun, true);
                 return WeaponHash.PumpShotgun;
             }
-            if (ped.Weapons.HasWeapon(WeaponHash.Pistol))
+            if (HasRounds(ped, WeaponHash.Pistol))
+            {
+                ped.Weapons.Select(WeaponHash.Pistol, true);
+                return WeaponHash.Pistol;
+            }
+            if (HasRounds(ped, WeaponHash.MicroSMG))
+            {
+                ped.Weapons.Select(WeaponHash.MicroSMG, true);
+                return WeaponHash.MicroSMG;
+            }
+            if (HasRounds(ped, WeaponHash.PumpShotgun))
+            {
+                ped.Weapons.Select(WeaponHash.PumpShotgun, true);
+                return WeaponHash.PumpShotgun;
+            }
+            return CurrentHash(ped);
+        }
+
+        /// <summary>The drive-by rule: the micro SMG, because that is the one that works out of a
+        /// car window — if it has rounds. A dry SMG falls back to a loaded pistol (a drive-by with
+        /// a pistol is a worse drive-by, not an impossible one), and with nothing tracked loaded
+        /// he keeps whatever he is holding rather than failing the task. Same "rounds, not
+        /// ownership" reasoning as <see cref="SelectForRange"/>; the harness's `smg_loaded` gate
+        /// means the fallback branches are only reached when a magazine ran dry mid-goal.</summary>
+        internal static WeaponHash SelectForDriveBy(Ped ped)
+        {
+            if (HasRounds(ped, WeaponHash.MicroSMG))
+            {
+                ped.Weapons.Select(WeaponHash.MicroSMG, true);
+                return WeaponHash.MicroSMG;
+            }
+            if (HasRounds(ped, WeaponHash.Pistol))
             {
                 ped.Weapons.Select(WeaponHash.Pistol, true);
                 return WeaponHash.Pistol;
@@ -220,17 +324,21 @@ namespace WastedBridge
             return CurrentHash(ped);
         }
 
-        /// <summary>The drive-by rule: the micro SMG, because that is the one that works out of a
-        /// car window. Falls back to whatever he is holding rather than failing the task — a
-        /// drive-by with a pistol is a worse drive-by, not an impossible one.</summary>
-        internal static WeaponHash SelectForDriveBy(Ped ped)
+        /// <summary>Owned AND at least one round. `AmmoFor` already answers 0 for a weapon he does
+        /// not have (HAS_PED_GOT_WEAPON false) and for a null `Weapons[hash]` lookup, so "> 0" is
+        /// the whole test. Never throws: a native failure reads as "no rounds", which makes the
+        /// caller fall through to the next gun or to what is already in his hands — the same safe
+        /// direction every other read in this file degrades in.</summary>
+        private static bool HasRounds(Ped ped, WeaponHash hash)
         {
-            if (ped.Weapons.HasWeapon(WeaponHash.MicroSMG))
+            try
             {
-                ped.Weapons.Select(WeaponHash.MicroSMG, true);
-                return WeaponHash.MicroSMG;
+                return AmmoFor(ped, hash) > 0;
             }
-            return CurrentHash(ped);
+            catch (System.Exception)
+            {
+                return false;
+            }
         }
 
         /// <summary>

@@ -13,7 +13,7 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.7.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        public const string BridgeVersion = "1.8.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
         // v1.3.0: CONTRACTS v1.11 (part 1) - mission.entity_blips[] (entity-attached blips,
         // throttled ~4 Hz); driving overhaul: driveAgainstTraffic explicit false on the new
         // StartVehicleMission call, avoid_traffic retuned off the brake-free
@@ -52,6 +52,18 @@ namespace WastedBridge
         // with a stranger stays a fist fight. The Ammu-Nation loadout exists in WeaponState and
         // is OFF unless WASTED_BRIDGE_LOADOUT=ammunation - CONTRACTS §1's frozen safety rule says
         // there is no weapon-giving, and that rule wins until it is formally changed.
+        // v1.8.0: CONTRACTS §1 proposal - `fly_to {x, y, z, speed_mps, arrive_radius_m}`, the
+        // flight step of the roam goal `go_flying` (which used to end in `wander_drive`, a GROUND
+        // task, so he stole a plane and taxied it round the apron). One verb, two engine tasks
+        // picked from the aircraft's model: TASK_PLANE_MISSION / TASK_HELI_MISSION through the
+        // pinned SHVDN TaskInvoker.StartPlaneMission / StartHeliMission Vector3 overloads with
+        // VehicleMissionType.GoTo (TaskEngine.IssueFlyTo quotes every parameter doc from
+        // lib/Docs/ScriptHookVDotNet3.xml). `z` is the cruise altitude above sea level
+        // (flightHeight). Fails not_in_vehicle / not_an_aircraft at once, did_not_take_off if
+        // Entity.IsInAir never reads true within 60 s, timeout at 600 s; done within
+        // arrive_radius_m (planar, like drive_to). Deliberately OUTSIDE the car-shaped stuck
+        // ladder, drive-start verification and planar no-progress watchdog. UNCOMPILED AND
+        // UNVERIFIED IN-GAME at the time of writing (no dotnet on the dev box or the server).
 
         private const float UnstickMinStoppedS = 20f;
         private const float UnstickNudgeBackM = 2.5f;   // total displacement stays ≤ 3 m (contract)
@@ -406,7 +418,55 @@ namespace WastedBridge
             // > 20 s AND a drive task running; nudge ≤ 3 m; always logged.
             Ped ped = Game.Player.Character;
             Vehicle veh = ped != null && ped.IsInVehicle() ? ped.CurrentVehicle : null;
-            if (!_engine.IsDriveTaskRunning || veh == null || !veh.Exists()
+
+            // ON FOOT (v1.8.0). Everything above this line has only ever applied to a CAR:
+            // `/unstick` demanded a vehicle and a running drive task, and `StuckDetector` reads
+            // `state.vehicle`. So a pedestrian wedged against geometry had no physical rung at all
+            // — he was handed task after task and never a shove. Observed live 2026-09-04: pinned
+            // at one coordinate for 205 s while `walk_to` and `enter_nearest_vehicle` each failed
+            // `no_progress` in turn, and every remote lever (drive, nudge, fight_ped, stop) moved
+            // him zero metres.
+            //
+            // Same narrow exception as the car case (CLAUDE.md rule 5): a few metres, logged,
+            // announced in commentary. The caller is expected to have exhausted the ordinary
+            // ladder; the bridge only checks that he is genuinely stationary and genuinely stuck.
+            if (veh == null)
+            {
+                if (ped == null || !ped.Exists() || ped.IsDead
+                    || _builder.CurrentPedStoppedForS <= UnstickMinStoppedS)
+                {
+                    reply.Complete(409, new JObject
+                    {
+                        ["error"] = "unstick_conditions_not_met",
+                        ["detail"] = "on foot: requires > 20 s at standstill"
+                    });
+                    return;
+                }
+
+                Vector3 footBefore = ped.Position;
+                // Backwards, the direction he came from and therefore the direction known to be
+                // walkable, rather than forwards into whatever he is wedged against.
+                Vector3 footOffset = ped.ForwardVector * -UnstickNudgeBackM;
+                footOffset.Z += UnstickNudgeUpM;
+                float footDistance = footOffset.Length();
+
+                ped.Position = footBefore + footOffset;
+
+                BridgeLog.Warn("UNSTICK: nudged PED on foot by "
+                               + footDistance.ToString("F2") + " m (stopped for "
+                               + _builder.CurrentPedStoppedForS.ToString("F1") + " s at "
+                               + footBefore.X.ToString("F1") + "," + footBefore.Y.ToString("F1")
+                               + "," + footBefore.Z.ToString("F1") + ")");
+                reply.Complete(200, new JObject
+                {
+                    ["moved"] = true,
+                    ["distance_m"] = (float)Math.Round(footDistance, 2),
+                    ["on_foot"] = true
+                });
+                return;
+            }
+
+            if (!_engine.IsDriveTaskRunning || !veh.Exists()
                 || _builder.CurrentStoppedForS <= UnstickMinStoppedS)
             {
                 reply.Complete(409, new JObject

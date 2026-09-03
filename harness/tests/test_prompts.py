@@ -199,11 +199,17 @@ def test_the_catalog_states_what_he_cannot_do() -> None:
 def test_the_police_rule_is_scoped_to_free_roam_not_absolute() -> None:
     """Stated absolutely, the rule fails eight scripted missions (Prologue, Blitz Play, The
     Paleto Score, The Bureau Raid, ...) whose objective IS surviving a police assault. Stated
-    with no rule at all, he farms stars in free roam and the stream dies. It has to be scoped."""
+    with no rule at all, he farms stars in free roam and the stream dies. It has to be scoped.
+
+    Since 2026-09-04 the scope has a second, named
+    exception: the roam engine's `shoot_a_cop` goal. The prompt must name it, keep the
+    free-roam default intact, and keep the two exceptions to exactly two — a prompt that
+    contradicts `roam.py` is worse than either."""
     from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
 
     for prefix in (tactical_static_prefix(), director_static_prefix()):
-        assert "In free roam you never start a fight with police" in prefix
+        assert "you never start a fight with police" in prefix
+        assert "shoot_a_cop" in prefix, "the one free-roam exception has to be named, by id"
         assert "mission.active" in prefix, "he must be told which flag decides"
         assert "fails the mission" in prefix, "the cost of refusing to fight a scripted assault"
 

@@ -839,15 +839,18 @@ RANGED_WEAPON_CLASSES: frozenset[str] = frozenset({"gun", "projectile"})
 MELEE_WEAPON_CLASSES: frozenset[str] = frozenset({"unarmed", "melee"})
 
 #: The bridge's own `weapon: "armed"` selection rule
-#: (`WeaponState.SelectForRange`, bridge 1.7.0): pump shotgun in his hands at
-#: or inside this range, pistol beyond it. Mirrored here ONLY so the harness
-#: can predict which of the two the bridge is about to pick and check that
-#: one for rounds; the selection itself stays bridge-side.
+#: (`WeaponState.SelectForRange`, bridge 1.7.0/1.8.0): pump shotgun in his
+#: hands at or inside this range, pistol beyond it — each only if it has
+#: rounds, see :func:`loaded_gun_for`. Mirrored here ONLY so the harness can
+#: predict which gun the bridge is about to pick and check that one for
+#: rounds; the selection itself stays bridge-side.
 SHOTGUN_RANGE_M = 10.0
 #: The attacker is closing, the snapshot is up to a poll period old, and the
 #: bridge re-measures the range when the task starts. Inside this margin the
-#: shotgun is assumed to be the pick, so a dry shotgun plus a loaded pistol at
-#: 12 m reads as "not armed" rather than gambling on the boundary.
+#: shotgun is assumed to be the bridge's first choice. Since the bridge now
+#: skips a dry shotgun, the margin only decides WHICH loaded gun is predicted,
+#: never whether he is armed — a dry shotgun plus a loaded pistol at 12 m is
+#: "armed with the pistol" on both sides of the boundary.
 SHOTGUN_RANGE_MARGIN_M = 4.0
 
 
@@ -867,22 +870,35 @@ def loaded_gun_for(state: GameState, distance_m: float | None) -> bool:
     whether THAT weapon has a round in it.
 
     ``distance_m`` is None when the target is not in `nearby.peds` (beyond the
-    top 8 by distance); the shotgun is then assumed, the conservative reading.
+    top 8 by distance); the shotgun is then assumed to be the first choice.
     False on a pre-1.7.0 bridge (`player.weapon` absent): it cannot vouch for
     rounds it cannot see, and the caller falls back to the unarmed answer.
+
+    **Bridge 1.8.0 — a loaded gun beats a dry one.** `SelectForRange` used to
+    be guarded by ownership alone, so a dry shotgun at 7 m was selected over a
+    loaded pistol, and this predictor faithfully said "not armed" for that
+    case — which was correct about the bridge and wrong about the man: he had
+    60 pistol rounds and was told to run. The bridge now walks its loadout in
+    a fixed order and takes the first gun with rounds (shotgun inside range,
+    pistol, micro SMG, shotgun beyond range, then whatever is in his hands),
+    and this function is that order, verbatim. Change one, change both. The
+    last arm matters for a mission that hands him a rifle: every tracked gun
+    can be dry while `player.weapon` shows 200 rounds in the thing he is
+    holding, and the bridge leaves that in his hands.
     """
     w = state.player.weapon
     if w is None:
         return False
     owned = w.owned or {}
-    shotgun = owned.get("PumpShotgun")
-    pistol = owned.get("Pistol")
+    shotgun = owned.get("PumpShotgun") or 0
+    pistol = owned.get("Pistol") or 0
+    smg = owned.get("MicroSMG") or 0
     close = distance_m is None or distance_m <= SHOTGUN_RANGE_M + SHOTGUN_RANGE_MARGIN_M
-    if shotgun is not None and close:
-        return shotgun > 0
-    if pistol is not None:
-        return pistol > 0
-    # Owns neither tracked handgun: the bridge leaves whatever he is holding.
+    if close and shotgun > 0:
+        return True
+    if pistol > 0 or smg > 0 or shotgun > 0:
+        return True
+    # Nothing tracked has rounds: the bridge leaves whatever he is holding.
     return w.weapon_class == "gun" and w.ammo > 0
 
 
@@ -1042,10 +1058,11 @@ def threat_action(
        ``combat_hated_targets_around``. This is the rung the live bug needed
        and did not have: a pedestrian who walks up and starts swinging is
        normally still `neutral` in the snapshot, so rung 4 below never fired
-       and he stood there and died. The action is byte-identical to rung 4's
-       (same type, same radius) so :class:`ThreatLatch` treats the two as one
-       intent and a ped that flips `neutral` -> `hostile` mid-fight cannot
-       cause a re-post.
+       and he stood there and died. This is the no-handle FALLBACK only: on a
+       v1.11+ bridge the attacker is named (`threat.attacker_handle`) and the
+       answer is `fight_ped`, same as rung 4 below, so a ped that flips
+       `neutral` -> `hostile` mid-fight is the same verb at the same handle
+       and :class:`ThreatLatch` never re-posts for it.
 
        On foot, or in a car that CANNOT leave. Rung 2 above is the
        working-car half of the operator's rule and this is the other half:
@@ -1068,14 +1085,16 @@ def threat_action(
        (CONTRACTS §1) and the latch's hold-down keeps the retry to one post
        every :data:`THREAT_HOLD_S`, which is a cheap way to be wrong.
     4. Healthy, and a hostile ped is present within
-       :data:`HOSTILE_CLOSE_RADIUS_M` -> ``combat_hated_targets_around``, the
-       engine's own combat task. This fires REGARDLESS of `wanted`. It no
-       longer fires regardless of `in_vehicle`, which is the second half of
-       the operator's reversal, and the change has to be spelled out because
-       the old behaviour was deliberate and documented: the bug it closed was
-       "sitting in a car near visible hostiles, healthy, doing nothing at
-       all". The answer to that bug is still "stop doing nothing" — it is just
-       no longer "get out and fight". In a WORKING vehicle, outside a mission:
+       :data:`HOSTILE_CLOSE_RADIUS_M` -> ``fight_ped`` at the NEAREST such
+       hostile, with ``weapon: "armed"`` when :func:`loaded_gun_for` says the
+       bridge's pick for that range has rounds. This fires REGARDLESS of
+       `wanted`. It no longer fires regardless of `in_vehicle`, which is the
+       second half of the operator's reversal, and the change has to be
+       spelled out because the old behaviour was deliberate and documented:
+       the bug it closed was "sitting in a car near visible hostiles, healthy,
+       doing nothing at all". The answer to that bug is still "stop doing
+       nothing" — it is just no longer "get out and fight". In a WORKING
+       vehicle, outside a mission:
 
        * already moving, or already under a running drive order -> fall
          through to the rungs below. He is already doing the best available
@@ -1085,14 +1104,46 @@ def threat_action(
          instead of freezing them out with `_threat_has_the_wheel`.
        * stationary, nothing driving -> ``wander_drive``. Start leaving.
 
-       In a car that cannot leave, or during a mission, it fights exactly as
-       before. `combat_hated_targets_around` hands off entirely to the game's
-       own combat AI (it aims and shoots; nothing here aims manually —
-       CONTRACTS §1's own description). Engaging a hostile cop this way is a
-       response to an already-hostile encounter, never an initiation — the
-       brain's own hard rule ("never initiate combat with police", rules.md
-       rule 6) is about starting one, not defending against one already close
-       enough to be a `nearby.peds` hostile.
+       In a car that cannot leave, or during a mission, it fights. It used
+       to fight with ``combat_hated_targets_around``, and that is the second
+       half of the live bug: the snapshot's `hostile` is `Relationship.Hate
+       OR IsInCombatAgainst(player)` (SnapshotBuilder), but the engine task
+       behind that verb is TASK_COMBAT_HATED_TARGETS_AROUND_PED, whose pinned
+       SHVDN doc says "Hated targets means Peds whose relationships are set to
+       Neutral, Dislike or Hate ... There must be at least one Ped with one of
+       the relationship settings, or the created CTaskCombatClosestTargetInArea
+       will stop executing immediately". A gang member or a carjack victim who
+       is `hostile` only because he is IN COMBAT against the agent need not be in
+       any of those groups, so the verb could fire and do nothing while the
+       man kept hitting him. The bridge's own gate for that verb counts the
+       same `Hate OR IsInCombatAgainst` set, so it cannot tell the two apart
+       either. `fight_ped` names the ped and needs no relationship (CONTRACTS
+       v1.11), its melee arm is the one R* runs on the player ped, and its
+       `weapon` param is the ONLY way to put the loadout gun in his hands
+       before the combat task — the area verb selects nothing, so an armed
+       the agent answered a gunman with whatever happened to be out, usually
+       fists. That is investigation 2 of the 2026-09-04 brief: the fight_ped
+       path now covers every rung, not just rung 3.
+
+       The nearest hostile is the target. With several (a police response),
+       the bridge ends `fight_ped` when its target is dead or gone and the
+       next tick names the next-nearest; :class:`ThreatLatch` lets a DIFFERENT
+       handle through as soon as the engine is not running the last one, so
+       the hand-off is one poll period, not a hold-down.
+
+       One guard, mirrored from rung 3: a hostile whose `weapon_class` is in
+       :data:`RANGED_WEAPON_CLASSES` when nothing he owns has a round in it is
+       not a fight, it is a charge across open ground at a gun — and it is
+       how "healthy, hostile in range, fists" ended in `player_dead` all day
+       on 2026-09-03 with every magazine empty. That case breaks contact
+       instead: ``flee_police`` with stars up outside a mission (rung 6's own
+       answer, because the bridge's `seek_cover` hides from his own position
+       and gets him arrested), otherwise rung 1's cover/drive-away.
+
+       Engaging a hostile cop this way is a response to an already-hostile
+       encounter, never an initiation — the roam engine's `shoot_a_cop` goal
+       (chaos tier 3, gated, loaded gun, full health) is the one place he
+       STARTS on police, and rules.md rule 6 says exactly that.
     5. Taking damage with nothing in reach to hit back at — a sniper, a fire,
        drowning, a beating he has already backed away from -> break contact,
        same two actions as rung 1. In a VEHICLE only the single-tick cliff
@@ -1175,10 +1226,11 @@ def threat_action(
 
     Two consequences worth knowing about. A ped who is attacking him and
     happens to be police IS fought this way — that is defending against an
-    attack already under way, which rules.md rule 6 ("never initiate combat
-    with police") permits; rung 4 already engaged a hostile cop through the
-    engine's own combat task before this change, so no new police policy is
-    introduced here, only a named target and a chosen weapon. And a ped he
+    attack already under way, which rules.md rule 6 permits (starting on
+    police is the roam engine's gated `shoot_a_cop` bit, never this reflex);
+    rung 4 already engaged a hostile cop through the engine's own combat task
+    before this change, so no new police policy is introduced here, only a
+    named target and a chosen weapon. And a ped he
     picked a FIST fight with (`roam.pick_a_fight`, ``weapon: "unarmed"``)
     who punches back is, by the bridge's `attacking_me`, an attacker: while
     the goal's own `fight_ped` is running, :class:`ThreatLatch` holds this
@@ -1330,10 +1382,15 @@ def threat_action(
 
     # 4. A hostile in engagement range, healthy: fight — unless he is in a
     #    working car outside a mission, where leaving outranks fighting.
-    if any(
-        ped.relationship == "hostile" and ped.distance <= HOSTILE_CLOSE_RADIUS_M
+    #    The target is the NEAREST hostile, named: `fight_ped` needs no
+    #    relationship group and is the only verb that selects the gun first
+    #    (see the docstring for why the area verb could silently no-op).
+    hostiles = [
+        ped
         for ped in state.nearby.peds
-    ):
+        if ped.relationship == "hostile" and ped.distance <= HOSTILE_CLOSE_RADIUS_M
+    ]
+    if hostiles:
         if player.in_vehicle and can_leave and free_roam:
             if stationary and not already_leaving:
                 return leave
@@ -1343,7 +1400,19 @@ def threat_action(
             # something better to say (stars mean `flee_police`, which beats
             # aimless wandering).
         else:
-            return fight
+            nearest = min(hostiles, key=lambda p: p.distance)
+            nearest_armed = loaded_gun_for(state, nearest.distance)
+            if nearest.weapon_class in RANGED_WEAPON_CLASSES and not nearest_armed:
+                # A gun in range and nothing to answer it with: rung 3's own
+                # guard, applied here. Fists against a shooter is the death
+                # this rung produced all day with empty magazines.
+                if player.wanted > 0 and free_roam:
+                    return {"type": "flee_police", "params": {}}
+                return break_contact()
+            params = {"handle": nearest.handle}
+            if nearest_armed:
+                params["weapon"] = "armed"
+            return {"type": "fight_ped", "params": params}
 
     # 5. Still being hurt, nothing in reach to answer: get away from it.
     if delta.big_health_drop or (under_attack and not player.in_vehicle):

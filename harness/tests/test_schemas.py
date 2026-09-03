@@ -39,8 +39,9 @@ def test_mood_enum_exact() -> None:
 def test_action_catalog_exact() -> None:
     # v1.11 adds fight_ped; v1.13 adds answer_call + reject_call; bridge 1.7.0
     # (fix-opus-b, T6) adds shoot_at + drive_by + enter_vehicle_seat; bridge
-    # 1.7.0 (fix-opus-a, T1) adds flee_ped.
-    assert len(BRIDGE_TASKS) == 18
+    # 1.7.0 (fix-opus-a, T1) adds flee_ped; bridge 1.8.0 adds fly_to (the
+    # flight step of `go_flying`).
+    assert len(BRIDGE_TASKS) == 19
     assert PRIMITIVES == (
         "look_around",
         "brake_tap",
@@ -67,6 +68,8 @@ def test_action_catalog_exact() -> None:
         "shoot_at": {"handle": 1},
         "drive_by": {"handle": 1},
         "enter_vehicle_seat": {"handle": 1},
+        # bridge 1.8.0: a target and a cruise altitude, like drive_to.
+        "fly_to": {"x": 1.0, "y": 2.0, "z": 3.0},
     }
     for t in ACTION_TYPES:
         ActionModel.model_validate({"type": t, "params": minimal_params.get(t, {})})

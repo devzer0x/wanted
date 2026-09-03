@@ -59,6 +59,18 @@ BRIDGE_TASKS: tuple[str, ...] = (
     "shoot_at",
     "drive_by",
     "enter_vehicle_seat",
+    # --- bridge 1.8.0 (CONTRACTS §1 proposal): the flight step of `go_flying`.
+    # `fly_to{x, y, z, speed_mps, arrive_radius_m}` — TASK_PLANE_MISSION or
+    # TASK_HELI_MISSION (chosen bridge-side from the aircraft's model) with
+    # VehicleMissionType.GoTo, through the pinned SHVDN wrappers
+    # `TaskInvoker.StartPlaneMission` / `StartHeliMission` (Vector3 overloads).
+    # It reuses drive_to's five frozen keys and adds NO new param, so the
+    # 15-union-param ceiling below is untouched. `z` is the CRUISE ALTITUDE
+    # above sea level (the engine's `flightHeight`), not the ground at x,y.
+    # It is a MOVEMENT task like every drive: it competes for the wheel, so a
+    # mission block or a survival rung takes the wheel off it exactly as they
+    # take it off a `drive_to`.
+    "fly_to",
 )
 
 #: CONTRACTS v1.13. The two bridge tasks that MOVE NOBODY: they inject one
@@ -113,6 +125,7 @@ ActionType = Literal[
     "shoot_at",
     "drive_by",
     "enter_vehicle_seat",
+    "fly_to",
     "look_around",
     "brake_tap",
     "swerve",
@@ -140,6 +153,9 @@ REQUIRED_NUMERIC_PARAMS: dict[str, tuple[str, ...]] = {
     "drive_to": ("x", "y", "z"),
     "walk_to": ("x", "y", "z"),
     "set_waypoint": ("x", "y"),
+    # bridge 1.8.0: the bridge 400s a fly_to without a target and altitude,
+    # exactly as it does a drive_to without coordinates.
+    "fly_to": ("x", "y", "z"),
 }
 REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
     "follow_entity": ("handle",),
@@ -450,6 +466,9 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     "shoot_at": ("handle", "duration_s"),
     "drive_by": ("handle", "duration_s"),
     "enter_vehicle_seat": ("handle", "seat"),
+    # bridge 1.8.0: drive_to's keys minus `style` (an aircraft has no traffic
+    # lights to ignore). No new key — see BRIDGE_TASKS.
+    "fly_to": ("x", "y", "z", "speed_mps", "arrive_radius_m"),
     "look_around": (),
     "brake_tap": (),
     "swerve": ("direction",),

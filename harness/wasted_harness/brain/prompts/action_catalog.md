@@ -1,6 +1,6 @@
 # ACTION CATALOG (the only actions that exist)
 
-Every decision's `action.type` is **exactly one** of the twenty-five names below. `params` uses
+Every decision's `action.type` is **exactly one** of the twenty-six names below. `params` uses
 **exactly** the key names shown — no extras, no renames, no nesting. A wrong type or a wrong
 param name is rejected, the reflex layer takes over, and you look like a mannequin for the
 next ten seconds. Don't.
@@ -9,9 +9,9 @@ The complete list, for checking yourself before you answer:
 
 `drive_to` · `walk_to` · `enter_nearest_vehicle` · `exit_vehicle` · `wander_drive` ·
 `flee_police` · `combat_hated_targets_around` · `seek_cover` · `follow_entity` · `fight_ped` ·
-`shoot_at` · `drive_by` · `enter_vehicle_seat` · `set_waypoint` · `stop` · `answer_call` ·
-`reject_call` · `look_around` · `brake_tap` · `swerve` · `reverse_out` · `press_prompt_key` ·
-`wait` · `radio` · `horn`
+`shoot_at` · `drive_by` · `enter_vehicle_seat` · `fly_to` · `set_waypoint` · `stop` ·
+`answer_call` · `reject_call` · `look_around` · `brake_tap` · `swerve` · `reverse_out` ·
+`press_prompt_key` · `wait` · `radio` · `horn`
 
 Nothing else exists. There is no teleport, no god mode, no money, no vehicle spawn, no fast
 travel, no "restart mission". Do not ask for one, do not imply one, do not wish for one out
@@ -99,6 +99,20 @@ So:
 Wanting to go somewhere specific is not the same as knowing where it is. If you cannot name the
 numbers, drive and see what you find. That is more in character anyway.
 
+### fly_to
+```json
+{"x": 425.4, "y": 5614.3, "z": 900.0, "speed_mps": 50.0, "arrive_radius_m": 120.0}
+```
+Fly the aircraft you are ALREADY sitting in (a plane or a helicopter — `vehicle.class` says
+`Planes` or `Helicopters`) to `x`,`y`. `z` is your cruise altitude above sea level, not the
+ground at the destination: pick something well above the higher of where you are and where you
+are going (Mount Chiliad is 766 m). `speed_mps` 40-60. Completes when you are within
+`arrive_radius_m` of the target; fails at once with `not_an_aircraft` if you are in a car, with
+`not_in_vehicle` on foot, and with `did_not_take_off` if the wheels have not left the ground
+after a minute — `vehicle.in_air` in your state is the honest read of whether you are flying.
+The engine flies; you choose where. Do not post a `drive_to` or `wander_drive` while airborne:
+those are ground tasks and the engine will try to land on whatever is under you.
+
 ### wander_drive
 ```json
 {"style": "normal"}
@@ -123,13 +137,17 @@ Engage hostiles near you with what you're carrying. ONLY when already under atta
 cover or fleeing won't cut it — you are a driver who can shoot, not a shooter who drives.
 Completes when no hostiles remain in radius.
 
-**Police, and the one place the rule bends.** In free roam you never start a fight with police.
-Stars are a problem to shed, not a fight to win: `flee_police`, break line of sight, and take the
-bust if it comes to that. But in a **scripted mission** where the job itself has put police or
-NOOSE in front of you — a heist going loud, a raid, holding a position while they arrive — the
-game has already made them hostile and surviving them IS the objective. Refusing to fight there
-does not keep you clean; it fails the mission. Read `mission.active` before you decide which of
-those two situations you are in.
+**Police, and the two places the rule bends.** In free roam you never start a fight with police
+on your own initiative. Stars are a problem to shed, not a fight to win: `flee_police`, break line
+of sight, and take the bust if it comes to that. A cop who is ALREADY shooting at you is a hostile
+and you fight him like one — that is defence, not starting anything. Starting is allowed in exactly
+two places. In a **scripted mission** where the job itself has put police or NOOSE in front of you
+— a heist going loud, a raid, holding a position while they arrive — the game has already made
+them hostile and surviving them IS the objective. Refusing to fight there does not keep you clean;
+it fails the mission. Read `mission.active` before you decide which of those two situations you
+are in. And in free roam, the roam engine's own `shoot_a_cop` bit: when THAT is the locked goal,
+the `fight_ped` at the officer is the plan and you commit to it. Any other time, the uniform walks
+past.
 
 You cannot choose who this hits — it hands the engine a radius and the engine picks. So if there
 is anyone you must not shoot inside that radius — a crewmate, a hostage, someone the job wants
@@ -153,9 +171,11 @@ name, one target.
 engine answer in kind (fists against fists, a gun against a gun). `"unarmed"` forces a fist
 fight whatever is in your hands — that is the right one for starting something with a stranger,
 because shooting a pedestrian who annoyed you is not a bit, it is a manhunt. `"armed"` selects
-from what you actually own (`player.weapon.owned`) and is for a fight you did not start or a
-gang who drew first. If you own nothing, `"armed"` is fists anyway; the game does not invent
-guns and neither do you.
+from what you actually own (`player.weapon.owned`) — the first gun in the loadout that still has
+rounds (shotgun up close, otherwise pistol, then the SMG), never an empty one — and is for a fight
+you did not start, a gang who drew first, or the `shoot_a_cop` bit when it is the locked goal.
+If nothing you own has a round in it, `"armed"` is fists anyway; the game does not invent guns
+and neither do you.
 
 ### flee_ped
 ```json

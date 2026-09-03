@@ -66,6 +66,18 @@ namespace WastedBridge
         /// <summary>stopped_for_s of the current vehicle as of the last Build call.</summary>
         public float CurrentStoppedForS { get; private set; }
 
+        /// <summary>How long the PLAYER PED has stayed inside a small circle, in seconds, as of
+        /// the last Build call. Vehicle-independent on purpose: `CurrentStoppedForS` is zeroed
+        /// whenever there is no vehicle, so it can never answer "is this man on foot wedged?" —
+        /// which left a pedestrian with no unstick rung at all until v1.8.0.</summary>
+        public float CurrentPedStoppedForS { get; private set; }
+
+        //: A ped who has not left this radius is not walking anywhere, whatever task says it is
+        //: running. Generous enough to ignore idle sway and the walk animation's own drift.
+        private const float PedStoppedRadiusM = 1.5f;
+        private Vector3 _pedAnchor;
+        private int _pedAnchorAtMs = -1;
+
         public Snapshot Build(long tick, TaskEngine engine, string edition,
                               bool playerDead, bool playerArrested)
         {
@@ -88,6 +100,20 @@ namespace WastedBridge
                     "the player ped does not exist yet (loading screen or character switch)");
             }
             Vector3 pos = ped.Position;
+
+            // Ped stationary clock. Anchored on the first Build and re-anchored whenever he
+            // actually gets somewhere; `ApplyUnstick` reads it for the on-foot case.
+            int nowMs = Environment.TickCount;
+            if (_pedAnchorAtMs < 0 || _pedAnchor.DistanceTo(pos) > PedStoppedRadiusM)
+            {
+                _pedAnchor = pos;
+                _pedAnchorAtMs = nowMs;
+                CurrentPedStoppedForS = 0f;
+            }
+            else
+            {
+                CurrentPedStoppedForS = unchecked(nowMs - _pedAnchorAtMs) / 1000f;
+            }
             bool inVehicle = ped.IsInVehicle();
             Vehicle veh = inVehicle ? ped.CurrentVehicle : null;
             // One blip pass produces both mission.objective_blip and mission.route_blips: they are

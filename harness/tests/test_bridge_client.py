@@ -84,6 +84,9 @@ def test_bridge_task_types_match_contract() -> None:
         "reject_call",
         # bridge 1.7.0 (fix-opus-a, T1), CONTRACTS v1.14.
         "flee_ped",
+        # bridge 1.8.0 (CONTRACTS §1 proposal): TASK_PLANE_MISSION /
+        # TASK_HELI_MISSION behind one verb, the flight step of `go_flying`.
+        "fly_to",
     )
 
 

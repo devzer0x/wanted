@@ -563,8 +563,15 @@ def test_unstick_treats_every_bridge_refusal_as_no_nudge_not_a_crash() -> None:
 # fix — no model call, evaluated fresh every tick.
 
 
-def _hostile(distance: float) -> dict:
-    return {"handle": 9, "model": "s_m_y", "distance": distance, "relationship": "hostile"}
+def _hostile(distance: float, handle: int = 9, **extra) -> dict:
+    return {"handle": handle, "model": "s_m_y", "distance": distance, "relationship": "hostile", **extra}
+
+
+#: Rung 4's answer since 2026-09-04: `fight_ped` at the NAMED nearest hostile,
+#: `auto` weapon when nothing loaded is known (every test below predates
+#: `player.weapon`, so no `weapon` key). The area verb stayed only as rung 3's
+#: no-handle fallback — see `threat_action`'s docstring for why.
+FIGHT_9 = {"type": "fight_ped", "params": {"handle": 9}}
 
 
 NO_DANGER_DELTA = Delta(wanted_from=0, wanted_to=0)
@@ -590,10 +597,7 @@ def test_threat_action_fights_a_close_hostile_even_while_wanted() -> None:
     Healthy + a close hostile (cop included — CONTRACTS exposes no
     "is a cop" field, only `relationship`) now fights, wanted stars or not."""
     state = make_state(wanted=3, in_vehicle=False, nearby_peds=[_hostile(2.0)])
-    assert threat_action(state, NO_DANGER_DELTA) == {
-        "type": "combat_hated_targets_around",
-        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
-    }
+    assert threat_action(state, NO_DANGER_DELTA) == FIGHT_9
 
 
 def test_threat_action_flees_police_when_wanted_but_nothing_close_yet() -> None:
@@ -620,10 +624,7 @@ def test_threat_action_still_fights_during_a_mission_when_a_hostile_is_close() -
     state = make_state(
         wanted=2, mission_active=True, in_vehicle=False, nearby_peds=[_hostile(2.0)]
     )
-    assert threat_action(state, NO_DANGER_DELTA) == {
-        "type": "combat_hated_targets_around",
-        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
-    }
+    assert threat_action(state, NO_DANGER_DELTA) == FIGHT_9
 
 
 def test_threat_action_still_breaks_contact_during_a_mission_when_hurt() -> None:
@@ -668,10 +669,7 @@ def test_threat_action_drives_away_when_hurt_in_a_vehicle() -> None:
 
 def test_threat_action_fights_a_close_hostile_on_foot_when_healthy() -> None:
     state = make_state(in_vehicle=False, nearby_peds=[_hostile(HOSTILE_CLOSE_RADIUS_M - 1)])
-    assert threat_action(state, NO_DANGER_DELTA) == {
-        "type": "combat_hated_targets_around",
-        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
-    }
+    assert threat_action(state, NO_DANGER_DELTA) == FIGHT_9
 
 
 def test_threat_action_ignores_a_hostile_outside_the_close_radius() -> None:
@@ -724,10 +722,7 @@ def test_a_car_that_cannot_leave_still_fights() -> None:
     (upside down / in the water / a shell) and the state machine's measured
     `vehicle_blocked`, which is the only evidence there is that a car with
     healthy bodywork will not actually move."""
-    fight = {
-        "type": "combat_hated_targets_around",
-        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
-    }
+    fight = FIGHT_9
     base = {
         "handle": 1, "model": "adder", "display_name": "Adder", "class": "Super",
         "speed": 0.0, "health": 900.0, "upside_down": False, "in_water": False,
@@ -766,10 +761,7 @@ def test_a_mission_firefight_still_fights_from_the_car() -> None:
     state = make_state(
         in_vehicle=True, vehicle=vehicle, mission_active=True, nearby_peds=[_hostile(2.0)]
     )
-    assert threat_action(state, NO_DANGER_DELTA) == {
-        "type": "combat_hated_targets_around",
-        "params": {"radius_m": HOSTILE_CLOSE_RADIUS_M},
-    }
+    assert threat_action(state, NO_DANGER_DELTA) == FIGHT_9
 
 
 def test_threat_action_ignores_a_hostile_far_beyond_engagement_range() -> None:
@@ -1898,17 +1890,22 @@ def test_loaded_gun_for_predicts_the_bridge_pick_and_checks_that_gun_for_rounds(
     # Every magazine empty (the post-arrest state): never armed, whatever is owned.
     assert loaded_gun_for(make_state(weapon=_loadout(0, 0, 0)), 3.0) is False
     assert loaded_gun_for(make_state(weapon=_loadout(0, 0, 0)), 30.0) is False
-    # Dry shotgun, loaded pistol: inside shotgun range (plus the closing margin)
-    # the bridge would put the EMPTY shotgun in his hands, so that is "not
-    # armed"; beyond it the pistol is the pick and it is loaded.
+    # Dry shotgun, loaded pistol: bridge 1.8.0's `SelectForRange` skips a gun
+    # with no rounds, so inside shotgun range the pistol is the pick and he is
+    # armed at every range. (Under the 1.7.0 rule the EMPTY shotgun was put in
+    # his hands at 3 m and this read False — correct about the bridge, fatal
+    # for the man with 60 pistol rounds who was told to run.)
     dry_shotgun = _loadout(pistol=60, smg=0, shotgun=0)
-    assert loaded_gun_for(make_state(weapon=dry_shotgun), 3.0) is False
-    assert loaded_gun_for(make_state(weapon=dry_shotgun), 12.0) is False
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), 3.0) is True
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), 12.0) is True
     assert loaded_gun_for(make_state(weapon=dry_shotgun), 25.0) is True
-    # Unknown range (attacker not in the top-8 list): the conservative reading.
-    assert loaded_gun_for(make_state(weapon=dry_shotgun), None) is False
-    # The SMG alone is never the range pick, so 90 SMG rounds do not make him armed.
-    assert loaded_gun_for(make_state(weapon=_loadout(0, 90, 0)), 3.0) is False
+    # Unknown range (attacker not in the top-8 list): still armed — the order
+    # walks every gun, so range only decides WHICH loaded gun, never whether.
+    assert loaded_gun_for(make_state(weapon=dry_shotgun), None) is True
+    # The SMG is third in the order: 90 SMG rounds with the handguns dry is armed.
+    assert loaded_gun_for(make_state(weapon=_loadout(0, 90, 0)), 3.0) is True
+    # A loaded shotgun beyond its range is the fourth arm, still a loaded gun.
+    assert loaded_gun_for(make_state(weapon=_loadout(0, 0, 24)), 25.0) is True
     # A pre-1.7.0 bridge (no `player.weapon` at all): cannot vouch for rounds.
     assert loaded_gun_for(make_state(), 3.0) is False
 
@@ -1920,6 +1917,22 @@ def test_loaded_gun_for_trusts_a_loaded_gun_in_hand_when_no_loadout_gun_is_owned
     assert loaded_gun_for(make_state(weapon=carbine), 3.0) is True
     empty = dict(carbine, ammo=0)
     assert loaded_gun_for(make_state(weapon=empty), 3.0) is False
+
+
+def test_loaded_gun_for_trusts_a_mission_rifle_when_every_loadout_gun_is_dry() -> None:
+    """The loadout is ON, all three tracked guns are owned and EMPTY, and a
+    mission handed him a rifle with rounds. Bridge 1.8.0 leaves what he holds
+    when nothing tracked has rounds, so the rifle is what fires; the old rule
+    read "owns a pistol -> pistol (0 rounds) -> not armed" and sent him to
+    cover with a loaded rifle in his hands."""
+    rifle = {
+        "name": "CarbineRifle", "class": "gun", "ammo": 200,
+        "owned": {"Pistol": 0, "MicroSMG": 0, "PumpShotgun": 0}, "loadout": "ammunation",
+    }
+    assert loaded_gun_for(make_state(weapon=rifle), 3.0) is True
+    assert loaded_gun_for(make_state(weapon=rifle), 30.0) is True
+    # ...and holding an empty rifle with everything else dry is still unarmed.
+    assert loaded_gun_for(make_state(weapon=dict(rifle, ammo=0)), 3.0) is False
 
 
 def test_threat_action_answers_an_attacker_with_a_loaded_gun() -> None:
@@ -1949,14 +1962,16 @@ def test_threat_action_never_asks_for_a_gun_with_empty_magazines() -> None:
     }
 
 
-def test_threat_action_stays_unarmed_when_the_bridge_would_pick_the_dry_shotgun() -> None:
-    """Loaded pistol, empty shotgun, attacker at 3 m: the bridge's range rule
-    would select the shotgun, so the harness must not call that "armed"."""
+def test_threat_action_asks_for_the_loaded_pistol_when_the_shotgun_is_dry() -> None:
+    """Loaded pistol, empty shotgun, attacker at 3 m: bridge 1.8.0's range rule
+    skips the dry shotgun and selects the pistol, so this IS armed. (The 1.7.0
+    rule put the empty shotgun in his hands here, and this test used to pin
+    the harness to that — see `loaded_gun_for`'s docstring.)"""
     state = make_state(
         health=185, in_vehicle=False, weapon=_loadout(pistol=60, smg=0, shotgun=0),
         nearby_peds=[_attacker(3.0)], threat=ATTACKED_BY_9012,
     )
-    assert threat_action(state, NO_DANGER_DELTA, True)["params"] == {"handle": 9012}
+    assert threat_action(state, NO_DANGER_DELTA, True)["params"] == {"handle": 9012, "weapon": "armed"}
     # Same loadout, attacker well beyond shotgun range: the pistol is the pick.
     far = make_state(
         health=185, in_vehicle=False, weapon=_loadout(pistol=60, smg=0, shotgun=0),
@@ -2008,6 +2023,98 @@ def test_threat_action_still_fights_an_unclassified_attacker_with_fists() -> Non
         nearby_peds=[_attacker(2.0, weapon_class="unknown")], threat=ATTACKED_BY_9012,
     )
     assert threat_action(unknown, NO_DANGER_DELTA, True)["type"] == "fight_ped"
+
+
+# --- rung 4 is target-explicit too (2026-09-04) --------------------------------
+#
+# The brief's investigation 2: `combat_hated_targets_around` is documented in the
+# pinned SHVDN XML as engaging only peds whose relationship toward him is
+# Neutral/Dislike/Hate, and exiting immediately otherwise — while the snapshot's
+# `hostile` also covers "in combat against him" with no such relationship. So the
+# healthy-hostile-in-range rung could fire a verb that did nothing. It now names
+# the nearest hostile with `fight_ped`, and asks for the gun the same way rung 3
+# does. Nothing here is a `threat.attacker_handle` case: these peds are hostile
+# by relationship, not (yet) swinging.
+
+
+def test_rung_4_names_the_nearest_hostile_and_asks_for_the_gun() -> None:
+    near = _hostile(6.0, handle=21, weapon_class="melee")
+    far = _hostile(20.0, handle=22, weapon_class="gun")
+    state = make_state(in_vehicle=False, weapon=_loadout(), nearby_peds=[far, near])
+    assert threat_action(state, NO_DANGER_DELTA) == {
+        "type": "fight_ped",
+        "params": {"handle": 21, "weapon": "armed"},
+    }
+    # Nothing loaded, a melee hostile: fists, the pre-existing answer, by name.
+    dry = make_state(in_vehicle=False, weapon=_loadout(0, 0, 0), nearby_peds=[near])
+    assert threat_action(dry, NO_DANGER_DELTA) == {"type": "fight_ped", "params": {"handle": 21}}
+
+
+def test_rung_4_does_not_charge_a_gunman_with_empty_magazines() -> None:
+    """The death he died all day on 2026-09-03 with 0/0/0 in every gun: healthy,
+    a hostile with a gun in range, fists. Stars up outside a mission is rung
+    6's own `flee_police` (the bridge's `seek_cover` hides from his own spot
+    and gets him arrested); no stars is cover; inside a mission it is cover
+    too, because fleeing fails the job and charging a gun with fists ends it."""
+    gunman = _hostile(15.0, handle=31, weapon_class="gun")
+    wanted = make_state(wanted=2, in_vehicle=False, weapon=_loadout(0, 0, 0), nearby_peds=[gunman])
+    assert threat_action(wanted, NO_DANGER_DELTA) == {"type": "flee_police", "params": {}}
+    clean = make_state(in_vehicle=False, weapon=_loadout(0, 0, 0), nearby_peds=[gunman])
+    assert threat_action(clean, NO_DANGER_DELTA) == {"type": "seek_cover", "params": {"duration_s": 10}}
+    mission = make_state(
+        wanted=2, mission_active=True, in_vehicle=False, weapon=_loadout(0, 0, 0), nearby_peds=[gunman]
+    )
+    assert threat_action(mission, NO_DANGER_DELTA) == {"type": "seek_cover", "params": {"duration_s": 10}}
+    # With a round in the gun the same gunman is exactly who to shoot.
+    loaded = make_state(wanted=2, in_vehicle=False, weapon=_loadout(), nearby_peds=[gunman])
+    assert threat_action(loaded, NO_DANGER_DELTA) == {
+        "type": "fight_ped",
+        "params": {"handle": 31, "weapon": "armed"},
+    }
+
+
+def test_a_hostile_cop_in_reach_is_fought_like_any_other_hostile() -> None:
+    """Defence, not initiation: a cop already hostile at 5 m with stars up is
+    a hostile in reach, and the reflex answers him with the gun. Starting on
+    police is the roam engine's gated `shoot_a_cop` goal, never this rung."""
+    cop = _hostile(5.0, handle=41, model="s_m_y_cop_01", weapon_class="gun")
+    state = make_state(wanted=2, in_vehicle=False, weapon=_loadout(), nearby_peds=[cop])
+    assert threat_action(state, NO_DANGER_DELTA) == {
+        "type": "fight_ped",
+        "params": {"handle": 41, "weapon": "armed"},
+    }
+
+
+def test_the_latch_hands_off_to_the_next_hostile_the_tick_the_first_fight_ends() -> None:
+    """Two on him: `fight_ped` at the nearest; when the bridge reports that one
+    `done` (dead or gone) the next tick names the other and the latch lets a
+    DIFFERENT handle through inside the hold-down. A running fight is never
+    preempted to switch, which is the restart-before-a-shot-lands thrash."""
+    clock = FakeClock()
+    latch = ThreatLatch(clock=clock)
+    first = make_state(
+        in_vehicle=False, weapon=_loadout(),
+        nearby_peds=[_hostile(4.0, handle=51), _hostile(9.0, handle=52)],
+    )
+    a1 = threat_action(first, NO_DANGER_DELTA)
+    assert a1["params"]["handle"] == 51 and latch.should_issue(a1, first)
+    latch.issued(a1)
+    clock.t += 0.5
+    running = make_state(
+        in_vehicle=False, weapon=_loadout(), task_status="running", task_type="fight_ped",
+        nearby_peds=[_hostile(9.0, handle=52), _hostile(4.0, handle=51)],
+    )
+    assert not latch.should_issue(threat_action(running, NO_DANGER_DELTA), running)
+    clock.t += 0.5
+    # 51 is down (the scan keeps corpses; he drops out of `hostile` here for
+    # brevity), the bridge says done, 52 is the nearest hostile now.
+    second = make_state(
+        in_vehicle=False, weapon=_loadout(), task_status="done", task_type="fight_ped",
+        nearby_peds=[_hostile(9.0, handle=52)],
+    )
+    a2 = threat_action(second, NO_DANGER_DELTA)
+    assert a2["params"]["handle"] == 52
+    assert latch.should_issue(a2, second), "a new named target is a new intent, not a retry"
 
 
 def test_threat_action_arms_the_retaliation_from_a_car_that_cannot_leave() -> None:

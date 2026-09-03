@@ -702,6 +702,28 @@ def _wander(style: str) -> dict[str, Any]:
     return {"type": "wander_drive", "params": {"style": style}}
 
 
+def _fly_to(pos: tuple[float, float, float], altitude_asl_m: float) -> dict[str, Any]:
+    """`fly_to` (CONTRACTS §1 proposal, bridge 1.8.0): fly the aircraft he is in.
+
+    Same five keys as `drive_to` minus `style`, so the decision schema gained no
+    new param. `z` is NOT the ground at `pos`: it is the cruise altitude above
+    sea level the bridge hands the engine as `flightHeight` ("the Z coordinate
+    the heli tries to maintain (i.e. 30 == 30 meters above sea level)" — pinned
+    SHVDN XML for StartHeliMission/StartPlaneMission), which is why the caller
+    computes it from BOTH ends of the trip and not from the destination alone.
+    """
+    return {
+        "type": "fly_to",
+        "params": {
+            "x": pos[0],
+            "y": pos[1],
+            "z": altitude_asl_m,
+            "speed_mps": FLIGHT_SPEED_MPS,
+            "arrive_radius_m": FLIGHT_ARRIVE_M,
+        },
+    }
+
+
 def _approach_then_enter(
     v: NearbyVehicle, prefer: str, fallback_radius: float
 ) -> list[dict[str, Any]]:
@@ -942,11 +964,17 @@ def _done_nicer_car(state: GameState, snap: dict[str, Any]) -> bool:
     return vehicle_rank(state.vehicle.vehicle_class) > snap["rank"]
 
 
-#: Peds the agent may never start on. Story characters are the show — killing Lamar
-#: ends the story arc the whole channel is built around — and cops turn a bit of
-#: fun into a wanted level the roam engine then has to spend a goal escaping.
-#: Matched as substrings because the bridge emits lowercased model names
-#: (`SnapshotBuilder.PedModelName`) and the family is what matters, not the variant.
+#: Peds the ORDINARY fight goals (`pick_a_fight`, `armed_rampage_block`,
+#: `shoot_and_run`, `gang_trouble`) never start on. Story characters are the
+#: show — killing Lamar ends the story arc the whole channel is built around —
+#: and the law is kept out of the ambient menu because a cop turns any bit into
+#: a wanted level the engine then has to spend a goal escaping. Starting on
+#: police is not forbidden any more; it is its OWN goal, `shoot_a_cop`,
+#: gated on chaos tier 3, a
+#: loaded gun and full health, so it is a deliberate bit and never the default
+#: answer to "there is a man nearby". Matched as substrings because the bridge
+#: emits lowercased model names (`SnapshotBuilder.PedModelName`) and the family
+#: is what matters, not the variant.
 PROTECTED_PED_MODELS: tuple[str, ...] = (
     # The three protagonists ship as `player_zero` (Michael), `player_one`
     # (Franklin) and `player_two` (Trevor) — their in-fiction names appear
@@ -956,6 +984,17 @@ PROTECTED_PED_MODELS: tuple[str, ...] = (
     "amanda", "lester", "devin", "stretch", "wade", "ron", "chop",
     "cop", "police", "sheriff", "swat", "army", "security", "fbi", "prisguard",
 )
+
+#: Ped model families that are the LAW, for `shoot_a_cop`. Substrings of the
+#: lowercased model name, same convention as :data:`PROTECTED_PED_MODELS`:
+#: `s_m_y_cop_01`, `s_f_y_cop_01`, `s_m_y_hwaycop_01`, `s_m_y_sheriff_01`,
+#: `s_m_y_swat_01`, `s_m_y_ranger_01`, `s_m_m_fibsec_01`, `s_m_m_fiboffice_01`.
+#: Curated from the model-name convention, NOT verified against the running
+#: game — a wrong name costs an offer, never a false completion, because the
+#: same predicate gates `needs` and `done_when`. Deliberately NOT `security`,
+#: `army` or `prisguard`: a mall guard is not a cop, and Fort Zancudo / Bolingbroke
+#: are a different, worse idea.
+COP_PED_MODEL_TOKENS: tuple[str, ...] = ("cop", "sheriff", "swat", "ranger", "fibsec", "fiboffice")
 
 #: Gang ped model families, by the neighbourhood they belong to. Curated from the
 #: model-name convention (`g_m_y_*`), NOT verified against the running game — the
@@ -999,6 +1038,30 @@ def nearest_mark(state: GameState) -> Any | None:
     peds = [
         p for p in state.nearby.peds
         if p.distance <= FIGHT_RADIUS_M and _fightable(p)
+    ]
+    return min(peds, key=lambda p: p.distance) if peds else None
+
+
+def is_cop_ped_model(model: str | None) -> bool:
+    name = (model or "").strip().lower()
+    return any(tok in name for tok in COP_PED_MODEL_TOKENS)
+
+
+def nearest_cop(state: GameState) -> Any | None:
+    """The nearest officer within :data:`FIGHT_RADIUS_M` he could START on.
+
+    Already-`hostile` cops are excluded for the same reason `_fightable`
+    excludes hostiles: a cop who is already shooting at him is the threat
+    reflex's job, and it does it without a model call. `friendly` is excluded
+    because a cop in the engine's Companion/Like/Respect group is a mission
+    crewmate wearing a uniform (the police-station missions), and shooting the
+    crew fails the job.
+    """
+    peds = [
+        p for p in state.nearby.peds
+        if p.distance <= FIGHT_RADIUS_M
+        and is_cop_ped_model(getattr(p, "model", None))
+        and getattr(p, "relationship", "neutral") == "neutral"
     ]
     return min(peds, key=lambda p: p.distance) if peds else None
 
@@ -1581,6 +1644,13 @@ HOLD_THREE_S = 90.0
 #: cops are somebody else's goal once this one is done.
 RAMPAGE_S = 60.0
 
+#: `shoot_a_cop`: the longest the goal holds him on ONE officer before it calls
+#: itself done and hands the consequences to `lose_the_cops`. Shorter than
+#: :data:`RAMPAGE_S` on purpose: the point of the bit is the moment he does it
+#: and the chase that follows, not a siege, and every second past the first
+#: shot is a second the dispatch is closing in on a man standing still.
+COP_FIGHT_S = 45.0
+
 #: Seat index asked for when riding as a passenger. Rear-right, which is where
 #: the game's own cab-hailing puts the player; the schema only allows 0/1/2, so
 #: no value of this can ever ask for the driver's seat.
@@ -1811,6 +1881,24 @@ AIRCRAFT_CLASSES: frozenset[str] = frozenset({"planes", "helicopters"})
 #: aircraft are spread over them.
 AIRFIELD_ARRIVE_M = 60.0
 
+#: The flight itself (`fly_to`, bridge 1.8.0). Cruise speed and arrival radius
+#: go on the wire; the trip length and the altitude margin shape the target.
+FLIGHT_SPEED_MPS = 50.0
+FLIGHT_ARRIVE_M = 120.0
+#: A destination nearer than this (planar, from the APRON he takes off from,
+#: not from wherever he was standing when the goal was picked) is a hop, and
+#: at FLIGHT_SPEED_MPS it would be over before `done_when` could grade it.
+FLIGHT_MIN_TRIP_M = 4000.0
+#: Cruise altitude above the HIGHER end of the trip. `flightHeight` is absolute
+#: (metres above sea level, see :func:`_fly_to`), so an altitude chosen from the
+#: apron alone would fly a Sandy Shores take-off straight into Mount Chiliad.
+FLIGHT_ALTITUDE_ABOVE_M = 150.0
+#: Continuous seconds with `vehicle.in_air` true, in an aircraft, before the
+#: goal calls it a flight. A bounce on the apron is one or two snapshots; a
+#: minute in the air is a minute in the air. Measured by the engine in
+#: `_fold_goal_progress` as `_airborne_s`, reset the moment the wheels touch.
+FLIGHT_AIRBORNE_S = 60.0
+
 
 def _nearest_aircraft_site(state: GameState) -> dict[str, Any]:
     here = player_pos(state)
@@ -1826,33 +1914,93 @@ def _in_aircraft(state: GameState) -> bool:
     )
 
 
+def _flight_destination(
+    origin: tuple[float, float, float], view: RoamView
+) -> tuple[str, tuple[float, float, float]]:
+    """Somewhere worth flying to, at least :data:`FLIGHT_MIN_TRIP_M` from the apron.
+
+    The same curated data every other trip uses (LANDMARKS plus the other
+    aircraft sites), measured from the take-off point rather than from where he
+    was standing when the goal was picked — the drive to the apron is not part
+    of the flight. When nothing is far enough (it always is, on this map) the
+    farthest candidate is taken rather than a hop.
+    """
+    candidates: dict[str, tuple[float, float, float]] = dict(LANDMARKS)
+    for site in AIRCRAFT_SITES:
+        candidates[site["name"]] = site["pos"]
+    far = [n for n in candidates if planar_distance(origin, candidates[n]) >= FLIGHT_MIN_TRIP_M]
+    if far:
+        name = view.rng.choice(far)
+    else:  # pragma: no cover - not reachable with the current tables
+        name = max(candidates, key=lambda n: planar_distance(origin, candidates[n]))
+    return name, candidates[name]
+
+
 def _needs_go_flying(state: GameState, view: RoamView) -> bool:
-    if state.mission.active or state.player.wanted > 0 or _in_aircraft(state):
+    if not supports_v17(state):
+        # `done_when` is graded on `vehicle.in_air` (bridge 1.7.0). An older
+        # bridge never sends it, so the goal could only ever time out: the
+        # honest degradation is to not offer it — see UNBUILDABLE_GOALS.
         return False
+    if state.mission.active or state.player.wanted > 0:
+        return False
+    # Already sitting in an aircraft is not a reason to refuse: it is the
+    # shortest possible plan (just fly it). It WAS a refusal when the bar was
+    # "be seated in one", because the goal would have been born complete.
     return state.player.health >= GANG_MIN_HEALTH
 
 
 def _plan_go_flying(state, view):
-    site = _nearest_aircraft_site(state)
-    pos = site["pos"]
-    steps: list[dict[str, Any]] = [_waypoint(pos)]
-    if not state.player.in_vehicle:
-        # Wheels first: the apron is usually a long way off, and walking there
-        # is not television.
+    """Get to an aircraft, then ACTUALLY FLY IT — the flight is a plan step.
+
+    The old plan ended in `wander_drive`, a ground task: he stole a plane and
+    taxied it round the apron. The last step is now `fly_to` (bridge 1.8.0,
+    TASK_PLANE_MISSION / TASK_HELI_MISSION chosen bridge-side from the model),
+    reached only after he is seated. It is an ordinary step of an ordinary
+    goal: it is posted through the same wheel as every drive, so a mission
+    block or a survival rung preempts it exactly as it preempts a `drive_to`,
+    and nothing here can preempt them.
+    """
+    steps: list[dict[str, Any]] = []
+    if _in_aircraft(state):
+        origin = player_pos(state)
+        site_name = "current_aircraft"
+    else:
+        site = _nearest_aircraft_site(state)
+        origin = site["pos"]
+        site_name = site["name"]
+        steps.append(_waypoint(origin))
+        if not state.player.in_vehicle:
+            # Wheels first: the apron is usually a long way off, and walking
+            # there is not television.
+            steps.append(_enter("any", ON_FOOT_RESCUE_RADIUS_M))
+        steps.append(_drive_to(origin, 30.0, "rushed", AIRFIELD_ARRIVE_M))
+        # On the apron: take whatever is parked there — at an airfield that is
+        # an aircraft. If it turns out to be a car, `fly_to` fails at once with
+        # `not_an_aircraft`, the plan runs out, and the one replan tries again
+        # from where he actually is.
         steps.append(_enter("any", ON_FOOT_RESCUE_RADIUS_M))
-    steps.append(_drive_to(pos, 30.0, "rushed", AIRFIELD_ARRIVE_M))
-    # On the apron: take whatever is parked there — at an airfield that is an
-    # aircraft — and then go.
-    steps.append(_enter("any", ON_FOOT_RESCUE_RADIUS_M))
-    steps.append(_wander("rushed"))
-    return steps, {"site": site["name"], "start": player_pos(state)}
+    dest_name, dest = _flight_destination(origin, view)
+    altitude = max(origin[2], dest[2]) + FLIGHT_ALTITUDE_ABOVE_M
+    steps.append(_waypoint(dest))
+    steps.append(_fly_to(dest, altitude))
+    return steps, {
+        "site": site_name,
+        "start": player_pos(state),
+        "destination": dest_name,
+        "altitude_m": altitude,
+    }
 
 
 def _done_go_flying(state: GameState, snap: dict[str, Any]) -> bool:
-    """He is in an aircraft. Airborne is a bonus, not the bar: taxiing a stolen
-    plane down a runway is already the shot, and `vehicle.in_air` on the ground
-    would never fire."""
-    return _in_aircraft(state)
+    """He FLEW: :data:`FLIGHT_AIRBORNE_S` continuous seconds off the ground, in
+    an aircraft. Being seated in one is where the flight starts, not where the
+    goal ends. `_airborne_s` is the engine's fold over `vehicle.in_air`
+    (IS_ENTITY_IN_AIR, bridge 1.7.0) and resets the moment the wheels touch, so
+    a bounce on the apron cannot fake it. If he never gets off the ground the
+    bridge fails the step (`did_not_take_off`) and the goal times out honestly.
+    """
+    return _in_aircraft(state) and snap.get("_airborne_s", 0.0) >= FLIGHT_AIRBORNE_S
 
 
 def _needs_shoot_and_run(state: GameState, view: RoamView) -> bool:
@@ -1928,6 +2076,96 @@ def _done_rampage(state: GameState, snap: dict[str, Any]) -> bool:
     prevent.
     """
     return snap.get("_elapsed", 0.0) >= RAMPAGE_S and snap.get("_ammo_spent", 0) >= 1
+
+
+# -- shoot_a_cop (L3) -----------------------------------------------------------
+#
+# THE ONE PLACE HE STARTS ON THE LAW. He could not previously fight back or
+# shoot people properly; initiating against police is now a deliberate, gated
+# skill. Defending against a cop who is already shooting was always allowed
+# (the threat reflex fights any `hostile` in reach, uniform or not). What was
+# forbidden — by rules.md rule 6, by PROTECTED_PED_MODELS and by the catalog's
+# own "the nearest man who is not a cop" — was INITIATING. This goal is that
+# initiation, and the gates are the whole design:
+#
+#   * chaos tier 3 only, so six deaths in an hour take it off the menu (the
+#     ladder's step-down), and it is never offered in the first thirty minutes;
+#   * a LOADED gun for the range the bridge will pick (`loaded_gun_for`), never
+#     fists against a service pistol;
+#   * full-ish health (GANG_MIN_HEALTH), on foot, no stars, not in a mission —
+#     starting a police shootout while already wanted is not a bit, it is the
+#     chase he was already in;
+#   * a cop in `nearby.peds` within FIGHT_RADIUS_M who is still `neutral` — an
+#     opportunity the world handed him, not a hunt across the map;
+#   * the long cooldown and the 2.0 chaos cost of the other L3 goals.
+#
+# `calm` is False, so it is withheld below CALM_HEALTH_FRACTION like every other
+# fight. `wants_heat` is True: the stars are the CONSEQUENCE this goal exists to
+# produce, and without the exemption the wanted override would kill it at the
+# first star, before `done_when` could grade the shot. `lose_the_cops` takes over
+# the tick this completes, the same hand-off `armed_rampage_block` uses.
+#
+# What this deliberately is NOT: a change to the threat reflex (it still never
+# starts anything), a trigger that outranks a supercar, or a default. The prompt
+# (rules.md rule 6, action_catalog.md) says the same thing in the same words.
+
+
+def _needs_shoot_a_cop(state: GameState, view: RoamView) -> bool:
+    if state.mission.active or not weapon_reported(state):
+        return False
+    if state.player.in_vehicle or state.player.wanted > 0:
+        return False
+    if state.player.health < GANG_MIN_HEALTH:
+        return False
+    cop = nearest_cop(state)
+    return cop is not None and loaded_gun_for(state, cop.distance)
+
+
+def _plan_shoot_a_cop(state, view):
+    cop = nearest_cop(state)
+    assert cop is not None
+    # `weapon: "armed"`: the bridge selects the loaded gun for the range at task
+    # start (WeaponState.SelectForRange). The threat reflex's rung 4 will keep
+    # him fighting whoever answers; this goal only names the first one.
+    return (
+        [{"type": "fight_ped", "params": {"handle": cop.handle, "weapon": "armed"}}],
+        {
+            "mark": cop.handle,
+            "task_before": state.last_task.id,
+            "start": player_pos(state),
+            "ammo_start": _ammo_snapshot(state),
+        },
+    )
+
+
+def _done_shoot_a_cop(state: GameState, snap: dict[str, Any]) -> bool:
+    """He fired at the officer, and that encounter is over — one way or another.
+
+    Rounds gone is the non-negotiable half (`_ammo_spent`, the same fold
+    `armed_rampage_block` grades on): a goal called `shoot_a_cop` that
+    completes without a shot would put a lie on the dashboard. The other half
+    is any of: the bridge's own `fight_ped` reporting `done` AFTER this goal
+    was picked (target dead or gone — the id check keeps a pre-pick `done`
+    from counting, exactly as `pick_a_fight` does), the officer no longer in
+    `nearby.peds` (fled or streamed out; the scan does not drop corpses, so
+    absence is honest), or :data:`COP_FIGHT_S` on the clock. The clock arm is
+    what keeps this from locking free roam until its timeout while the engine
+    trades shots with a man behind a car door.
+    """
+    if snap.get("_ammo_spent", 0) < 1:
+        return False
+    handle = snap.get("mark")
+    if all(p.handle != handle for p in state.nearby.peds):
+        return True
+    last = state.last_task
+    if (
+        last.type == "fight_ped"
+        and last.status == "done"
+        and last.id is not None
+        and last.id != snap.get("task_before")
+    ):
+        return True
+    return snap.get("_elapsed", 0.0) >= COP_FIGHT_S
 
 
 # -- helicopter_grab (L3) --------------------------------------------------------
@@ -2385,14 +2623,16 @@ CATALOG: tuple[Goal, ...] = (
     Goal(
         id="go_flying",
         category="stunt",
-        description="get to an airfield and take something that flies",
+        description="get to an airfield, take something that flies, fly it",
         why="the ground is boring",
         needs=_needs_go_flying,
         plan=_plan_go_flying,
         done_when=_done_go_flying,
-        # A cross-map drive plus finding something on the apron. Long, and worth
-        # it: this is the goal that ends "he has been driving for too long".
-        timeout_s=600.0,
+        # A cross-map drive, finding something on the apron, a take-off and a
+        # minute in the air. Long, and worth it: this is the goal that ends "he
+        # has been driving for too long". Was 600 s when the bar was "seated";
+        # the flight itself needs the extra.
+        timeout_s=900.0,
         cooldown_s=45 * 60.0,
         chaos_cost=0.5,
         level=1,
@@ -2410,6 +2650,26 @@ CATALOG: tuple[Goal, ...] = (
         chaos_cost=2.0,
         wants_heat=True,
         level=2,
+    ),
+    Goal(
+        id="shoot_a_cop",
+        category="trouble",
+        description="start on the nearest cop, then live with it",
+        why="that uniform has opinions",
+        needs=_needs_shoot_a_cop,
+        plan=_plan_shoot_a_cop,
+        done_when=_done_shoot_a_cop,
+        # COP_FIGHT_S plus the approach the engine's combat task makes on its
+        # own; anything longer is a standoff the stream does not need.
+        timeout_s=120.0,
+        cooldown_s=45 * 60.0,
+        chaos_cost=2.0,
+        # The stars are the point. Without the exemption the wanted override
+        # ends the goal at the first star, before the shot is graded.
+        wants_heat=True,
+        # L3 with the other things that can genuinely end him. See the block
+        # comment above `_needs_shoot_a_cop` for every gate.
+        level=3,
     ),
     Goal(
         id="roam_the_block",
@@ -2528,6 +2788,10 @@ TRIGGERS: tuple[Trigger, ...] = (
     # than a corner he could pick a fight on, and the first matching trigger
     # takes the top slot.
     Trigger("gang_trouble", "wrong corner, wrong colours", _t_gang_corner),
+    # Below the gang corner and every acquisition: a cop on the pavement is a
+    # reason to put the bit at the top of the menu ONLY when every gate in
+    # `_needs_shoot_a_cop` already passed (a trigger can promote, never admit).
+    Trigger("shoot_a_cop", "that uniform has opinions", _needs_shoot_a_cop),
     Trigger("freeway_run", "there's the on-ramp", _t_onramp),
     Trigger("start_nearest_mission", "let's get paid", _t_get_paid),
     Trigger(
@@ -3191,6 +3455,7 @@ class RoamEngine:
         "_ammo_spent",
         "_climb_m",
         "_drop_from_peak_m",
+        "_airborne_s",
     )
 
     def _fold_goal_progress(self, state: GameState, locked: LockedGoal) -> None:
@@ -3225,6 +3490,22 @@ class RoamEngine:
         else:
             snap["_held3_since"] = None
             snap["_held3_s"] = 0.0
+
+        # Continuous seconds airborne IN AN AIRCRAFT, for `go_flying`. Same
+        # shape as the three-star hold: broken the moment `vehicle.in_air`
+        # reads false or he is no longer in something that flies, so a kerb
+        # bounce, a taxi over a bump or a crash-landing all read as zero. A
+        # pre-1.7.0 bridge never sends `in_air`, the model default is False,
+        # and the goal that reads this is not offered on such a bridge.
+        if _in_aircraft(state) and in_air(state):
+            since = snap.get("_airborne_since")
+            if since is None:
+                snap["_airborne_since"] = now
+                since = now
+            snap["_airborne_s"] = now - since
+        else:
+            snap["_airborne_since"] = None
+            snap["_airborne_s"] = 0.0
 
         # Rounds gone since the goal was picked, totalled over the tracked
         # loadout. A TOTAL rather than per-weapon on purpose: which weapon the

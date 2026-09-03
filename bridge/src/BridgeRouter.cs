@@ -234,6 +234,28 @@ namespace WastedBridge
                     req.ArriveRadiusM = OptFloat(p, "arrive_radius_m", 8f);
                     return true;
                 }
+                // --- bridge 1.8.0: fly_to (CONTRACTS §1 proposal; the flight step of the roam
+                // goal `go_flying`) --------------------------------------------------------------
+                case "fly_to":
+                {
+                    // drive_to's keys minus `style` (an aircraft has no traffic lights to ignore).
+                    // x, y = the target; z = the CRUISE ALTITUDE above sea level that
+                    // TaskEngine.IssueFlyTo hands the engine as flightHeight - NOT the ground at
+                    // x,y. Validated through the exact same path as drive_to so a fly_to without
+                    // a target is a 400 here, never a plane mission at (0,0,0).
+                    if (!TryFloat(p, "x", out req.X) || !TryFloat(p, "y", out req.Y)
+                        || !TryFloat(p, "z", out req.Z))
+                    {
+                        return Invalid(out error, out detail, "fly_to requires numeric x, y, z");
+                    }
+                    if (!TryFloat(p, "speed_mps", out req.SpeedMps))
+                    {
+                        return Invalid(out error, out detail, "fly_to requires numeric speed_mps");
+                    }
+                    req.ArriveRadiusM = OptFloat(p, "arrive_radius_m",
+                        TaskEngine.FlyToDefaultArriveRadiusM);
+                    return true;
+                }
                 case "walk_to":
                 {
                     if (!TryFloat(p, "x", out req.X) || !TryFloat(p, "y", out req.Y)
@@ -529,16 +551,24 @@ namespace WastedBridge
             {
                 return "no game state yet";
             }
+            // On foot the only precondition is that he really is standing still: there is no
+            // drive task to require, and a wedged pedestrian is exactly the case this grew to
+            // cover (v1.8.0). The game thread re-checks authoritatively.
+            if (snap.Vehicle == null)
+            {
+                // The snapshot carries no ped stationary clock, and adding one to the wire would
+                // be a contract change for a value only this check wants. The game thread holds
+                // it (`SnapshotBuilder.CurrentPedStoppedForS`) and re-checks authoritatively, so
+                // the honest precheck here is simply "he is on foot": at worst that costs one
+                // round trip to a 409, never an unjustified nudge.
+                return null;
+            }
             LastTaskDto task = snap.LastTask;
             bool driveRunning = task != null && task.Status == "running"
                                 && (task.Type == "drive_to" || task.Type == "wander_drive");
             if (!driveRunning)
             {
                 return "no drive task is running";
-            }
-            if (snap.Vehicle == null)
-            {
-                return "player is not in a vehicle";
             }
             if (snap.Vehicle.StoppedForS <= UnstickMinStoppedS)
             {

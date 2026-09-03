@@ -1348,7 +1348,9 @@ def test_threat_reflex_hurt_overrides_wanted_and_a_close_hostile() -> None:
 def test_threat_reflex_fights_a_hostile_even_while_wanted() -> None:
     """Revised per live feedback: healthy + a hostile present now fights
     regardless of `wanted` — "he just sits in car and dies" was the exact
-    bug a `wanted`-always-flees rule caused."""
+    bug a `wanted`-always-flees rule caused. Since 2026-09-04 the verb is
+    `fight_ped` at the named hostile (target-explicit, no relationship group
+    needed, selects the gun first) rather than the area task."""
     stub = _ReflexStub()
     state = make_state(
         wanted=3,
@@ -1356,7 +1358,7 @@ def test_threat_reflex_fights_a_hostile_even_while_wanted() -> None:
         nearby_peds=[{"handle": 9, "model": "s_m_y", "distance": 3.0, "relationship": "hostile"}],
     )
     _reflex(stub, state)
-    assert [t for t, _ in stub.posted] == ["combat_hated_targets_around"]
+    assert [t for t, _ in stub.posted] == ["fight_ped"]
 
 
 def test_threat_reflex_breaks_contact_on_foot_when_hurt() -> None:
@@ -1380,7 +1382,7 @@ def test_threat_reflex_fights_a_close_hostile_on_foot_when_healthy() -> None:
         nearby_peds=[{"handle": 9, "model": "s_m_y", "distance": 5.0, "relationship": "hostile"}],
     )
     _reflex(stub, state)
-    assert [t for t, _ in stub.posted] == ["combat_hated_targets_around"]
+    assert [t for t, _ in stub.posted] == ["fight_ped"]
 
 
 def test_threat_reflex_leaves_rather_than_fights_from_a_working_car() -> None:
@@ -1533,31 +1535,32 @@ def test_a_running_combat_task_is_not_re_posted_every_tick() -> None:
             stub,
             _hostile_state(
                 task_status="running",
-                task_type="combat_hated_targets_around",
+                task_type="fight_ped",
                 task_id="t-1",
             ),
         )
-    assert [t for t, _ in stub.posted] == ["combat_hated_targets_around"], (
+    assert [t for t, _ in stub.posted] == ["fight_ped"], (
         f"one threat, one post — got {stub.posted}"
     )
 
 
 def test_the_hold_down_covers_a_task_that_briefly_reports_finished() -> None:
-    """Belt and braces: the engine's combat task ends the moment no hated
-    target is in radius, so `last_task` can read `done` for a tick or two
-    mid-fight. Re-posting through that window is the same thrash by another
-    route."""
+    """Belt and braces: the engine's combat task can end for a tick or two
+    mid-fight (`fight_ped` reports `done` the moment its target reads dead or
+    gone, and a ragdolled target can flicker), so `last_task` can read `done`
+    while the SAME hostile is still in the list. Re-posting at the same
+    handle through that window is the same thrash by another route."""
     stub = _ReflexStub()
     _reflex(stub, _hostile_state(task_status="idle"))
     stub.clock.tick(THREAT_HOLD_S / 2)
-    _reflex(stub, _hostile_state(task_status="done", task_type="combat_hated_targets_around"))
+    _reflex(stub, _hostile_state(task_status="done", task_type="fight_ped"))
     assert len(stub.posted) == 1
     # Past the hold with the task still not running: he re-engages.
     stub.clock.tick(THREAT_HOLD_S)
-    _reflex(stub, _hostile_state(task_status="done", task_type="combat_hated_targets_around"))
+    _reflex(stub, _hostile_state(task_status="done", task_type="fight_ped"))
     assert [t for t, _ in stub.posted] == [
-        "combat_hated_targets_around",
-        "combat_hated_targets_around",
+        "fight_ped",
+        "fight_ped",
     ]
 
 
@@ -1567,18 +1570,18 @@ def test_a_change_of_situation_class_is_issued_immediately() -> None:
     tick, hold-down or not."""
     stub = _ReflexStub()
     _reflex(stub, _hostile_state(task_status="idle"))
-    assert [t for t, _ in stub.posted] == ["combat_hated_targets_around"]
+    assert [t for t, _ in stub.posted] == ["fight_ped"]
     stub.clock.tick(0.3)  # deep inside the hold-down
     _reflex(
         stub,
         _hostile_state(
             health=20,  # 10% of 200
             task_status="running",
-            task_type="combat_hated_targets_around",
+            task_type="fight_ped",
             task_id="t-1",
         ),
     )
-    assert [t for t, _ in stub.posted] == ["combat_hated_targets_around", "seek_cover"]
+    assert [t for t, _ in stub.posted] == ["fight_ped", "seek_cover"]
 
 
 def test_someone_else_taking_the_wheel_re_arms_the_threat_reflex() -> None:
@@ -1590,8 +1593,8 @@ def test_someone_else_taking_the_wheel_re_arms_the_threat_reflex() -> None:
     stub.clock.tick(THREAT_HOLD_S + 1.0)
     _reflex(stub, _hostile_state(task_status="running", task_type="drive_to", task_id="t-9"))
     assert [t for t, _ in stub.posted] == [
-        "combat_hated_targets_around",
-        "combat_hated_targets_around",
+        "fight_ped",
+        "fight_ped",
     ]
 
 
@@ -1736,8 +1739,8 @@ def test_a_threat_post_that_never_reached_the_game_does_not_start_the_hold() -> 
     stub.clock.tick(0.3)  # deep inside the hold-down
     _reflex(stub, _hostile_state(task_status="idle"))
     assert [t for t, _ in stub.posted] == [
-        "combat_hated_targets_around",
-        "combat_hated_targets_around",
+        "fight_ped",
+        "fight_ped",
     ]
 
 

@@ -208,7 +208,14 @@ NEUTRAL_GOAL_TEXT = "seeing what Los Santos throws at him next"
 #: single post walked him to a car); `wander_drive` is here for the same reason
 #: — both are "no coordinates, find/keep going" tasks that a restart resets to
 #: zero, unlike `walk_to`/`drive_to` which carry a target and redirect cleanly.
-RESTART_HOSTILE_TASKS: frozenset[str] = frozenset({"enter_nearest_vehicle", "wander_drive"})
+#: `fly_to` (bridge 1.8.0) is here for the same reason: TASK_PLANE_MISSION /
+#: TASK_HELI_MISSION run a take-off sequence from a standstill, and re-posting
+#: the task mid-roll restarts that sequence from zero — the bridge's own
+#: `did_not_take_off` watchdog is what fails a flight that never leaves the
+#: ground, and (status != running) lifts this guard exactly as it does above.
+RESTART_HOSTILE_TASKS: frozenset[str] = frozenset(
+    {"enter_nearest_vehicle", "wander_drive", "fly_to"}
+)
 
 #: He stops narrating once he has stood in the same spot this long. Commentary
 #: is gated on events, but a goal being picked IS an event, so a man who cannot

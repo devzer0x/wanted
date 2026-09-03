@@ -254,6 +254,40 @@ namespace WastedBridge
         // kill a healthy task, so a mismatch has to hold for this many consecutive Update() ticks.
         private const int LivenessDebounceTicks = 3;
 
+        // ---- bridge 1.8.0: fly_to - the flight step of the roam goal `go_flying` ---------------
+        //
+        // One wire verb, two engine tasks, chosen from the aircraft's MODEL at Start():
+        //   plane      -> TaskInvoker.StartPlaneMission (wraps TASK_PLANE_MISSION)
+        //   helicopter -> TaskInvoker.StartHeliMission  (wraps TASK_HELI_MISSION)
+        // both with VehicleMissionType.GoTo and the Vector3-target overload. Every signature and
+        // parameter meaning is quoted at the call site in IssueFlyTo from the PINNED
+        // lib/Docs/ScriptHookVDotNet3.xml (CLAUDE.md rule 6) so the next reader can check it
+        // without the DLL. The enum member names used (VehicleMissionType.GoTo,
+        // HeliMissionFlags as a type) were confirmed present in the pinned
+        // lib/ScriptHookVDotNet3.dll's string heap, and GoTo=4 is in the verified
+        // VehicleMissionType table in docs/research/brief-driving-natives.json.
+        //
+        // Deliberately NOT a "vehicle driving task" for the rest of this file: the stuck ladder
+        // (TASK_VEHICLE_TEMP_ACTION reverse/turn rungs), the 2 s drive-start verification and
+        // the 10 s PLANAR no-progress watchdog were all written for a CAR, and each of them
+        // would fail or fight a helicopter climbing straight up or a plane holding at the end of
+        // the runway. fly_to has its own take-off watchdog instead (FlyToTakeoffTimeoutMs), and
+        // the liveness check (cleared_by_game) still applies to it like any other scripted task.
+        //
+        // UNCOMPILED AND UNVERIFIED IN-GAME as written (no dotnet on the dev box or the server).
+        internal const float FlyToDefaultArriveRadiusM = 120f;
+        private const float FlyToMinSpeedMps = 10f;
+        private const float FlyToMaxSpeedMps = 120f;
+        // XML (both mission wrappers): "The height in meters that the heli will try to stay above
+        // terrain (ie 20 == always tries to stay at least 20 meters above ground)". Bridge-side;
+        // the wire carries only the absolute cruise altitude (flightHeight) as `z`.
+        private const int FlyToMinHeightAboveTerrainM = 50;
+        // Wheels never left the ground -> failed/"did_not_take_off". Long enough for engine start,
+        // a taxi to the runway and a take-off roll; short enough that an aircraft the engine will
+        // not fly is reported while the goal still has time to try something else.
+        private const int FlyToTakeoffTimeoutMs = 60000;
+        private const int FlyToTimeoutMs = 600000;
+
         private TaskRequest _req;            // null = no task ever posted
         private string _status = "idle";
         private string _detail = "";
@@ -297,6 +331,10 @@ namespace WastedBridge
         private float _progressAnchorX;
         private float _progressAnchorY;
         private int _progressEscalations;    // escalations this episode (cap: 1, then fail)
+
+        // bridge 1.8.0: fly_to's take-off watchdog state, reset per task episode in Start().
+        // Primitive-typed for the same offline-checks reason as the fields above.
+        private bool _flyEverAirborne;
 
         // Item 5: anti-stuck recovery ladder state, reset per task episode in Start().
         private enum StuckStage { Idle, Reversing, Turning }
@@ -353,6 +391,7 @@ namespace WastedBridge
             _driveStarts = 0;
             _progressEscalations = 0;
             _progressAt = 0;
+            _flyEverAirborne = false;    // 1.8.0: fly_to's take-off watchdog
 
             Ped ped = Game.Player.Character;
             if (ped == null || !ped.Exists())
@@ -479,6 +518,11 @@ namespace WastedBridge
                 case "answer_call":
                 case "reject_call":
                     StartPhoneInput(ped, req);
+                    break;
+
+                // --- bridge 1.8.0 ---------------------------------------------------------
+                case "fly_to":
+                    StartFlyTo(ped, req);
                     break;
 
                 case "set_waypoint":
@@ -686,6 +730,11 @@ namespace WastedBridge
                 case "answer_call":
                 case "reject_call":
                     UpdatePhoneInput(ped, elapsed);
+                    break;
+
+                // --- bridge 1.8.0 ---------------------------------------------------------
+                case "fly_to":
+                    UpdateFlyTo(ped, elapsed);
                     break;
             }
         }
@@ -1469,6 +1518,168 @@ namespace WastedBridge
                     }
                     IssueFollowVehicleMission(ped, veh, target);
                     break;
+            }
+        }
+
+        // ---- bridge 1.8.0: fly_to ----------------------------------------------------------------
+
+        /// <summary>
+        /// fly_to's preconditions: he is in something that flies. The seat and the engine are
+        /// checked by <see cref="PrepareToDrive"/> inside <see cref="IssueFlyTo"/>, exactly as for
+        /// every drive task.
+        /// </summary>
+        private void StartFlyTo(Ped ped, TaskRequest req)
+        {
+            Vehicle veh = CurrentVehicle(ped);
+            if (veh == null)
+            {
+                Fail("not_in_vehicle");
+                return;
+            }
+            // Pinned XML, P:GTA.Entity.Model: "Gets the model of the current Entity."
+            // P:GTA.Model.IsPlane: "Gets a value indicating whether this Model is a plane."
+            // P:GTA.Model.IsHelicopter: "Gets a value indicating whether this Model is a
+            // helicopter." Read off the MODEL, so a car taken on the apron fails here at once
+            // rather than being handed a flight mission it cannot run - the harness's plan
+            // then runs out and re-plans from where he actually is.
+            bool plane = veh.Model.IsPlane;
+            bool heli = veh.Model.IsHelicopter;
+            if (!plane && !heli)
+            {
+                Fail("not_an_aircraft");
+                return;
+            }
+            IssueFlyTo(ped, veh, heli);
+        }
+
+        /// <summary>
+        /// The one native call of fly_to. Two SHVDN wrappers, chosen by airframe; both take the
+        /// target as a Vector3 and VehicleMissionType.GoTo. The parameter docs below are quoted
+        /// verbatim from the pinned lib/Docs/ScriptHookVDotNet3.xml so they can be checked
+        /// without the DLL. No SET_DRIVER_ABILITY / DrivingAggressiveness / DrivingSpeed tuning
+        /// (those are the CAR-driving dials; the cruise speed goes into the mission natives
+        /// directly) and no <see cref="ArmDriveVerification"/> (its grader is keyed on
+        /// <see cref="IsVehicleDrivingTask"/>, which this task deliberately is not).
+        /// </summary>
+        private void IssueFlyTo(Ped ped, Vehicle veh, bool helicopter)
+        {
+            // T1 steps 1-2 apply to an aircraft too: IS_PED_IN_VEHICLE + GET_PED_IN_VEHICLE_SEAT
+            // (driver), then SET_VEHICLE_ENGINE_ON. A mission handed to a passenger flies nobody.
+            if (!PrepareToDrive(ped, veh))
+            {
+                return;
+            }
+            float speed = System.Math.Min(FlyToMaxSpeedMps,
+                System.Math.Max(FlyToMinSpeedMps, _req.SpeedMps));
+            // The wire's z IS the cruise altitude; both natives want it as an int flightHeight.
+            // The Vector3 target's Z is set to the same value so the two never disagree.
+            int flightHeight = (int)System.Math.Round(_req.Z);
+            var target = new Vector3(_req.X, _req.Y, _req.Z);
+
+            if (helicopter)
+            {
+                // Pinned XML, M:GTA.TaskInvoker.StartHeliMission(GTA.Vehicle,GTA.Math.Vector3,
+                //   GTA.VehicleMissionType,System.Single,System.Single,System.Int32,System.Int32,
+                //   System.Single,System.Single,GTA.HeliMissionFlags)
+                //   <summary>Gives the helicopter a mission.</summary>
+                //   heli:              "The helicopter."
+                //   target:            "The target coordinate."
+                //   missionType:       "The vehicle mission type."
+                //   cruiseSpeed:       "The cruise speed for the task in m/s."
+                //   targetReachedDist: "The distance in meters at which heli thinks it's arrived.
+                //                       Also used as the hover distance for Attack and Circle.
+                //                       To pick default value 4f, the parameter can be passed in
+                //                       as -1 or any other values less than zero."
+                //   flightHeight:      "The Z coordinate the heli tries to maintain (i.e. 30 == 30
+                //                       meters above sea level)."
+                //   minHeightAboveTerrain: "The height in meters that the heli will try to stay
+                //                       above terrain (ie 20 == always tries to stay at least 20
+                //                       meters above ground)."
+                //   heliOrientation:   "The orientation the heli tries to be in (0f to 360f). Use
+                //                       -1f (or any value less than zero) if not bothered. -1f
+                //                       Should be used in 99% of the times."
+                //   slowDownDistance:  "In general, get more control with big number and more
+                //                       dynamic with smaller. Setting to -1 means use default
+                //                       tuning (100)."
+                //   missionFlags:      "The heli mission flags for the task."
+                // (HeliMissionFlags)0: the enum's members are not documented in the pinned XML
+                // (no T:/F: entries), so no member NAME is relied on - same cast pattern as the
+                // (TaskCombatFlags)0 / (TaskThreatResponseFlags)0 calls above.
+                ped.Task.StartHeliMission(veh, target, VehicleMissionType.GoTo, speed,
+                    _req.ArriveRadiusM, flightHeight, FlyToMinHeightAboveTerrainM,
+                    -1f, -1f, (HeliMissionFlags)0);
+            }
+            else
+            {
+                // Pinned XML, M:GTA.TaskInvoker.StartPlaneMission(GTA.Vehicle,GTA.Math.Vector3,
+                //   GTA.VehicleMissionType,System.Single,System.Single,System.Int32,System.Int32,
+                //   System.Single,System.Boolean) - documented by <inheritdoc/> from the
+                //   (Vehicle,Vehicle,...) overload, whose text is:
+                //   <summary>Gives a plane a mission.</summary>
+                //   plane:             "The helicopter." [sic, in the XML]
+                //   target:            "The target coordinate."
+                //   missionType:       "The vehicle mission type."
+                //   cruiseSpeed:       "The cruise speed for the task in m/s."
+                //   targetReachedDist: "Distance in meters at which heli thinks it's arrived. Also
+                //                       used as the hover distance for Attack and Circle. To pick
+                //                       default value 4f, the parameter can be passed in as -1 or
+                //                       any other values less than zero."
+                //   flightHeight:      "The Z coordinate the heli tries to maintain (i.e. 30 == 30
+                //                       meters above sea level)."
+                //   minHeightAboveTerrain: "The height in meters that the heli will try to stay
+                //                       above terrain (ie 20 == always tries to stay at least 20
+                //                       meters above ground)."
+                //   planeOrientation:  "The orientation the plane tries to be in (0f to 360f). Use
+                //                       -1f if not bothered. -1f Should be used in 99% of the
+                //                       times."
+                //   precise:           "Specifies whether to tell the plane to move precisely with
+                //                       VTOL. ... If the plane does not support VTOL, this
+                //                       parameter has no effect."
+                ped.Task.StartPlaneMission(veh, target, VehicleMissionType.GoTo, speed,
+                    _req.ArriveRadiusM, flightHeight, FlyToMinHeightAboveTerrainM,
+                    -1f, false);
+            }
+            // docs/research/brief-script-task-status.json: "TASK_VEHICLE_FOLLOW, TASK_VEHICLE_ESCORT,
+            // TASK_VEHICLE_MISSION, TASK_HELI/PLANE/BOAT_MISSION all report the same script-task
+            // type VehicleMission=0xB41F1A34 when polled" - the same hash, with the same known
+            // ambiguity, that follow_entity's in-vehicle tail already relies on.
+            SetExpectedHash(ScriptTaskNameHash.VehicleMission);
+            BridgeLog.Info("task " + Describe() + ": " + (helicopter ? "heli" : "plane")
+                           + " mission GoTo (" + _req.X.ToString("F0") + ", " + _req.Y.ToString("F0")
+                           + ") at " + flightHeight + " m ASL, " + speed.ToString("F0") + " m/s");
+        }
+
+        /// <summary>
+        /// fly_to grading. Arrival is planar (drive_to's own rule, and for the same reason: a
+        /// ground-projected target Z would make 3D arrival unreachable from cruise altitude).
+        /// "The wheels left the ground" is Entity.IsInAir - pinned XML: "Gets a value indicating
+        /// whether this Entity is in the air." - the SAME read SnapshotBuilder publishes as
+        /// vehicle.in_air, so what fails here is exactly what the harness can see.
+        /// </summary>
+        private void UpdateFlyTo(Ped ped, int elapsed)
+        {
+            Vehicle veh = CurrentVehicle(ped);
+            if (veh == null)
+            {
+                Fail("not_in_vehicle");
+                return;
+            }
+            if (!_flyEverAirborne && veh.IsInAir)
+            {
+                _flyEverAirborne = true;
+                BridgeLog.Info("task " + Describe() + ": airborne after " + elapsed + " ms");
+            }
+            if (DistanceXY(ped.Position, _req.X, _req.Y) <= _req.ArriveRadiusM)
+            {
+                Done("");
+            }
+            else if (!_flyEverAirborne && elapsed > FlyToTakeoffTimeoutMs)
+            {
+                Fail("did_not_take_off");
+            }
+            else if (elapsed > FlyToTimeoutMs)
+            {
+                Fail("timeout");
             }
         }
 

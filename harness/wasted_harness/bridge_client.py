@@ -68,6 +68,11 @@ BRIDGE_TASK_TYPES: tuple[str, ...] = (
     # the same day it was added to `brain.schemas.BRIDGE_TASKS`, because the
     # phone bug above was exactly this tuple being forgotten.
     "flee_ped",
+    # --- bridge 1.8.0 (CONTRACTS §1 proposal) --------------------------------
+    # `fly_to{x, y, z, speed_mps, arrive_radius_m}`: the flight step of the
+    # roam goal `go_flying`. Added here the same day as `brain.schemas`, for the
+    # same reason as `flee_ped` above.
+    "fly_to",
 )
 
 DrivingStyle = Literal["normal", "rushed", "ignore_lights", "avoid_traffic"]

@@ -13,10 +13,10 @@ namespace WastedBridge
         public string Id;
         public string Type;
 
-        public float X, Y, Z;               // drive_to, walk_to, set_waypoint
-        public float SpeedMps;              // drive_to; follow_entity in-vehicle tail (v1.9, reuses this field)
+        public float X, Y, Z;               // drive_to, walk_to, set_waypoint; fly_to (1.8.0: Z is the CRUISE ALTITUDE above sea level, not ground)
+        public float SpeedMps;              // drive_to; follow_entity in-vehicle tail (v1.9, reuses this field); fly_to (1.8.0)
         public VehicleDrivingFlags Style;   // drive_to, wander_drive; follow_entity in-vehicle tail (v1.9, reuses this field)
-        public float ArriveRadiusM;         // drive_to
+        public float ArriveRadiusM;         // drive_to; fly_to (1.8.0)
         public bool Run;                    // walk_to
         public string Prefer;               // enter_nearest_vehicle: "nicer" | "any"
         public float SearchRadiusM;         // enter_nearest_vehicle

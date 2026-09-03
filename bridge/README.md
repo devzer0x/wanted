@@ -248,6 +248,18 @@ Implementation choices where the contract is silent (all in code comments too):
 - Bridge-side watchdog timeouts (→ `failed`/`"timeout"`): drive_to 600 s, walk_to 300 s,
   enter_nearest_vehicle 60 s, exit_vehicle 30 s. `seek_cover` completes (`done`) on cover **or**
   timeout per contract.
+- `fly_to` (bridge **1.8.0**, CONTRACTS §1 proposal): `{x, y, z, speed_mps, arrive_radius_m: 120}`
+  flies the aircraft the player is ALREADY in. `z` is the cruise altitude above sea level (the
+  engine's `flightHeight`), not the ground at `x,y`; a bridge-side `minHeightAboveTerrain` of 50 m
+  keeps it off the hills. Plane vs helicopter is chosen from `Model.IsPlane` / `Model.IsHelicopter`
+  (`TASK_PLANE_MISSION` / `TASK_HELI_MISSION` via the pinned SHVDN `StartPlaneMission` /
+  `StartHeliMission` Vector3 overloads, `VehicleMissionType.GoTo`). Fails `not_in_vehicle` /
+  `not_an_aircraft` at once, `did_not_take_off` if `Entity.IsInAir` never reads true within 60 s,
+  `timeout` at 600 s; `done` within `arrive_radius_m` planar. Speed clamped 10–120 m/s. It is
+  deliberately NOT one of the "vehicle driving tasks": no reverse/turn stuck ladder, no 2 s
+  drive-start check and no planar no-progress watchdog, all of which would fight a helicopter
+  climbing straight up. **Uncompiled and unverified in-game as of 2026-09-04** — no dotnet on
+  either machine; see the first-live-run checklist in the delivery report.
 - Tasks fail with `not_in_vehicle` when the player ped reports a vehicle that no longer exists, and
   with `no_player_ped` during a character switch or load transition (the harness retries).
 - **Preemption is not observable in `/state`.** CONTRACTS §1 says a preempted task ends as

@@ -27,6 +27,11 @@ from wasted_harness.behavior.roam import (
     CLEAN_RECOVERY_S,
     DEATHS_PER_HOUR_STEP_DOWN,
     FALLBACK_GOAL_ID,
+    FLIGHT_AIRBORNE_S,
+    FLIGHT_ALTITUDE_ABOVE_M,
+    FLIGHT_ARRIVE_M,
+    FLIGHT_MIN_TRIP_M,
+    FLIGHT_SPEED_MPS,
     FREEWAY_ONRAMPS,
     GOAL_STUCK_S,
     GOAL_STUCK_STRIKES,
@@ -44,6 +49,11 @@ from wasted_harness.behavior.roam import (
     ROAM_CATEGORIES,
     UNBUILDABLE_GOALS,
     UNCOMPUTABLE_TRIGGERS,
+    COP_FIGHT_S,
+    COP_PED_MODEL_TOKENS,
+    TRIGGERS,
+    is_cop_ped_model,
+    nearest_cop,
     VEHICLE_RANK,
     HouseEscape,
     RoamCadence,
@@ -62,8 +72,9 @@ from wasted_harness.behavior.roam import (
     weapon_ammo,
     weapon_reported,
 )
-from wasted_harness.brain.schemas import ACTION_TYPES, BRIDGE_TASKS
-from wasted_harness.bridge_client import GameState
+from wasted_harness.behavior.navigation import planar_distance
+from wasted_harness.brain.schemas import ACTION_PARAM_KEYS, ACTION_TYPES, BRIDGE_TASKS, MOVEMENT_TASKS
+from wasted_harness.bridge_client import BRIDGE_TASK_TYPES, GameState
 
 
 class FakeClock:
@@ -358,6 +369,16 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
         ),
         # Healthy, unwanted, not already flying: go and take an aircraft.
         "go_flying": armed_state(in_vehicle=False, health=200),
+        # Armed, on foot, no stars, an officer on the pavement: the gated bit.
+        "shoot_a_cop": armed_state(
+            in_vehicle=False,
+            health=200,
+            weapon=_weapon(owned=dict(full_kit)),
+            nearby_peds=[
+                {"handle": 43, "model": "s_m_y_cop_01", "distance": 8.0,
+                 "relationship": "neutral", "pos": {"x": 8.0, "y": 0.0, "z": 0.0}},
+            ],
+        ),
         "helicopter_grab": armed_state(
             in_vehicle=False,
             nearby_vehicles=[veh(88, "polmav", "Helicopters", 25.0, pos=(25.0, 0.0, 0.0))],
@@ -2140,14 +2161,15 @@ def test_armed_goals_need_rounds_in_the_gun_the_bridge_would_pick() -> None:
     )
     assert not {"armed_rampage_block", "shoot_and_run"} & offered(empty)
 
-    # Loaded pistol, dry shotgun, mark at 7 m: the bridge's range rule would
-    # put the EMPTY shotgun in his hands, so still not on the menu...
+    # Loaded pistol, dry shotgun, mark at 7 m: bridge 1.8.0's range rule skips
+    # the EMPTY shotgun and puts the pistol in his hands, so this IS offered
+    # (under 1.7.0 it was not — the dry shotgun would have been the pick)...
     pistol_only = dict(dry, Pistol=60)
     close = armed_state(
         in_vehicle=False, health=200, nearby_peds=[mark_close],
         weapon=_weapon(name="Unarmed", weapon_class="unarmed", ammo=0, owned=pistol_only),
     )
-    assert not {"armed_rampage_block", "shoot_and_run"} & offered(close)
+    assert {"armed_rampage_block", "shoot_and_run"} <= offered(close)
     # ...and beyond shotgun range the pistol is the pick, and it is loaded.
     far = armed_state(
         in_vehicle=False, health=200, nearby_peds=[mark_far],
@@ -2358,3 +2380,312 @@ def test_slow_freeway_plan_gets_him_to_the_mower_then_across_the_map() -> None:
     assert "enter_nearest_vehicle" in types
     assert types[-1] == "wander_drive"
     assert snap["model"] == "mower"
+
+
+# --- go_flying: the flight is a plan step, graded on being airborne ------------
+
+
+def _aircraft_sites() -> dict[str, tuple[float, float, float]]:
+    from wasted_harness.behavior.roam import AIRCRAFT_SITES
+
+    return {s["name"]: s["pos"] for s in AIRCRAFT_SITES}
+
+
+def test_go_flying_ends_in_a_flight_not_a_taxi() -> None:
+    """The last step is `fly_to`, after he is seated, and no ground task follows it.
+
+    The old plan ended in `wander_drive` — a GROUND task — so he stole a plane
+    and taxied it round the apron. The flight has to be an ordinary step of the
+    same goal (posted through the same wheel as every drive), not a new layer.
+    """
+    goal = GOALS_BY_ID["go_flying"]
+    view = RoamView(rng=random.Random(7))
+    on_foot = armed_state(in_vehicle=False, health=200)
+    assert goal.needs(on_foot, view)
+    plan, snap = goal.plan(on_foot, view)
+    types = [s["type"] for s in plan]
+    assert types == [
+        "set_waypoint", "enter_nearest_vehicle", "drive_to", "enter_nearest_vehicle",
+        "set_waypoint", "fly_to",
+    ], types
+    assert "wander_drive" not in types
+    # The apron he drives to is the nearest curated site, and the flight leaves
+    # from THERE, not from where he was standing.
+    sites = _aircraft_sites()
+    site = sites[snap["site"]]
+    drive = plan[2]["params"]
+    assert (drive["x"], drive["y"], drive["z"]) == site
+    fly = plan[-1]["params"]
+    assert set(fly) == set(ACTION_PARAM_KEYS["fly_to"]) == {
+        "x", "y", "z", "speed_mps", "arrive_radius_m"
+    }
+    assert fly["speed_mps"] == FLIGHT_SPEED_MPS and fly["arrive_radius_m"] == FLIGHT_ARRIVE_M
+    # A real trip, measured from the apron ...
+    assert planar_distance(site, (fly["x"], fly["y"], 0.0)) >= FLIGHT_MIN_TRIP_M
+    # ... at a cruise altitude that clears BOTH ends (z is metres above sea
+    # level for the engine's flightHeight, not the ground at the destination).
+    dest = {**LANDMARKS, **sites}[snap["destination"]]
+    assert (fly["x"], fly["y"]) == dest[:2]
+    assert fly["z"] == pytest.approx(max(site[2], dest[2]) + FLIGHT_ALTITUDE_ABOVE_M)
+    assert snap["altitude_m"] == fly["z"]
+    # The map waypoint moves to the destination before the flight is posted.
+    assert (plan[-2]["params"]["x"], plan[-2]["params"]["y"]) == dest[:2]
+
+
+def test_go_flying_already_seated_in_an_aircraft_just_flies_it() -> None:
+    """Sitting in a plane used to mean the goal was born complete; now it is the
+    shortest plan there is."""
+    goal = GOALS_BY_ID["go_flying"]
+    view = RoamView(rng=random.Random(3))
+    seated = armed_state(
+        pos=(1747.0, 3273.0, 41.1),
+        in_vehicle=True,
+        vehicle={"class": "Planes", "model": "cuban800", "speed": 0.0},
+        in_air=False,
+    )
+    assert goal.needs(seated, view)
+    plan, snap = goal.plan(seated, view)
+    assert [s["type"] for s in plan] == ["set_waypoint", "fly_to"]
+    assert snap["site"] == "current_aircraft"
+    assert planar_distance(
+        (1747.0, 3273.0, 41.1), (plan[-1]["params"]["x"], plan[-1]["params"]["y"], 0.0)
+    ) >= FLIGHT_MIN_TRIP_M
+    # Not graded done just for sitting there.
+    assert not goal.done_when(seated, {"_airborne_s": 0.0})
+    # A helicopter is an aircraft too: same verb, the bridge picks the native.
+    heli = armed_state(
+        in_vehicle=True, vehicle={"class": "Helicopters", "model": "maverick"}, in_air=False
+    )
+    assert goal.needs(heli, view)
+    assert [s["type"] for s in goal.plan(heli, view)[0]] == ["set_waypoint", "fly_to"]
+
+
+def test_go_flying_is_not_offered_by_a_bridge_that_cannot_report_airtime() -> None:
+    """`done_when` reads `vehicle.in_air`; a pre-1.7.0 bridge never sends it, so
+    offering the goal would lock free roam for 900 s to report a certain failure."""
+    goal = GOALS_BY_ID["go_flying"]
+    view = RoamView(rng=random.Random(1))
+    assert not goal.needs(make_state(in_vehicle=False), view)
+    assert goal.needs(armed_state(in_vehicle=False), view)
+    # And never over a mission or with stars — those owners outrank a joyride.
+    assert not goal.needs(armed_state(in_vehicle=False, mission_active=True), view)
+    assert not goal.needs(armed_state(in_vehicle=False, wanted=1), view)
+
+
+def _flying(clock_pos: float, *, in_air: bool, vclass: str = "Planes") -> GameState:
+    return armed_state(
+        pos=(clock_pos, 0.0, 200.0),
+        in_vehicle=True,
+        vehicle={"class": vclass, "model": "cuban800", "speed": 45.0},
+        in_air=in_air,
+        task_type="fly_to",
+        task_status="running",
+    )
+
+
+def test_go_flying_is_graded_on_a_sustained_flight_not_on_the_seat() -> None:
+    """Airborne for FLIGHT_AIRBORNE_S continuous seconds, in an aircraft. A
+    bounce resets the clock; a running `fly_to` is never mistaken for stuck."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(41), clock=clock, level=1)
+    on_foot = armed_state(in_vehicle=False, health=200)
+    e.observe(on_foot)
+    picked = e.pick(on_foot, goal_id="go_flying")
+    assert picked is not None and picked[0].goal.id == "go_flying"
+
+    # Seated on the apron, engine running, wheels down: not done.
+    seated = _flying(0.0, in_air=False)
+    e.observe(seated)
+    assert e.judge(seated) is None
+
+    # One snapshot off the ground is a bump, not a flight.
+    clock.tick(0.4)
+    bump = _flying(2.0, in_air=True)
+    e.observe(bump)
+    assert e.judge(bump) is None
+    assert picked[0].snapshot["_airborne_s"] == pytest.approx(0.0)
+
+    # Wheels back on: the airborne clock is torn up, not paused.
+    clock.tick(0.4)
+    down = _flying(4.0, in_air=False)
+    e.observe(down)
+    assert e.judge(down) is None
+    assert picked[0].snapshot["_airborne_s"] == 0.0
+
+    # Now a real take-off, polled every 0.4 s. Position advances every tick so
+    # the ordinary stillness watchdog has nothing to say either way; the
+    # hovering case is covered below.
+    x = 4.0
+    t = 0.0
+    while t + 0.4 < FLIGHT_AIRBORNE_S:
+        clock.tick(0.4)
+        t += 0.4
+        x += 18.0
+        s = _flying(x, in_air=True)
+        e.observe(s)
+        assert e.judge(s) is None, f"done after only {t:.1f} s airborne"
+    clock.tick(1.0)
+    s = _flying(x + 18.0, in_air=True)
+    e.observe(s)
+    assert e.judge(s) == "done"
+    assert picked[0].snapshot["_airborne_s"] >= FLIGHT_AIRBORNE_S
+
+
+def test_a_hovering_aircraft_under_fly_to_is_the_bridge_s_to_judge_not_stuck() -> None:
+    """A helicopter climbing straight up moves nowhere on the map. While the
+    bridge's `fly_to` is running, its own take-off watchdog owns that; the roam
+    stuck ladder must not re-post over a take-off in progress."""
+    clock = FakeClock()
+    e = RoamEngine(random.Random(43), clock=clock, level=1)
+    on_foot = armed_state(in_vehicle=False, health=200)
+    e.observe(on_foot)
+    assert e.pick(on_foot, goal_id="go_flying") is not None
+    hover = _flying(0.0, in_air=True, vclass="Helicopters")
+    e.observe(hover)
+    assert e.judge(hover) is None
+    clock.tick(GOAL_STUCK_S + 5.0)
+    e.observe(hover)
+    # Not "stuck"/"escalate": the movement task is running and the bridge is
+    # accounting for it. Not "done" either: only ~15 s airborne.
+    assert e.judge(hover) is None
+    assert e.current is not None and e.current.strikes == 0
+
+
+def test_fly_to_is_a_movement_task_behind_the_same_wheel_as_a_drive() -> None:
+    """The flight must never bypass the choke point: it is a BRIDGE task and a
+    MOVEMENT task, so `_execute_action` refuses it without the wheel's token and
+    a mission block / survival rung preempts it exactly like a `drive_to`."""
+    from wasted_harness.main import RESTART_HOSTILE_TASKS
+
+    assert "fly_to" in BRIDGE_TASKS
+    assert "fly_to" in MOVEMENT_TASKS
+    assert "fly_to" in BRIDGE_TASK_TYPES
+    assert "fly_to" in ACTION_TYPES
+    # No new schema param: drive_to's own keys, minus style.
+    assert set(ACTION_PARAM_KEYS["fly_to"]) < set(ACTION_PARAM_KEYS["drive_to"])
+    assert "style" not in ACTION_PARAM_KEYS["fly_to"]
+    # A re-post mid take-off would restart the roll from zero.
+    assert "fly_to" in RESTART_HOSTILE_TASKS
+
+
+# --- shoot_a_cop: the one place he STARTS on the law (2026-09-04) ---------------
+#
+# Initiating against police is now an allowed, gated skill. Defending against
+# a hostile cop was always the reflex's job; INITIATING was forbidden everywhere.
+# It is now one gated L3 goal, and these pin every gate, so that "he can shoot
+# cops" never quietly becomes "he shoots cops".
+
+
+def _cop(handle: int = 70, model: str = "s_m_y_cop_01", distance: float = 8.0,
+         rel: str = "neutral") -> dict[str, Any]:
+    return ped(handle=handle, model=model, distance=distance, relationship=rel,
+               pos=(distance, 0.0, 0.0))
+
+
+FULL_KIT = {"Pistol": 60, "MicroSMG": 90, "PumpShotgun": 24}
+DRY_KIT = {"Pistol": 0, "MicroSMG": 0, "PumpShotgun": 0}
+
+
+def _cop_state(**over: Any) -> GameState:
+    over.setdefault("in_vehicle", False)
+    over.setdefault("health", 200)
+    over.setdefault("weapon", _weapon(owned=dict(FULL_KIT)))
+    over.setdefault("nearby_peds", [_cop()])
+    return armed_state(**over)
+
+
+def _menu(state: GameState, level: int = 3) -> list[Any]:
+    e = RoamEngine(random.Random(5), clock=FakeClock(), level=level)
+    e.observe(state)
+    return e.available(state)
+
+
+def test_the_cop_model_family_is_recognised_and_guards_are_not_cops() -> None:
+    for model in ("s_m_y_cop_01", "s_f_y_cop_01", "s_m_y_hwaycop_01", "s_m_y_sheriff_01",
+                  "s_m_y_swat_01", "s_m_y_ranger_01", "s_m_m_fibsec_01", "S_M_Y_COP_01"):
+        assert is_cop_ped_model(model), model
+    for model in ("s_m_m_security_01", "s_m_y_marine_01", "s_m_m_prisguard_01",
+                  "a_m_y_hipster_01", "ig_lamardavis", None, ""):
+        assert not is_cop_ped_model(model), model
+    assert "security" not in COP_PED_MODEL_TOKENS and "army" not in COP_PED_MODEL_TOKENS
+
+
+def test_shoot_a_cop_is_offered_only_with_every_gate_passed() -> None:
+    """Tier 3, on foot, no stars, no mission, healthy, a loaded gun for the
+    range, a still-neutral cop within FIGHT_RADIUS_M. Each gate alone keeps it
+    off the menu."""
+    assert "shoot_a_cop" in {o.id for o in _menu(_cop_state())}
+    assert "shoot_a_cop" not in {o.id for o in _menu(_cop_state(), level=2)}, "L3 only"
+    withheld = {
+        "in a car": _cop_state(in_vehicle=True, vehicle={"class": "Sedans", "model": "sultan", "speed": 0.0}),
+        "already wanted": _cop_state(wanted=1),
+        "in a mission": _cop_state(mission_active=True),
+        "hurt": _cop_state(health=90),
+        "every magazine empty": _cop_state(weapon=_weapon(name="Unarmed", weapon_class="unarmed", ammo=0, owned=dict(DRY_KIT))),
+        "cop too far": _cop_state(nearby_peds=[_cop(distance=30.0)]),
+        "cop already hostile (the reflex's job)": _cop_state(nearby_peds=[_cop(rel="hostile")]),
+        "cop is a crewmate": _cop_state(nearby_peds=[_cop(rel="friendly")]),
+        "a guard, not a cop": _cop_state(nearby_peds=[_cop(model="s_m_m_security_01")]),
+        "nobody": _cop_state(nearby_peds=[]),
+    }
+    for why, state in withheld.items():
+        assert "shoot_a_cop" not in {o.id for o in _menu(state)}, why
+    # A pre-1.7.0 bridge cannot vouch for rounds, so it is never offered there.
+    old = make_state(in_vehicle=False, health=200, nearby_peds=[_cop()])
+    assert "shoot_a_cop" not in {o.id for o in _menu(old)}
+
+
+def test_shoot_a_cop_plans_one_armed_fight_at_the_officer_and_wants_the_heat() -> None:
+    goal = GOALS_BY_ID["shoot_a_cop"]
+    assert goal.level == 3 and goal.wants_heat and not goal.calm and goal.chaos_cost >= 2.0
+    state = _cop_state(nearby_peds=[_cop(handle=71, distance=15.0), _cop(handle=72, distance=6.0)])
+    e = RoamEngine(random.Random(5), clock=FakeClock(), level=3)
+    e.observe(state)
+    picked = e.pick(state, goal_id="shoot_a_cop")
+    assert picked is not None
+    locked, step = picked
+    assert step == {"type": "fight_ped", "params": {"handle": 72, "weapon": "armed"}}
+    assert locked.snapshot["mark"] == 72 and locked.snapshot["ammo_start"] == FULL_KIT
+    assert nearest_cop(state).handle == 72
+    # The stars it earns are the point: the wanted override does not end it.
+    one_star = observed(e, _cop_state(wanted=1, nearby_peds=[_cop(handle=72, distance=6.0, rel="hostile")]))
+    assert e.judge(one_star) != "wanted_override"
+
+
+def test_shoot_a_cop_is_never_done_without_a_round_fired() -> None:
+    goal = GOALS_BY_ID["shoot_a_cop"]
+    snap = {"mark": 70, "task_before": "t-1", "start": (0.0, 0.0, 0.0), "ammo_start": dict(FULL_KIT)}
+    # Cop gone, bridge says done, clock expired — and nothing fired: not done.
+    gone = _cop_state(nearby_peds=[], task_id="t-2", task_type="fight_ped", task_status="done")
+    assert not goal.done_when(gone, dict(snap, _ammo_spent=0, _elapsed=COP_FIGHT_S + 1))
+    # A round gone AND any one of the three endings.
+    assert goal.done_when(gone, dict(snap, _ammo_spent=1))
+    finished = _cop_state(task_id="t-2", task_type="fight_ped", task_status="done")
+    assert goal.done_when(finished, dict(snap, _ammo_spent=1))
+    stale = _cop_state(task_id="t-1", task_type="fight_ped", task_status="done")
+    assert not goal.done_when(stale, dict(snap, _ammo_spent=1)), "a pre-pick done is not this fight"
+    ongoing = _cop_state(task_id="t-2", task_type="fight_ped", task_status="running")
+    assert not goal.done_when(ongoing, dict(snap, _ammo_spent=1, _elapsed=COP_FIGHT_S - 1))
+    assert goal.done_when(ongoing, dict(snap, _ammo_spent=1, _elapsed=COP_FIGHT_S))
+
+
+def test_a_cop_on_the_pavement_promotes_the_bit_but_never_admits_it() -> None:
+    """The trigger sorts an OFFERED `shoot_a_cop` to the top with its line; it
+    cannot put it on the menu when a gate failed, and it sits below the
+    acquisition and gang triggers in the table."""
+    ids = [t.goal_id for t in TRIGGERS]
+    assert ids.index("shoot_a_cop") > ids.index("gang_trouble") > ids.index("steal_nice_car")
+    offers = _menu(_cop_state())
+    assert offers[0].id == "shoot_a_cop" and offers[0].triggered
+    assert offers[0].why == "that uniform has opinions"
+    assert "shoot_a_cop" not in {o.id for o in _menu(_cop_state(), level=2)}
+
+
+def test_the_ordinary_fight_goals_still_never_start_on_a_cop() -> None:
+    """`pick_a_fight`, `armed_rampage_block` and `shoot_and_run` keep their
+    protected list: with ONLY a cop in reach none of them is offered, however
+    well armed he is. Starting on the law is `shoot_a_cop` or nothing."""
+    offered = {o.id for o in _menu(_cop_state())}
+    assert not {"pick_a_fight", "armed_rampage_block", "shoot_and_run", "gang_trouble"} & offered
+    assert "shoot_a_cop" in offered
+
