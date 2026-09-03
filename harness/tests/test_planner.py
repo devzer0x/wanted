@@ -1037,6 +1037,9 @@ class _ActivityStub:
         self.wheel.begin_tick()
         self.wheel.on_preempt("roam", self._roam_preempted)
         self._roam_token = None
+        # Operator overrides read by the roam pick path; never armed here.
+        self._operator_goal = None
+        self._operator_force_pick = False
         #: `(tick, owner, action_type)` for every task that reached the game.
         self.posted_owners: list[tuple[int, str, str]] = []
         #: `_begin_roam_goal` reads the model's last goal line to see whether it

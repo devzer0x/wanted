@@ -68,6 +68,9 @@ class _LoopStub(_ReflexStub):
         super().__init__(governor_level=governor_level)
         self.wheel.on_preempt("roam", self._roam_preempted)
         self.rng = random.Random(7)
+        # Operator overrides read by the roam pick path; never armed here.
+        self._operator_goal = None
+        self._operator_force_pick = False
 
 
 def tick(stub: _ReflexStub, state: GameState) -> None:

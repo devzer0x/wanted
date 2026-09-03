@@ -124,6 +124,20 @@ from .budget import LEVEL_NOTES, BudgetGovernor, Pricing, cost_of_usage, cost_us
 from .commentary import Commentary
 from .events import SupabaseWriter
 from .logsetup import force_utf8_console, get_logger, setup_logging
+from .operator import (
+    NUDGE_TYPE_BAN_S,
+    Directive,
+    OperatorQueue,
+)
+from .operator import (
+    attach as attach_operator,
+)
+from .operator import (
+    blocking_reason as operator_blocking_reason,
+)
+from .operator import (
+    status_from as operator_status,
+)
 from .overlay import OverlayBus, create_app
 from .perception import (
     Delta,
@@ -870,6 +884,17 @@ class Harness:
         self.task_stall = TaskStallDetector()
         self.cleared_backoff = ClearedByGameBackoff()
         self.idle_breaker = IdleBreaker(rng=self.rng)
+        #: The operator's button (`wasted_harness.operator`, driven from the
+        #: Mac by `scripts/wanted`). Constructed once and NOT rebuilt on a game
+        #: restart: a command typed during the restart must still land.
+        self.operator = OperatorQueue()
+        #: One-shot overrides the operator can arm for the roam pick path:
+        #: a specific catalog goal, and "pick NOW, ignore the boredom timer".
+        self._operator_goal: str | None = None
+        self._operator_force_pick = False
+        #: `drive` is two tasks that cannot both be posted in one tick (the
+        #: second would preempt the first): the follow-up waits for the seat.
+        self._operator_followup: dict[str, Any] | None = None
         self.stranded = StrandedEscalator()
         #: T9 (findings.md R1/R5): `vehicle.in_water` past 10 s → exit, then
         #: one walk toward known land; an NPC vehicle closing fast while he is
@@ -1130,6 +1155,8 @@ class Harness:
         import uvicorn
 
         app = create_app(self.bus)
+        # `POST /operator` + `GET /operator/status` on the same localhost-only app.
+        attach_operator(app, self.operator)
         config = uvicorn.Config(
             app,
             host=self.settings.overlay_host,
@@ -2063,6 +2090,92 @@ class Harness:
         action = self.idle_breaker.check(state)
         if action is not None:
             self._reflex_act("idle_breaker", action, "not moving: something different")
+
+    def _apply_operator(self, state: GameState) -> None:
+        """Apply everything `scripts/wanted` queued since the last tick, then publish
+        the status document it reads.
+
+        Five shapes (see `wasted_harness.operator`). Gating first: a command the
+        game would ignore is refused with a reason the operator sees on the next
+        `status`, never swallowed. Every accepted command is an `unstick` event
+        with `source: "operator"`, so the feed shows the human intervention.
+        """
+        followup = self._operator_followup
+        if followup is not None and state.player.in_vehicle:
+            # Second half of `drive`: he is seated now, so wander. Same owner,
+            # same choke point, same log line shape as the first half.
+            self._operator_followup = None
+            self._reflex_act("operator", followup, "operator: drive (seated, now wander)")
+
+        for d in self.operator.drain():
+            reason = operator_blocking_reason(state, d)
+            if reason is not None:
+                self.operator.refused(d, reason)
+                continue
+            note = self._apply_one_operator_directive(state, d)
+            if note is None:
+                continue
+            self.operator.applied(d, note)
+            self.writer.record_event(
+                "unstick",
+                {"source": "operator", "cmd": d.cmd, "arg": d.arg, "handle": d.handle, "note": note},
+            )
+
+        self.operator.status.publish(
+            operator_status(
+                state,
+                still_for_s=self.idle_breaker.still_for_s(),
+                goal_id=None if self.roam.current is None else self.roam.current.goal.id,
+                available_goals=list(self.roam.offered_ids()),
+                held_by=self._vehicle_hold(state),
+                governor_level=self.governor.level,
+                last_applied=self.operator.last_applied,
+                last_refusal=self.operator.last_refusal,
+            )
+        )
+
+    def _apply_one_operator_directive(self, state: GameState, d: Directive) -> str | None:
+        """One directive → what happened (a note for the log/feed), or None when it
+        was refused at this stage (already logged)."""
+        lt = state.last_task
+        if d.cmd == "stop":
+            self._end_activity_if_running("operator_stop", by="operator")
+            self._reflex_act("operator", {"type": "stop", "params": {}}, "operator: stop")
+            return "task cleared, goal ended, nothing new picked"
+
+        if d.cmd in ("nudge", "goal"):
+            if d.cmd == "goal" and d.arg not in self.roam.offered_ids():
+                self.operator.refused(
+                    d, f"{d.arg!r} is not on his menu right now; available: {', '.join(self.roam.offered_ids()) or 'nothing'}"
+                )
+                return None
+            # The same three moves the idle watchdog makes, on a human's say-so:
+            # end whatever goal he is nominally on, refuse the task type that
+            # left him standing, and make the very next tick pick.
+            self._end_activity_if_running(f"operator_{d.cmd}", by="operator")
+            if lt.type:
+                self.idle_breaker.ban(lt.type, NUDGE_TYPE_BAN_S)
+            self._operator_force_pick = True
+            if d.cmd == "goal":
+                self._operator_goal = d.arg
+                return f"goal {d.arg} will lock on the next pick; {lt.type or 'no task'} banned {NUDGE_TYPE_BAN_S:.0f}s"
+            return f"goal closed; {lt.type or 'no task'} banned {NUDGE_TYPE_BAN_S:.0f}s; he picks fresh on the next tick"
+
+        # d.cmd == "task"
+        steps = d.steps()
+        if not steps:
+            self.operator.refused(d, "nothing to post")
+            return None
+        first, rest = steps[0], steps[1:]
+        _, attempted = self._reflex_act("operator", first, f"operator: {d.arg}")
+        if not attempted:
+            self.operator.refused(d, "the wheel refused: a higher-priority reflex (survival) owns him right now")
+            return None
+        if rest:
+            # Only `drive` has a second step, and it must wait for the seat.
+            self._operator_followup = rest[0]
+            return f"{first['type']} posted; {rest[0]['type']} follows once he is seated"
+        return f"{first['type']} posted"
 
     def _reflex_act(
         self, owner: str, action: dict[str, Any], reason: str
@@ -3337,11 +3450,14 @@ class Harness:
 
         if state.phone.in_call:
             return  # a goal picked now would stand still for the whole call
-        if not self.roam.due():
+        if not self.roam.due() and not self._operator_force_pick:
             # Not idle, just between goals — but "between goals" is capped by
             # `RoamEngine.due`, which ignores its own jittered beat the moment he
             # is actually standing still. That is the operator's one hard rule.
+            # (`_operator_force_pick`: the operator typed `nudge`/`goal`; the
+            # beat is skipped exactly once.)
             return
+        self._operator_force_pick = False
         self._begin_roam_goal(state)
 
     def _judge_roam_goal(self, state: GameState) -> bool:
@@ -3497,6 +3613,12 @@ class Harness:
         # `observe` refreshed the menu at the top of this tick, so the id the
         # model named is validated against what is on offer NOW.
         chosen = self.roam.model_choice(self.current_goal)
+        if self._operator_goal is not None:
+            # The operator named a goal (`wanted goal <id>` / any alias). It was
+            # validated against the offered menu when the command was applied,
+            # so it goes straight to `pick` — the one place a human choice
+            # overrides the model's, and it is on the feed as an event.
+            chosen, self._operator_goal = self._operator_goal, None
         if chosen is None and self.roam.offered_ids():
             # The one decision in free roam that is genuinely the model's, and it
             # did not make it: the `goal` field named no offered id (or named
@@ -4215,6 +4337,10 @@ class Harness:
                 self._wanted_now = state.player.wanted
                 self._live_last_task = state.last_task
 
+                # The operator's button (`scripts/wanted`) is an INPUT to the tick, not
+                # a reflex rung: whatever a human queued since the last tick is
+                # applied here, before any layer — reflex included — sees the state.
+                self._apply_operator(state)
                 self._reflex(state, delta)
 
                 if self._pending_park:

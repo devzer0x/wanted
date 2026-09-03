@@ -985,6 +985,12 @@ MOVEMENT_OWNER_TABLE: tuple[MovementOwner, ...] = (
     MovementOwner("threat", WHEEL_REFLEX, 7, "survival, and clearing a task that has him pinned"),
     MovementOwner("vehicle", WHEEL_REFLEX, 6, "drive away / get the car moving"),
     MovementOwner("physical", WHEEL_REFLEX, 5, "wedged: reverse_out / swerve / unstick"),
+    # The operator's button (wasted_harness.operator, `scripts/wanted`). A human
+    # watching the stream said "do something else" or "drive". Ranked with the
+    # physical-recovery rung on purpose: above every planner and the idle
+    # watchdog (a human beat them to the diagnosis), below the survival rungs
+    # (a human on a laptop does not outrank a car about to hit him).
+    MovementOwner("operator", WHEEL_REFLEX, 5, "the operator said so: un-stick / go do this"),
     MovementOwner("governor", WHEEL_REFLEX, 4, "budget override: L2 wander, L3 scenic park"),
     # CONTRACTS v1.12: `player.interior` says he is indoors, so he is. Above
     # `house_escape` (which is the pre-v1.12 GUESS at the same thing) and above

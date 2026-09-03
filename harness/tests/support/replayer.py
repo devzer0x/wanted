@@ -448,6 +448,10 @@ class ReplayHarness:
         # Seeded and on the fake clock: the breaker picks a bearing at random,
         # and a replay has to be reproducible from (seed, states) alone.
         self.idle_breaker = IdleBreaker(clock=self.clock, rng=random.Random(seed))
+        # Operator overrides read by the roam pick path (`_begin_roam_goal`):
+        # never armed in a replay/unit tick, but the attributes must exist.
+        self._operator_goal = None
+        self._operator_force_pick = False
         self.stranded = StrandedEscalator(clock=self.clock)
         self.threat_latch = ThreatLatch(clock=self.clock)
         self.damage = DamageTracker(clock=self.clock)

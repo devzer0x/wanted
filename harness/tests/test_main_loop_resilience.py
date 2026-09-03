@@ -24,6 +24,7 @@ from typing import Any
 import pytest
 from PIL import Image
 from support import throwaway_totals
+from test_recovery import make_state as _rich_state
 
 from wasted_harness.behavior.activities import ActivityPicker, ActivityRunner
 from wasted_harness.behavior.humanizer import BreakScheduler, IdlePicker, MoodModel
@@ -64,6 +65,7 @@ from wasted_harness.bridge_client import (
     GameState,
 )
 from wasted_harness.main import FRAME_MAX_AGE_S, THINKING_TIMESCALE, Harness
+from wasted_harness.operator import OperatorQueue
 from wasted_harness.perception import Delta, Perceptor, ScreenshotUnavailableError
 
 
@@ -109,6 +111,9 @@ class _Governor:
 
 class _Settings:
     poll_hz = 20.0  # fast, so the test is quick; the loop honours the backoff anyway
+    #: Read by `_dynamic_context` (CONTRACTS v1.13 phone line) whenever a tick reaches
+    #: the brain; the backoff usually keeps it out, but not on every clock.
+    missions_enabled = False
     #: Shutdown clears state/current_session.json so post-mortem watchdog events
     #: stop being filed under a dead session; the real directory is created here
     #: rather than stubbed, because the unlink is the behaviour under test.
@@ -157,7 +162,7 @@ def _harness(bridge: Any) -> Harness:
     h._start_overlay = lambda: None
     h._start_clips = lambda: None
     h._write_session_start = lambda: None
-    h._end_activity_if_running = lambda outcome: None
+    h._end_activity_if_running = lambda outcome, *, by=None: None
     return h
 
 
@@ -394,6 +399,12 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     h.task_stall = TaskStallDetector()
     h.cleared_backoff = ClearedByGameBackoff()
     h.idle_breaker = IdleBreaker()
+    # The operator's button is an input to every tick (`_apply_operator` runs
+    # before `_reflex`), so a bare tick needs its queue and overrides present.
+    h.operator = OperatorQueue()
+    h._operator_goal = None
+    h._operator_force_pick = False
+    h._operator_followup = None
     h.stranded = StrandedEscalator()
     # T9 (findings.md R1/R5): production collaborators of a tick too — `_reflex`
     # feeds all three every tick.
@@ -828,3 +839,68 @@ def test_a_dxcam_import_that_raises_a_com_error_degrades_instead_of_killing_the_
     with pytest.raises(perception.ScreenshotUnavailableError) as caught:
         perception.ScreenGrabber()
     assert "-2005270494" in str(caught.value), "the real COM reason must survive into the message"
+
+
+# --- the operator's button (`_apply_operator`, called directly — no run loop) ----------
+
+
+def _op_harness():
+    """A real Harness with the collaborators `_apply_operator` touches, and a
+    bridge that just records posted tasks. No run loop, so no brain, no hang."""
+    bridge = _TickBridge(_state_body(), stop_after=99)
+    h = _tick_harness(bridge)
+    return h, bridge
+
+
+def test_operator_drive_posts_a_car_then_wander_once_seated() -> None:
+    h, bridge = _op_harness()
+    h.operator.submit("task", "drive")
+    h._apply_operator(GameState.model_validate(_state_body()))
+    assert bridge.tasks and bridge.tasks[0][0] == "enter_nearest_vehicle"
+    assert h._operator_followup is not None and h._operator_followup["type"] == "wander_drive"
+    assert any(t == "unstick" and p.get("source") == "operator" for t, p in h.writer.events)
+
+    # Seated on a LATER tick. The loop opens each tick with `wheel.begin_tick()`,
+    # which expires the one-tick lease the enter-vehicle post took; do the same
+    # here so the follow-up can acquire the wheel, exactly as production does.
+    h.wheel.begin_tick()
+    bridge.tasks.clear()
+    h._apply_operator(_rich_state(in_vehicle=True))
+    assert ("wander_drive", {"style": "rushed"}) in bridge.tasks
+    assert h._operator_followup is None
+
+
+def test_operator_nudge_bans_the_stalled_task_and_arms_a_pick() -> None:
+    h, _ = _op_harness()
+    h.operator.submit("nudge")
+    h._apply_operator(_rich_state(task_type="walk_to", task_status="running"))
+    assert h.idle_breaker.bans("walk_to")
+    assert h._operator_force_pick is True
+    assert h.operator.last_refusal is None
+    assert h.operator.last_applied and h.operator.last_applied.startswith("nudge")
+    assert any(t == "unstick" and p.get("cmd") == "nudge" for t, p in h.writer.events)
+
+
+def test_operator_command_is_refused_not_swallowed_during_a_cutscene() -> None:
+    h, bridge = _op_harness()
+    h.operator.submit("task", "drive")
+    h._apply_operator(GameState.model_validate(_state_body(cutscene_active=True)))
+    assert bridge.tasks == []
+    assert h.operator.last_refusal and "cutscene" in h.operator.last_refusal
+    assert not any(t == "unstick" for t, _ in h.writer.events)
+
+
+def test_operator_goal_off_the_menu_names_what_is_available() -> None:
+    h, _ = _op_harness()
+    h.operator.submit("goal", "definitely_not_a_goal_id")
+    h._apply_operator(GameState.model_validate(_state_body()))
+    assert h.operator.last_refusal and "not on his menu" in h.operator.last_refusal
+
+
+def test_operator_status_is_published_on_every_apply() -> None:
+    h, _ = _op_harness()
+    assert h.operator.status.read() == {}
+    h._apply_operator(GameState.model_validate(_state_body()))
+    doc = h.operator.status.read()
+    assert "still_for_s" in doc and "held_by" in doc and "available_goals" in doc
+    assert doc["last_task"]["status"] in ("idle", "running", "done", "failed")

@@ -52,6 +52,7 @@ harness is the only way `done_when` can tell an upgrade from the fallback.
 from __future__ import annotations
 
 import collections
+import math
 import os
 import random
 import time
@@ -582,6 +583,10 @@ BLOCK_VEHICLE_RADIUS_M = 50.0
 #: him to a car and completes; the old pinpoint radius failed on the spot and left
 #: him standing in the street for the whole goal.
 ON_FOOT_RESCUE_RADIUS_M = 60.0
+
+#: `shoot_and_run`: how far he aims to get away, and how far counts as away.
+SHOOT_RUN_M = 140.0
+SHOOT_RUN_DONE_M = 90.0
 
 #: `roam_the_block` completes on displacement too — it is the never-stand-still
 #: fallback, so "he actually went somewhere" is the whole success condition.
@@ -1588,6 +1593,111 @@ def _done_three_star(state: GameState, snap: dict[str, Any]) -> bool:
 # -- armed_rampage_block (L3) ----------------------------------------------------
 
 
+# --- aircraft: go and fly something --------------------------------------------
+
+#: Where aircraft actually sit in Story Mode. Curated coordinates, the same
+#: class of authored data as LANDMARKS and STUNT_APPROACHES: `/state` has no
+#: "airfield" flag, so this is written down or it does not exist. Sandy Shores
+#: and the LSIA apron park planes; Higgins Helitours parks helicopters. Fort
+#: Zancudo is deliberately absent — driving onto a military base is an instant
+#: chase and a very short flight.
+#: NOT VERIFIED against the running game: if he arrives and there is nothing to
+#: take, the goal times out honestly and the log says where he stood.
+AIRCRAFT_SITES: tuple[dict[str, Any], ...] = (
+    {"name": "sandy_shores_airfield", "pos": (1747.0, 3273.0, 41.1)},
+    {"name": "lsia_apron", "pos": (-1336.0, -3044.0, 13.9)},
+    {"name": "higgins_helitours", "pos": (-724.0, -1444.0, 5.0)},
+)
+
+#: Vehicle classes that count as "he is flying something".
+AIRCRAFT_CLASSES: frozenset[str] = frozenset({"planes", "helicopters"})
+
+#: How close to the apron counts as arrived — aprons are big and the parked
+#: aircraft are spread over them.
+AIRFIELD_ARRIVE_M = 60.0
+
+
+def _nearest_aircraft_site(state: GameState) -> dict[str, Any]:
+    here = player_pos(state)
+    return min(AIRCRAFT_SITES, key=lambda a: planar_distance(here, a["pos"]))
+
+
+def _in_aircraft(state: GameState) -> bool:
+    v = state.vehicle
+    return bool(
+        state.player.in_vehicle
+        and v is not None
+        and (v.vehicle_class or "").strip().lower() in AIRCRAFT_CLASSES
+    )
+
+
+def _needs_go_flying(state: GameState, view: RoamView) -> bool:
+    if state.mission.active or state.player.wanted > 0 or _in_aircraft(state):
+        return False
+    return state.player.health >= GANG_MIN_HEALTH
+
+
+def _plan_go_flying(state, view):
+    site = _nearest_aircraft_site(state)
+    pos = site["pos"]
+    steps: list[dict[str, Any]] = [_waypoint(pos)]
+    if not state.player.in_vehicle:
+        # Wheels first: the apron is usually a long way off, and walking there
+        # is not television.
+        steps.append(_enter("any", ON_FOOT_RESCUE_RADIUS_M))
+    steps.append(_drive_to(pos, 30.0, "rushed", AIRFIELD_ARRIVE_M))
+    # On the apron: take whatever is parked there — at an airfield that is an
+    # aircraft — and then go.
+    steps.append(_enter("any", ON_FOOT_RESCUE_RADIUS_M))
+    steps.append(_wander("rushed"))
+    return steps, {"site": site["name"], "start": player_pos(state)}
+
+
+def _done_go_flying(state: GameState, snap: dict[str, Any]) -> bool:
+    """He is in an aircraft. Airborne is a bonus, not the bar: taxiing a stolen
+    plane down a runway is already the shot, and `vehicle.in_air` on the ground
+    would never fire."""
+    return _in_aircraft(state)
+
+
+def _needs_shoot_and_run(state: GameState, view: RoamView) -> bool:
+    if state.mission.active or not weapon_reported(state):
+        return False
+    if state.player.in_vehicle or state.player.health < GANG_MIN_HEALTH:
+        return False
+    armed = armed_with_a_gun(state) or any(
+        owns_weapon(state, n) for n in ("Pistol", "MicroSMG", "PumpShotgun")
+    )
+    return armed and nearest_mark(state) is not None
+
+
+def _plan_shoot_and_run(state, view):
+    mark = nearest_mark(state)
+    assert mark is not None
+    here = player_pos(state)
+    bearing = math.radians(state.player.heading + view.rng.uniform(120.0, 240.0))
+    away = (
+        here[0] - (SHOOT_RUN_M * math.sin(bearing)),
+        here[1] + (SHOOT_RUN_M * math.cos(bearing)),
+        here[2],
+    )
+    return (
+        [
+            {"type": "shoot_at", "params": {"handle": mark.handle, "duration_s": 5.0}},
+            _walk_to(away, run=True),
+        ],
+        {"start": here, "ammo_start": _ammo_snapshot(state)},
+    )
+
+
+def _done_shoot_and_run(state: GameState, snap: dict[str, Any]) -> bool:
+    """Fired, then put distance between himself and it. Graded on rounds gone
+    and on displacement, never on the target dying — the same honesty rule
+    `drive_by_run` uses."""
+    spent = snap.get("_ammo_spent", 0) >= 1
+    return spent and snap.get("_from_start_m", 0.0) >= SHOOT_RUN_DONE_M
+
+
 def _needs_rampage(state: GameState, view: RoamView) -> bool:
     if not weapon_reported(state) or state.player.in_vehicle:
         return False
@@ -2035,6 +2145,35 @@ CATALOG: tuple[Goal, ...] = (
         # reason as `steal_cop_car`.
         wants_heat=True,
         level=3,
+    ),
+    Goal(
+        id="go_flying",
+        category="stunt",
+        description="get to an airfield and take something that flies",
+        why="the ground is boring",
+        needs=_needs_go_flying,
+        plan=_plan_go_flying,
+        done_when=_done_go_flying,
+        # A cross-map drive plus finding something on the apron. Long, and worth
+        # it: this is the goal that ends "he has been driving for too long".
+        timeout_s=600.0,
+        cooldown_s=45 * 60.0,
+        chaos_cost=0.5,
+        level=1,
+    ),
+    Goal(
+        id="shoot_and_run",
+        category="trouble",
+        description="pick someone, put rounds near them, and leg it",
+        why="somebody was asking for it",
+        needs=_needs_shoot_and_run,
+        plan=_plan_shoot_and_run,
+        done_when=_done_shoot_and_run,
+        timeout_s=150.0,
+        cooldown_s=8 * 60.0,
+        chaos_cost=2.0,
+        wants_heat=True,
+        level=2,
     ),
     Goal(
         id="roam_the_block",

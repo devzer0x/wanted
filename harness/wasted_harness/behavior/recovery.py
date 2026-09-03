@@ -2138,6 +2138,12 @@ class IdleBreaker:
         """Is this task type refused right now because it left him standing?"""
         return self.clock() < self._banned.get(task_type, 0.0)
 
+    def ban(self, task_type: str, seconds: float) -> None:
+        """Refuse `task_type` for `seconds` from now. The operator's `nudge`
+        (wasted_harness.operator) uses this so a human "do something else"
+        and the watchdog's own verdict share one ban list and one gate."""
+        self._banned[task_type] = self.clock() + seconds
+
     def observe(self, state: GameState) -> None:
         """Track real displacement. Called every tick, before :meth:`check`."""
         here = (state.player.pos.x, state.player.pos.y)

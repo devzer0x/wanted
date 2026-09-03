@@ -341,6 +341,18 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
                  "relationship": "neutral", "pos": {"x": 7.0, "y": 0.0, "z": 0.0}},
             ],
         ),
+        # Armed, on foot, someone in range: shoot and leg it.
+        "shoot_and_run": armed_state(
+            in_vehicle=False,
+            health=200,
+            weapon=_weapon(owned=dict(full_kit)),
+            nearby_peds=[
+                {"handle": 42, "model": "a_m_y_hipster_01", "distance": 9.0,
+                 "relationship": "neutral", "pos": {"x": 9.0, "y": 0.0, "z": 0.0}},
+            ],
+        ),
+        # Healthy, unwanted, not already flying: go and take an aircraft.
+        "go_flying": armed_state(in_vehicle=False, health=200),
         "helicopter_grab": armed_state(
             in_vehicle=False,
             nearby_vehicles=[veh(88, "polmav", "Helicopters", 25.0, pos=(25.0, 0.0, 0.0))],
