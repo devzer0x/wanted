@@ -48,6 +48,13 @@ class Settings:
     #: mission whether he is ready or not). Missions that begin some other way are
     #: still played — this is about not walking into them on purpose.
     missions_enabled: bool = field(default=True)
+    #: Touch the in-game phone at all? OFF by default (operator, 2026-09-03).
+    #: Measured live: `answer_call`/`reject_call` are POST /task, so each one
+    #: PREEMPTS whatever he was doing — with Simeon calling every ~30 s the
+    #: bridge log was a wall of "walk_to failed: preempted by reject_call" and
+    #: he never finished a goal. An unanswered phone rings out on its own and
+    #: costs him nothing, so the harness simply leaves it alone.
+    phone_enabled: bool = field(default=False)
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> Settings:
@@ -88,6 +95,8 @@ class Settings:
             hourly_cap_usd=hourly_cap,
             missions_enabled=str(_env("WASTED_MISSIONS_ENABLED", "true")).strip().lower()
             not in ("0", "false", "no", "off"),
+            phone_enabled=str(_env("WASTED_PHONE_ENABLED", "false")).strip().lower()
+            in ("1", "true", "yes", "on"),
             # Both paths are anchored to the package, never to the CWD: on the
             # server the harness starts from a scheduled task whose working
             # directory is not the repo. expanduser() so %USERPROFILE%-style

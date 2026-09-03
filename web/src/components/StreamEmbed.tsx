@@ -8,12 +8,22 @@ import type { StreamConfig } from "@/lib/types";
 // localhost in dev). It is therefore read from window.location at runtime rather than baked into
 // the build (D8) — which is also why the iframe renders only after mount. Autoplay must be muted
 // or browsers block it.
-function twitchSrc(channel: string, host: string): string {
+//
+// `controls: false` is Twitch's own documented embed parameter and it is what makes the stream
+// read as OUR stream: the player's control bar is the only surface that carries Twitch chrome
+// (the logo, the channel links, "watch on Twitch"), and it lives inside a cross-origin iframe
+// where our CSS cannot reach it. Turning the bar off is therefore the only way to remove it.
+//
+// Losing the bar also loses the only volume control, so the panel supplies its own unmute
+// (see `StreamEmbed`): swapping `muted` re-mounts the iframe, and because that swap happens
+// inside a click handler the browser treats it as a user gesture and allows sound.
+function twitchSrc(channel: string, host: string, muted: boolean): string {
   const q = new URLSearchParams({
     channel,
     parent: host,
-    muted: "true",
+    muted: muted ? "true" : "false",
     autoplay: "true",
+    controls: "false",
   });
   return `https://player.twitch.tv/?${q.toString()}`;
 }
@@ -76,12 +86,16 @@ export function StreamEmbed({
   offline: boolean;
 }) {
   const [host, setHost] = useState<string | null>(null);
+  // Muted is the only state autoplay is allowed to start in; the viewer opts into sound.
+  const [muted, setMuted] = useState(true);
   useEffect(() => {
     setHost(window.location.hostname);
   }, []);
 
   let inner: React.ReactNode;
   let configured = true;
+  // Only the Twitch branch has its controls turned off, so only it needs our sound toggle.
+  let isTwitch = false;
 
   if (!config) {
     configured = false;
@@ -96,10 +110,14 @@ export function StreamEmbed({
       // Pre-mount: the parent hostname is not known yet, so no player can be built.
       inner = <div className="h-full w-full bg-void" aria-hidden="true" />;
     } else {
+      isTwitch = true;
       inner = (
         <iframe
+          // Keyed on `muted` so React remounts the iframe on the toggle rather than
+          // mutating a live player's src, which Twitch does not reliably honour.
+          key={muted ? "muted" : "unmuted"}
           data-testid="stream-player"
-          src={twitchSrc(config.channel, host)}
+          src={twitchSrc(config.channel, host, muted)}
           title={`Live stream: ${config.channel}`}
           className="h-full w-full"
           // A cross-origin document that fails to load (blocked player, flaky network) paints
@@ -145,6 +163,19 @@ export function StreamEmbed({
         }`}
       >
         {inner}
+        {/* The Twitch control bar is off (see `twitchSrc`), so sound is ours to offer.
+            Rendered only over a real player, never over the NO SIGNAL panel. */}
+        {configured && isTwitch && (
+          <button
+            type="button"
+            data-testid="stream-sound"
+            onClick={() => setMuted((m) => !m)}
+            aria-pressed={!muted}
+            className="ticker absolute bottom-2 right-2 border border-ash bg-void/80 px-2 py-1 text-[0.55rem] text-smoke transition-colors hover:border-blood hover:text-ember"
+          >
+            {muted ? "sound off" : "sound on"}
+          </button>
+        )}
       </div>
       {status === "off-air" && (
         <p className="border-t border-ash px-3 py-2 text-[0.62rem] leading-snug text-smoke">

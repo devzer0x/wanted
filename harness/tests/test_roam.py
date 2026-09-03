@@ -1187,8 +1187,15 @@ def test_the_fallback_walks_when_there_is_no_car_to_take() -> None:
     state = observed(e, make_state(in_vehicle=False, nearby_vehicles=[]))
     picked = e.pick(state, goal_id="roam_the_block")
     assert picked is not None, "the floor must always produce an action"
-    _locked, step = picked
-    assert step["type"] == "walk_to", f"on foot with no car he walks; got {step}"
+    locked, step = picked
+    # Measured in-game 2026-09-03: `enter_nearest_vehicle` searches the LIVE
+    # world, not this snapshot's list, and a 60 m search walks him to a car and
+    # completes — so the floor ASKS for wheels first, because "he is driving" is
+    # the show. The walk is still in the plan behind it (a failed step advances),
+    # which is what keeps the original guarantee: he never just stands there.
+    assert step["type"] == "enter_nearest_vehicle", f"wheels first; got {step}"
+    assert step["params"]["search_radius_m"] >= 50.0
+    assert "walk_to" in [s["type"] for s in locked.plan], "the walk fallback must survive"
 
 
 def test_steal_cop_car_survives_the_star_it_earns() -> None:

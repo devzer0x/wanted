@@ -2611,7 +2611,7 @@ def _phone_harness(missions_enabled: bool) -> Harness:
     from types import SimpleNamespace
 
     h = _bare_harness(cutscene_active=False)
-    h.settings = SimpleNamespace(missions_enabled=missions_enabled)
+    h.settings = SimpleNamespace(missions_enabled=missions_enabled, phone_enabled=True)
     h._phone_answered_this_ring = False
     h._phone_hung_up_this_call = False
     h._phone_call_connected_at = None
@@ -2805,3 +2805,18 @@ def test_a_running_enter_is_not_re_posted_and_freezes_him(monkeypatch) -> None:
         h, "enter_nearest_vehicle", {"prefer": "any", "search_radius_m": 90.0}, _holding(h, "roam")
     )
     assert len(h.bridge.posted) == 2, "a failed task no longer blocks a fresh post"
+
+
+def test_the_phone_is_left_alone_by_default() -> None:
+    """Operator call 2026-09-03: the phone verbs are POST /task, so each one
+    preempts whatever he was doing — with Simeon calling every ~30 s that was
+    the biggest interruption in his day. Off unless explicitly enabled."""
+    from types import SimpleNamespace
+
+    h = _phone_harness(missions_enabled=False)
+    h.settings = SimpleNamespace(missions_enabled=False, phone_enabled=False)
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, _phone_state(ringing=True, in_call=False)) is False
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, _phone_state(ringing=False, in_call=True)) is False
+    assert h.bridge.posted == [], "the harness must not touch the phone at all"

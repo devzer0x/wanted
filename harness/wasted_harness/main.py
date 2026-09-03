@@ -1887,6 +1887,17 @@ class Harness:
         Returns True when it posted, which is what makes the planners running
         later in this tick stand down for it.
         """
+        if not getattr(self.settings, "phone_enabled", False):
+            # THE PHONE IS NOT OURS TO TOUCH (operator, 2026-09-03: "remove the
+            # phone task, let him do whatever he wants"). Every phone verb is a
+            # POST /task and therefore PREEMPTS the movement task he is in the
+            # middle of; with a story call arriving every ~30 s that was the
+            # single biggest interruption in his day — the bridge log read
+            # "walk_to failed: preempted by reject_call" over and over. A phone
+            # nobody answers rings out by itself, so ignoring it costs him
+            # nothing and he simply keeps playing. `WASTED_PHONE_ENABLED=true`
+            # brings the whole answer/hang-up policy below back.
+            return False
         phone = state.phone
         if phone.in_call:
             # Connected — re-arm the ANSWER latch for the next ring regardless

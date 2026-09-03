@@ -539,7 +539,7 @@ TRIGGER_RADIUS_M = 40.0
 #: `enter_nearest_vehicle` takes no handle, so "which car" is expressed as
 #: proximity: walk to within `walk_to`'s 2 m arrival radius, then search a
 #: circle small enough that the target is the only candidate in it.
-PROXIMITY_SEARCH_RADIUS_M = 6.0
+PROXIMITY_SEARCH_RADIUS_M = 30.0
 #: Past this, walk to the vehicle first instead of trusting the search radius.
 VEHICLE_APPROACH_M = 8.0
 
@@ -576,6 +576,12 @@ FALLBACK_GOAL_ID = "roam_the_block"
 #: 50 m is the same reach the goal used before; the change is that not finding
 #: one is now a branch rather than a dead end.
 BLOCK_VEHICLE_RADIUS_M = 50.0
+
+#: How far `enter_nearest_vehicle` may search when he is on foot with nothing in
+#: the snapshot's own nearby list. Proven in-game 2026-09-03: a 60 m search walks
+#: him to a car and completes; the old pinpoint radius failed on the spot and left
+#: him standing in the street for the whole goal.
+ON_FOOT_RESCUE_RADIUS_M = 60.0
 
 #: `roam_the_block` completes on displacement too — it is the never-stand-still
 #: fallback, so "he actually went somewhere" is the whole success condition.
@@ -1684,6 +1690,19 @@ def _plan_roam_the_block(state, view):
             style = "ignore_lights" if view.mood in ("hyped", "bored") else view.mood_style
             steps.append(_wander(style))
             return steps, {"start": here}
+        # No car in the snapshot's own list, but `enter_nearest_vehicle` searches
+        # the LIVE world at whatever radius it is given and walks him there — and
+        # measured in-game (2026-09-03) a 60 m search is what actually gets him
+        # off his feet. Ask for that before falling back to walking, because "he
+        # is driving" is the show and "he is walking at a landmark" is not.
+        steps.append(_enter("any", ON_FOOT_RESCUE_RADIUS_M))
+        # ...and if even that finds nothing, he still walks rather than stands:
+        # a failed step advances the plan, so the walk below is the floor's floor.
+        _, target = _landmark_choice(state, view)
+        steps.append(_walk_to(target, run=True))
+        style = "ignore_lights" if view.mood in ("hyped", "bored") else view.mood_style
+        steps.append(_wander(style))
+        return steps, {"start": here}
         # No car in reach. Walking is slower television than driving, but it is
         # television; standing in an empty street is not. A landmark is used only
         # as a bearing — `done_when` is displacement, so he does not have to
