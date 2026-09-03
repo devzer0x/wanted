@@ -126,6 +126,7 @@ from .events import SupabaseWriter
 from .logsetup import force_utf8_console, get_logger, setup_logging
 from .operator import (
     NUDGE_TYPE_BAN_S,
+    OPERATOR_GOAL_WINDOW_S,
     Directive,
     OperatorQueue,
 )
@@ -215,6 +216,12 @@ RESTART_HOSTILE_TASKS: frozenset[str] = frozenset({"enter_nearest_vehicle", "wan
 #: read as fake (operator, 2026-09-03: "he talks like he is doing but standing
 #: at one place ... then it looks fake").
 IDLE_SILENCE_S = 15.0
+
+#: The same rule for a man who is moving but arriving nowhere. Longer than
+#: IDLE_SILENCE_S because covering no ground is only damning once it has gone on
+#: a while — a slow walk across a forecourt is not a loop, and half a minute of
+#: pacing inside one fifteen-metre circle is.
+IDLE_NOWHERE_SILENCE_S = 30.0
 
 #: T3 (findings.md R2): action types that mean "he is fighting" for the
 #: purposes of gating `say` on an event — the decision itself choosing one of
@@ -890,7 +897,10 @@ class Harness:
         self.operator = OperatorQueue()
         #: One-shot overrides the operator can arm for the roam pick path:
         #: a specific catalog goal, and "pick NOW, ignore the boredom timer".
+        #: The goal is STICKY until `_operator_goal_until`: see `_roam` for why
+        #: consuming it on the first pick threw the human's choice away.
         self._operator_goal: str | None = None
+        self._operator_goal_until: float = 0.0
         self._operator_force_pick = False
         #: `drive` is two tasks that cannot both be posted in one tick (the
         #: second would preempt the first): the follow-up waits for the seat.
@@ -2153,13 +2163,27 @@ class Harness:
             # end whatever goal he is nominally on, refuse the task type that
             # left him standing, and make the very next tick pick.
             self._end_activity_if_running(f"operator_{d.cmd}", by="operator")
-            if lt.type:
+            # Only a task that FAILED earns a ban. Banning whatever happened to
+            # be RUNNING is how `enter_nearest_vehicle` got locked out for good
+            # (same bug, same week, in `recovery.IdleBreaker`): standing still is
+            # exactly when he needs a car, so the ban refused him every vehicle.
+            banned = bool(lt.type) and lt.status == "failed"
+            if banned:
                 self.idle_breaker.ban(lt.type, NUDGE_TYPE_BAN_S)
+            ban_note = (
+                f"{lt.type} banned {NUDGE_TYPE_BAN_S:.0f}s"
+                if banned
+                else f"nothing banned ({lt.type or 'no task'} was not a failure)"
+            )
             self._operator_force_pick = True
             if d.cmd == "goal":
                 self._operator_goal = d.arg
-                return f"goal {d.arg} will lock on the next pick; {lt.type or 'no task'} banned {NUDGE_TYPE_BAN_S:.0f}s"
-            return f"goal closed; {lt.type or 'no task'} banned {NUDGE_TYPE_BAN_S:.0f}s; he picks fresh on the next tick"
+                self._operator_goal_until = time.monotonic() + OPERATOR_GOAL_WINDOW_S
+                return (
+                    f"goal {d.arg} armed; it locks on the next pick where it is "
+                    f"still on his menu (up to {OPERATOR_GOAL_WINDOW_S / 60:.0f} min); {ban_note}"
+                )
+            return f"goal closed; {ban_note}; he picks fresh on the next tick"
 
         # d.cmd == "task"
         steps = d.steps()
@@ -2196,6 +2220,77 @@ class Harness:
         if token is None:
             return None, False
         return self._execute_action(action_type, action["params"], token), True
+
+    def _going_nowhere_quietly(self, state: GameState, d: DecisionModel) -> bool:
+        """Is he narrating a life he is not actually living?
+
+        Two ways to be doing nothing, and the feed needs both:
+
+        * **Standing still** — `still_for_s`, the original T3 rule.
+        * **Getting nowhere** — `going_nowhere_s`. `still_for_s` resets on any
+          six-metre hop, so a man pacing between two points eight metres apart
+          reads as "moving" forever and never trips the first rule. That is the
+          case this rule exists for: repeated narration about one subject while
+          nothing is happening — a line every poll about the same car, while he
+          covered no ground at all.
+
+        A FIGHT IS NOT NOTHING. Trading punches, being shot at or running from
+        the police all happen inside a few metres and are the best television he
+        produces; silencing those would be a worse bug than the one this fixes.
+        So a live threat, a wanted level or a fighting action exempts him
+        entirely — the same carve-out `_phone_reflex` already makes for the
+        same reason.
+        """
+        fighting = (
+            state.threat.attacker_handle is not None
+            or state.player.wanted > 0
+            or d.action.type in FIGHT_ACTION_TYPES
+        )
+        if fighting:
+            return False
+        if self.idle_breaker.still_for_s() >= IDLE_SILENCE_S:
+            return True
+        return self.idle_breaker.going_nowhere_s() >= IDLE_NOWHERE_SILENCE_S
+
+    def _operator_choice(self, chosen: str | None) -> str | None:
+        """The operator's armed goal, if it is on his menu THIS tick.
+
+        WHY THIS IS STICKY. `wanted goal <id>` validates the id against the menu
+        when the command is APPLIED, but the menu is recomputed every tick from
+        state-dependent `needs` predicates and the pick can be several ticks
+        later. LIVE 2026-09-03: `goal armed_rampage_block` was accepted while he
+        was on foot, an un-stick put him in a car two ticks later, and
+        `_needs_rampage` gates on `not in_vehicle` — so by the time the pick ran
+        the goal was off the menu. The old code had already consumed
+        `_operator_goal`, `pick` fell through to the head of the menu, and the
+        human's choice was silently swapped for `roam_the_block`. The operator
+        saw "accepted" and got something else, twice in a row.
+
+        So the choice is HELD until it is actually offerable, and dropped after
+        `OPERATOR_GOAL_WINDOW_S` — beyond that the state has moved on far enough
+        that firing it would be a surprise rather than a command. He never waits
+        on it: an unofferable goal leaves the model's own choice untouched and
+        free roam carries on exactly as it would have.
+        """
+        if self._operator_goal is None:
+            return chosen
+        offered = list(self.roam.offered_ids())
+        if time.monotonic() >= self._operator_goal_until:
+            log.info(
+                "operator goal expired before it was ever on his menu",
+                extra={"kv": {"goal": self._operator_goal, "offered": offered}},
+            )
+            self._operator_goal = None
+            return chosen
+        if self._operator_goal in offered:
+            picked, self._operator_goal = self._operator_goal, None
+            return picked
+        log.info(
+            "operator goal not on the menu yet; still armed",
+            extra={"kv": {"goal": self._operator_goal, "offered": offered,
+                          "s_left": round(self._operator_goal_until - time.monotonic(), 1)}},
+        )
+        return chosen
 
     def _roam_preempted(self, by: str, reason: str) -> None:
         """Free roam lost the wheel. The goal it was running is over, for real.
@@ -2909,7 +3004,7 @@ class Harness:
                 extra={"kv": {"layer": layer, "would_have_said": d.say[:120]}},
             )
             say = ""
-        elif self.idle_breaker.still_for_s() >= IDLE_SILENCE_S:
+        elif self._going_nowhere_quietly(state, d):
             # He has not actually moved for a quarter of a minute. Whatever the
             # event was, a running line about taking a car he is not walking to
             # reads as fake to anyone watching the screen — and it was: observed
@@ -3613,12 +3708,7 @@ class Harness:
         # `observe` refreshed the menu at the top of this tick, so the id the
         # model named is validated against what is on offer NOW.
         chosen = self.roam.model_choice(self.current_goal)
-        if self._operator_goal is not None:
-            # The operator named a goal (`wanted goal <id>` / any alias). It was
-            # validated against the offered menu when the command was applied,
-            # so it goes straight to `pick` — the one place a human choice
-            # overrides the model's, and it is on the feed as an event.
-            chosen, self._operator_goal = self._operator_goal, None
+        chosen = self._operator_choice(chosen)
         if chosen is None and self.roam.offered_ids():
             # The one decision in free roam that is genuinely the model's, and it
             # did not make it: the `goal` field named no offered id (or named

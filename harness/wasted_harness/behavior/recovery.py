@@ -104,6 +104,7 @@ attack, and it is already in every `/state`.
 from __future__ import annotations
 
 import math
+from collections import deque
 import random
 import threading
 import time
@@ -2071,6 +2072,20 @@ class ApiBackoff:
 
 #: How far he has to actually travel for this not to count as standing still.
 IDLE_MOVE_M = 6.0
+
+#: Radius inside which a run of positions counts as "the same place" for
+#: :meth:`IdleBreaker.going_nowhere_s`. Bigger than IDLE_MOVE_M on purpose: this
+#: is not "did he twitch", it is "has he actually got anywhere".
+GOING_NOWHERE_RADIUS_M = 15.0
+
+#: Nothing older than this is kept, so the answer is always about the recent
+#: past rather than the whole session.
+GOING_NOWHERE_WINDOW_S = 60.0
+
+#: Positions are recorded no more often than this. The poll runs several times
+#: a second and the question is measured in tens of seconds; storing every
+#: sample would just make the scan longer for no extra truth.
+GOING_NOWHERE_SAMPLE_S = 0.5
 #: How long he may stand inside that circle before the breaker fires. Longer
 #: than the bridge's own no-progress cycle (10 s, one re-issue, 10 s more) on
 #: purpose: a task that is quietly failing gets its full chance to say so before
@@ -2086,7 +2101,7 @@ IDLE_WALK_FAR_M = 110.0
 #: A task type that was running while he stood still is not tried again for
 #: this long. Observed live: `enter_nearest_vehicle` failed and was re-issued
 #: for ten minutes at a car in a garage he could not reach.
-IDLE_TYPE_BAN_S = 90.0
+IDLE_TYPE_BAN_S = 30.0
 
 
 @dataclass
@@ -2127,12 +2142,16 @@ class IdleBreaker:
     _health: int | None = None
     #: Task types seen running while he was stuck, and when they may be tried again.
     _banned: dict[str, float] = field(default_factory=dict)
+    #: Recent (t, x, y) samples, for `going_nowhere_s`. Bounded by
+    #: GOING_NOWHERE_WINDOW_S in `observe`, so it never grows with session length.
+    _trail: deque[tuple[float, float, float]] = field(default_factory=deque)
 
     def reset(self) -> None:
         self._anchor = None
         self._anchor_at = self.clock()
         self._rung = 0
         self._fired_at = 0.0
+        self._trail.clear()
 
     def bans(self, task_type: str) -> bool:
         """Is this task type refused right now because it left him standing?"""
@@ -2144,10 +2163,38 @@ class IdleBreaker:
         and the watchdog's own verdict share one ban list and one gate."""
         self._banned[task_type] = self.clock() + seconds
 
+    def going_nowhere_s(self) -> float:
+        """How long he has been inside one :data:`GOING_NOWHERE_RADIUS_M` circle.
+
+        WHY THIS EXISTS ALONGSIDE `still_for_s`. `still_for_s` is time since he
+        last moved six metres from an anchor, so ANY six-metre hop resets it to
+        zero. A man pacing between two points eight metres apart therefore reads
+        as "moving" forever, and the commentary gate that keys off it never
+        fires — which is how the feed filled up with a line every poll about the
+        same car while he got nowhere at all: repeated narration about one
+        subject while he is doing nothing. This
+        answers the different question the feed actually cares about: has he
+        BEEN anywhere, not did he just twitch.
+        """
+        if not self._trail:
+            return 0.0
+        now, hx, hy = self._trail[-1]
+        oldest = now
+        for t, x, y in reversed(self._trail):
+            dx, dy = x - hx, y - hy
+            if math.sqrt((dx * dx) + (dy * dy)) > GOING_NOWHERE_RADIUS_M:
+                break
+            oldest = t
+        return now - oldest
+
     def observe(self, state: GameState) -> None:
         """Track real displacement. Called every tick, before :meth:`check`."""
         here = (state.player.pos.x, state.player.pos.y)
         now = self.clock()
+        if not self._trail or (now - self._trail[-1][0]) >= GOING_NOWHERE_SAMPLE_S:
+            self._trail.append((now, here[0], here[1]))
+            while self._trail and (now - self._trail[0][0]) > GOING_NOWHERE_WINDOW_S:
+                self._trail.popleft()
         health = state.player.health
         losing_health = self._health is not None and health < self._health
         self._health = health
@@ -2197,9 +2244,13 @@ class IdleBreaker:
             return None
         if now - self._fired_at < IDLE_RUNG_HOLD_S:
             return None
-        # Whatever was running while he stood there does not get another go.
+        # A task that FAILED while he stood there does not get another go for a
+        # bit. Only a failure: a task merely running while he is stuck may be
+        # the very thing about to move him, and banning that was worse than the
+        # freeze — it locked `enter_nearest_vehicle` out permanently and left
+        # him on foot for good (observed immediately after shipping the ban).
         lt = state.last_task
-        if lt is not None and lt.type:
+        if lt is not None and lt.type and lt.status == "failed":
             self._banned[lt.type] = now + IDLE_TYPE_BAN_S
         self._fired_at = now
         rung, self._rung = self._rung % 4, (self._rung + 1) % 4

@@ -171,6 +171,10 @@ class _ApplyDecisionStub:
     def _free_roam_owns_movement(self, action_type: str) -> bool:
         return Harness._free_roam_owns_movement(self, action_type)
 
+    def _going_nowhere_quietly(self, state: Any, d: Any) -> bool:
+        # The REAL gate, so these tests keep testing the shipped rule.
+        return Harness._going_nowhere_quietly(self, state, d)
+
     def _execute_action(
         self, action_type: str, params: dict[str, Any], token: Any = None
     ) -> str | None:

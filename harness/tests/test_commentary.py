@@ -127,3 +127,67 @@ def test_suppressing_a_line_logs_a_debug_line(tmp_path: Path, caplog) -> None:
     with caplog.at_level(logging.DEBUG, logger="wasted.commentary"):
         c.gate_say("Closing the gap, still on his six.")
     assert any("suppressed" in r.message for r in caplog.records)
+
+
+# --- the buffalo loop -------------------------------------------------------------
+
+
+def _gate():
+    """A Commentary whose only job here is `gate_say`, with a real state dir."""
+    import tempfile
+    from pathlib import Path
+
+    from wasted_harness.commentary import Commentary
+
+    return Commentary(Path(tempfile.mkdtemp()))
+
+
+def test_the_same_subject_three_lines_running_is_a_loop_and_is_dropped() -> None:
+    """Repeated commentary about one subject reads as fake, AI-generated filler
+    even when the sentences share almost no wording.
+
+    These three sentences share almost no wording, so the Jaccard gate passes
+    every one of them — but they are all about the Buffalo, and back to back
+    they read like a stuck bot rather than a person.
+    """
+    c = _gate()
+    assert c.gate_say("The Buffalo took that corner better than I did.") is True
+    assert c.gate_say("Still riding in this Buffalo, and it still smells.") is True
+    assert c.gate_say("Somebody keyed the Buffalo while I was inside.") is False
+
+
+def test_two_mentions_are_a_callback_not_a_loop() -> None:
+    c = _gate()
+    assert c.gate_say("Parked the Buffalo outside the store.") is True
+    assert c.gate_say("Back to the Buffalo, then.") is True
+
+
+def test_the_subject_gate_forgets_once_other_lines_push_it_out_of_the_window() -> None:
+    c = _gate()
+    assert c.gate_say("The Buffalo is filthy.") is True
+    assert c.gate_say("This Buffalo pulls left.") is True
+    for filler in (
+        "Red light. Nobody else is stopping either.",
+        "That siren is not for me yet.",
+        "Rain on the windscreen, and no wipers worth the name.",
+        "Someone is selling oranges in the middle of the road.",
+        "The radio just played this one.",
+    ):
+        assert c.gate_say(filler) is True
+    # The window has rolled over; the subject is fair game again.
+    assert c.gate_say("Found the Buffalo where I left it.") is True
+
+
+def test_a_line_with_no_proper_noun_is_never_subject_gated() -> None:
+    c = _gate()
+    assert c.gate_say("That was close.") is True
+    assert c.gate_say("Still nothing behind me.") is True
+    assert c.gate_say("Nothing much happening out here.") is True
+
+
+def test_sentence_initial_capitals_are_not_treated_as_subjects() -> None:
+    """Every line starts with a capital; that says nothing about its subject."""
+    c = _gate()
+    assert c.gate_say("Traffic is heavy today.") is True
+    assert c.gate_say("Traffic has not moved in a while.") is True
+    assert c.gate_say("Traffic finally broke up.") is True

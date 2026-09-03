@@ -54,6 +54,24 @@ SIMILARITY_WINDOW = 5
 #: "Right on his six" — different strings, same line, back to back.
 SIMILARITY_THRESHOLD = 0.8
 
+#: How many of the recently shown lines may name the SAME subject before a
+#: further line about it is dropped. The similarity gate above compares
+#: WORDING, so "Buffalo's still where I left it" and "back in the Buffalo" score
+#: far below its threshold and both go through — different sentences, same
+#: subject, over and over. Watching that back it reads like a stuck bot rather
+#: than someone talking, which is the one thing the feed cannot afford: repeated
+#: narration about one subject reads as fake, AI-generated filler.
+#: Two mentions inside the window is a callback; a third is
+#: a loop.
+SUBJECT_REPEAT_MAX = 2
+
+#: Words that are Capitalised mid-sentence but are not really subjects: the
+#: brand and character names the show says constantly by design, plus the
+#: sentence-initial "I" that survives the mid-sentence test in quoted speech.
+#: Kept deliberately tiny — anything else repeated three times in five lines is
+#: a loop whether it is a car, a street or a person.
+SUBJECT_STOPWORDS: frozenset[str] = frozenset({"i", "im", "ive", "ill", "id", "the agent", "los", "santos"})
+
 _WRITE_RETRIES = 8
 _WRITE_DELAY_S = 0.12
 
@@ -265,6 +283,29 @@ class Commentary:
         """Remember a model-authored line; True when it repeated a recent one."""
         return self.recent.add(line)
 
+    @staticmethod
+    def _subjects(line: str) -> set[str]:
+        """The proper nouns a line is ABOUT: tokens capitalised mid-sentence.
+
+        Sentence-initial words are skipped because every line starts with a
+        capital and that says nothing about its subject. This is a deliberately
+        dumb reader — no model call, no name list — because the thing it has to
+        catch (`Buffalo`, `Vespucci`, `Trevor` three lines running) is exactly
+        what capitalisation already marks in ordinary English prose.
+        """
+        subjects: set[str] = set()
+        starts_sentence = True
+        for raw in line.split():
+            word = raw.strip("\"'“”‘’(),.:;!?—-")
+            if not word:
+                continue
+            if not starts_sentence and word[:1].isupper() and word.isalpha():
+                token = word.lower()
+                if token not in SUBJECT_STOPWORDS:
+                    subjects.add(token)
+            starts_sentence = raw.endswith((".", "!", "?", "…"))
+        return subjects
+
     def gate_say(self, line: str) -> bool:
         """Should `line` actually be shown (overlay/feed) right now?
 
@@ -297,6 +338,16 @@ class Commentary:
                     },
                 )
                 return False
+        subjects = self._subjects(line)
+        if subjects:
+            for subject in sorted(subjects):
+                seen = sum(1 for prior in self._shown if subject in self._subjects(prior))
+                if seen >= SUBJECT_REPEAT_MAX:
+                    log.debug(
+                        "commentary line suppressed: same subject too many times running",
+                        extra={"kv": {"say": line[:120], "subject": subject, "seen": seen}},
+                    )
+                    return False
         self._shown.append(line)
         return True
 

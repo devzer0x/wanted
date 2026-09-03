@@ -38,6 +38,7 @@ from wasted_harness.behavior.recovery import (
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
+    IdleBreaker,
     JackHandoffGate,
     OffLoopGrab,
     RoadDodge,
@@ -1807,3 +1808,40 @@ def test_the_stars_only_rung_stands_down_when_the_goal_wants_the_heat() -> None:
     assert threat_action(one_star, calm, False, heat_wanted=True) is None
     hurt = Delta(wanted_from=1, wanted_to=1, big_health_drop=True)
     assert threat_action(one_star, hurt, True, heat_wanted=True) is not None
+
+
+# --- going nowhere: moving, but arriving nowhere ----------------------------------
+
+
+def test_pacing_reads_as_moving_to_still_for_s_but_not_to_going_nowhere_s() -> None:
+    """The 2026-09-04 feed bug, in a test.
+
+    Eight metres is more than IDLE_MOVE_M, so every leg of this pace re-anchors
+    `still_for_s` to zero and the old commentary gate never fired — he narrated
+    a line per poll while covering no ground at all.
+    """
+    clock = FakeClock()
+    breaker = IdleBreaker(clock=clock)
+    for step in range(40):  # 40 s of pacing between x=0 and x=8
+        breaker.observe(make_state(pos=(0.0 if step % 2 else 8.0, 0.0, 0.0)))
+        clock.t += 1.0
+
+    assert breaker.still_for_s() < 5.0, "every leg re-anchors it; that is the bug"
+    assert breaker.going_nowhere_s() >= 30.0, "but he has been in one circle throughout"
+
+
+def test_going_nowhere_s_resets_once_he_actually_travels() -> None:
+    clock = FakeClock()
+    breaker = IdleBreaker(clock=clock)
+    for _ in range(40):
+        breaker.observe(make_state(pos=(0.0, 0.0, 0.0)))
+        clock.t += 1.0
+    assert breaker.going_nowhere_s() >= 30.0
+
+    clock.t += 1.0
+    breaker.observe(make_state(pos=(400.0, 0.0, 0.0)))  # drove off
+    assert breaker.going_nowhere_s() == 0.0
+
+
+def test_going_nowhere_s_is_zero_before_anything_is_observed() -> None:
+    assert IdleBreaker(clock=FakeClock()).going_nowhere_s() == 0.0
