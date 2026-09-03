@@ -1,9 +1,39 @@
 # WANTED — CONTRACTS
 
-**Version: 1.13 — FROZEN 2026-09-03.** Executors treat this file as read-only; changes go through
+**Version: 1.14 — FROZEN 2026-09-03.** Executors treat this file as read-only; changes go through
 Fable (the orchestrator) and bump the version. Research backing every external-API claim:
 docs/RESEARCH.md (decisions D1–D10) + raw sourced briefs in docs/research/.
 Changelog:
+- v1.14 (additive; bridge 1.6.0 → **1.7.0**). **WEAPONS AND TARGETED VIOLENCE.**
+  **§1 `/state` gains three fields.** `player.weapon` = `{"name": "<WeaponHash member>", "class":
+  "unarmed|melee|gun|projectile|unknown", "ammo": int, "owned": {"<member>": int}, "loadout":
+  "off"|"ammunation"}`, always present. `owned` is `HAS_PED_GOT_WEAPON` over the three tracked
+  loadout weapons only — a missing name means "not one of the three", never "unarmed".
+  `vehicle.in_air` = `IS_ENTITY_IN_AIR` (via `Entity.IsInAir`). `vehicle.seat` =
+  `"driver"|"passenger"|null` from `GET_PED_IN_VEHICLE_SEAT(veh,-1) == player`.
+  **§1 gains three task types.** `shoot_at {handle, duration_s}` (`TASK_SHOOT_AT_ENTITY`, done on
+  the clock); `drive_by {handle, duration_s}` (`TASK_DRIVE_BY`, raw — no SHVDN wrapper exists;
+  signature from citizenfx natives docs, fetched 2026-09-03; in-vehicle only); `enter_vehicle_seat
+  {handle, seat: 0|1|2}` (`TASK_ENTER_VEHICLE`, passenger seats only — the driver's seat stays
+  `enter_nearest_vehicle`; fails with `seat_occupied` / `no_driver` / `took_the_wheel`). `fight_ped`
+  gains optional `weapon: "auto"|"unarmed"|"armed"`, default `auto` = unchanged v1.11 behaviour.
+  `attack_ped` was NOT added: `TASK_COMBAT_PED(player, target, 0, 16)` is byte-for-byte what
+  `fight_ped`'s armed arm already issues; a second type with the same native would give the model
+  two indistinguishable options.
+  **§1 safety rule, amended.** The sentence *"…no money, no weapon-giving endpoint."* becomes:
+  *"…no money, and **no endpoint through which the harness can request a weapon**. The bridge may
+  maintain a fixed Ammu-Nation-equivalent loadout of its own — pistol, micro SMG, pump shotgun,
+  modest ammo (60/90/24), **never infinite** — controlled by `WASTED_BRIDGE_LOADOUT` (`off` |
+  `ammunation`), reported in `player.weapon.loadout`, re-applied on the death→alive edge, and no
+  caller can vary it. Weapon **selection** is bridge-side and always `HAS_PED_GOT_WEAPON`-guarded."*
+  **Operator decision, logged:** the default ships as `ammunation`. CLAUDE.md rule 5's test is
+  "a human can't do that": a human with the agent's cash walks into Ammu-Nation and buys exactly these
+  three. What a human cannot do — infinite ammo, perfect accuracy, a minigun from nowhere — stays
+  refused (`docs/research/brief-combat-natives.json` FAIRNESS JUDGMENTS). Flip the env to `off`
+  to go back to whatever he picks up.
+  Every wrapper's underlying native hash was verified by reading the pinned SHVDN 3.7.0.189 DLL's
+  IL with `System.Reflection.Metadata` (the table is in fix-opus-b's T6 report and in
+  `bridge/src/WeaponState.cs`). NOT VERIFIED in-game: all of it — see `docs/findings.md` T6.
 - v1.13 (additive; bridge 1.5.0 → **1.6.0**). **THE PHONE.** `/state` gains
   `phone` = `{"ringing": bool, "in_call": bool}`, and §1 gains two task types, `answer_call` and
   `reject_call`, both `{}`.

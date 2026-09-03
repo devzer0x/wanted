@@ -3,6 +3,36 @@
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
 run log, or URL) noted next to it. Last updated: 2026-09-03.
 
+## 2026-09-03 — "make the agent fun to watch" program (stream PAUSED, brain key DISABLED)
+
+Operator brief: five phases, autonomous, stop at READY TO GO LIVE. Fun is defined as automated
+checks F1–F6 (idle < 5 %, something new every 60 s, no line without an event, ≥ 60 % goal
+completion, < 6 roam deaths/h, moves within 3 s of control). Everything is built and verified
+OFFLINE against a fake brain and recorded/synthesised `/state` streams — no live brain calls.
+
+- **PHASE 0 done:** six subagent definitions in `.claude/agents/` (registry picks them up next
+  session; this session maps them to executor/verifier with the same model overrides). Safety
+  net (fake brain, 5 Hz `/state` recorder, replayer through the REAL selection code, F1–F6
+  `funcheck.py`) in progress.
+- **PHASE 1 done — `docs/findings.md`:** R1 no drive-start sequence + `cleared_by_game` (111 in
+  2 h); R2 a line on every decision, decisions on every poll; R3 mission goal leaking through
+  missions-off (fixed `788956b`, undeployed); R4 model goal id never reached the plugin (22/22
+  picks fell back; prompt fixed, undeployed); R5 stranded livelock (fixed, deployed); R6 phone;
+  R7 **401 — the key on the box and on the dev machine are both invalid**; R8 weapons/aimed
+  fire/drive-by/airtime/taxi not expressible. Tickets T1–T11.
+- **PHASE 2 — fix-opus-b DONE** (T6 weapons/shoot_at/drive_by/in_air/seat, T7 chaos ladder L1–L3 with F5 step-down, cadence config, 95 roam tests; bridge 1.7.0; CONTRACTS v1.14 written by Fable, loadout default `ammunation` as an operator-requested, bounded exception). It also found the live bug behind "it can't cut the call": the phone tasks were missing from `bridge_client.BRIDGE_TASK_TYPES`, so `post_task` raised before I/O — routed to fix-sonnet-d.
+- **PHASE 2 running:** fix-opus-a (T1 drive-start + verify, T2 wheel-only movement),
+  fix-opus-b (T6 weapons + attack/shoot/drive-by/airtime/taxi tasks, T7 chaos ladder L1–L3 with
+  F5 step-down + mission cadence config), fix-sonnet-c (T3 line-only-on-event in code, T4
+  validator with one regenerate, T5 plugin-written dashboard goal), fix-sonnet-d (T8 phone
+  answer/hang-up-25 s/destroy-stuck-UI, T9 reflexes + F6 on every control edge), fix-sonnet-e
+  (T10 safety net). Merge order a → c → b → d, then `verify`.
+- **sshd throttle fixed on the box** (`MaxStartups 60:30:200`, `LoginGraceTime 30`, inserted
+  before the Match block, `sshd -t` clean, restarted, reconnect verified) — the 3-minute waits
+  between connections are over.
+- **Site:** the production site shows "N days, H hours since the agent was born" in place of the counters.
+
+
 ## 2026-09-03 — live: missions off, the stranded livelock, and the phone
 
 **the agent is live on bridge 1.5.0, deployed by HOT RELOAD** — the DLL swapped 1.2.0 → 1.5.0 with the
