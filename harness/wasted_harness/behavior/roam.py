@@ -1856,15 +1856,23 @@ class RoamEngine:
         locked = self.current
         if locked is not None:
             elapsed = locked.elapsed(self._clock())
+            # The instruction names the FIELD and the exact value, because the
+            # softer wording ("do not switch") produced prose in the goal field on
+            # stream every single pick — "cruise around, find a bike, aim for a
+            # hill" — which the matcher (rightly) reads as no choice at all.
             lines.append(
                 f"ROAM CURRENT: {locked.goal.id} — {locked.goal.description} "
                 f'("{locked.why}"). {elapsed:.0f}s of {locked.goal.timeout_s:.0f}s. '
-                f"This is the goal. Do not switch; a different one is ignored."
+                f'Set your "goal" field to exactly: {locked.goal.id} — nothing else. '
+                f"Any other value is ignored."
             )
         elif self._offers:
+            ids = " | ".join(o.id for o in self._offers)
             menu = "; ".join(f'{o.id} ("{o.why}")' for o in self._offers)
             lines.append(
-                f"ROAM AVAILABLE (pick ONE by id, first is the live opportunity): {menu}"
+                f'ROAM AVAILABLE: {menu}. Set your "goal" field to EXACTLY ONE of: '
+                f"{ids} — the bare id, no sentence. First listed is the live opportunity. "
+                f"A goal that is not one of these ids is thrown away and picked for you."
             )
         return "\n".join(lines)
 

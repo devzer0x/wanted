@@ -837,7 +837,7 @@ def test_the_brain_gets_exactly_one_line_per_transition() -> None:
     e.observe(state)
     e.available(state)
     menu = e.note()
-    assert "ROAM AVAILABLE" in menu and "pick ONE by id" in menu
+    assert "ROAM AVAILABLE" in menu and 'Set your "goal" field to EXACTLY ONE of:' in menu
 
 
 def test_the_offer_list_carries_a_quotable_why_for_every_entry() -> None:
@@ -1266,3 +1266,29 @@ def test_the_planner_never_schedules_or_requests_a_mission_when_off() -> None:
     assert not p._overdue_for_a_mission(10**9), "never overdue for something switched off"
     p.request_mission_block("let's get paid")
     assert not p.in_mission_block, "an explicit request is refused too"
+
+
+
+def test_the_menu_tells_him_the_field_and_the_exact_value() -> None:
+    """Watched on stream after deploy: every pick logged goal_fallback with prose in
+    the goal field ("cruise around, find a bike, aim for a hill"). The softer
+    "pick ONE by id" was not enough; the line has to name the FIELD and show the
+    bare ids in the shape he must return."""
+    e, _ = engine()
+    state = observed(e, make_state(nearby_vehicles=[veh(1, "adder", "Super", 12.0, pos=(12.0, 0.0, 0.0))]))
+    e.available(state)
+    note = e.note()
+    assert 'Set your "goal" field to EXACTLY ONE of:' in note
+    for o in e._offers:
+        assert o.id in note
+    assert "bare id, no sentence" in note
+
+
+def test_a_locked_goal_names_the_exact_value_to_return() -> None:
+    e, _ = engine()
+    state = observed(e, make_state())
+    e.pick(state, goal_id="roam_the_block")
+    e.note()  # drains the transition line
+    note = e.note()
+    assert 'Set your "goal" field to exactly: roam_the_block' in note
+
