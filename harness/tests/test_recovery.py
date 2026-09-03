@@ -7,6 +7,7 @@ recorded sessions — the fixtures directory stays empty by design.
 import random
 import threading
 import time
+from typing import Any
 
 import pytest
 
@@ -1591,3 +1592,62 @@ def test_the_watchdog_never_presses_tab() -> None:
     one on Enter. Tab must never be sent."""
     assert "tab" not in {k.lower() for k in BLOCKING_SCREEN_KEYS}
     assert BLOCKING_SCREEN_KEYS[0] == "enter"
+
+
+# -- ClearedByGameBackoff --------------------------------------------------------
+# Measured live 2026-09-03: `enter_nearest_vehicle` started, `failed: cleared_by_game`
+# ~1 s later, and was re-posted within 300 ms by whichever owner got the wheel next,
+# with an empty car 2.8 m away, for minutes. The game clears tasks for reasons the
+# harness cannot see (a ringing phone, a scripted moment). Backing off is the only
+# honest response.
+
+
+def _task_state(task_id: str, ttype: str, status: str, detail: str = "") -> Any:
+    from types import SimpleNamespace
+
+    return SimpleNamespace(last_task=SimpleNamespace(id=task_id, type=ttype, status=status, detail=detail))
+
+
+def test_a_game_cleared_task_is_refused_for_a_while() -> None:
+    from wasted_harness.behavior.recovery import CLEARED_BACKOFF_FIRST_S, ClearedByGameBackoff
+
+    clock = FakeClock()
+    b = ClearedByGameBackoff(clock=clock)
+    assert b.refuses("enter_nearest_vehicle") == 0.0
+    assert b.feed(_task_state("t1", "enter_nearest_vehicle", "failed", "cleared_by_game")) == "enter_nearest_vehicle"
+    assert b.refuses("enter_nearest_vehicle") > 0.0, "the type the game just cleared must wait"
+    assert b.refuses("walk_to") == 0.0, "a DIFFERENT type is not blocked — that is the variety he needs"
+    clock.t += CLEARED_BACKOFF_FIRST_S + 0.1
+    assert b.refuses("enter_nearest_vehicle") == 0.0
+
+
+def test_repeated_clears_back_off_longer_but_are_capped() -> None:
+    from wasted_harness.behavior.recovery import CLEARED_BACKOFF_MAX_S, ClearedByGameBackoff
+
+    clock = FakeClock()
+    b = ClearedByGameBackoff(clock=clock)
+    waits = []
+    for i in range(6):
+        b.feed(_task_state(f"t{i}", "enter_nearest_vehicle", "failed", "cleared_by_game"))
+        waits.append(b.refuses("enter_nearest_vehicle"))
+        clock.t += 0.5
+    assert waits[1] > waits[0], "a repeat backs off longer"
+    assert max(waits) <= CLEARED_BACKOFF_MAX_S + 0.01, "but never past the cap"
+
+
+def test_the_same_failure_is_not_counted_twice_across_ticks() -> None:
+    from wasted_harness.behavior.recovery import ClearedByGameBackoff
+
+    clock = FakeClock()
+    b = ClearedByGameBackoff(clock=clock)
+    same = _task_state("t1", "enter_nearest_vehicle", "failed", "cleared_by_game")
+    assert b.feed(same) == "enter_nearest_vehicle"
+    assert b.feed(same) is None, "one task id, one strike — /state repeats the same row every tick"
+
+
+def test_other_failures_do_not_trigger_the_backoff() -> None:
+    from wasted_harness.behavior.recovery import ClearedByGameBackoff
+
+    b = ClearedByGameBackoff(clock=FakeClock())
+    assert b.feed(_task_state("t1", "drive_to", "failed", "timeout")) is None
+    assert b.refuses("drive_to") == 0.0, "a timeout is the stall detector's business, not this one's"

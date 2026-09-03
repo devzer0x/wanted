@@ -51,6 +51,7 @@ harness is the only way `done_when` can tell an upgrade from the fallback.
 
 from __future__ import annotations
 
+import collections
 import random
 import time
 from collections.abc import Callable
@@ -267,6 +268,11 @@ FREEWAY_RUN_DISTANCE_M = 1500.0
 #: it was not his decision to stop. `main.ROAM_PREEMPTED` is the same string;
 #: it is defined in both places because neither module may import the other.
 PREEMPTED_OUTCOME = "preempted"
+
+#: How many recent goals count as "just did that". Four is long enough that a
+#: fourteen-goal menu still has room to breathe and short enough that a good
+#: opportunistic trigger (a supercar, a cop car) comes back around quickly.
+NOVELTY_WINDOW = 4
 
 #: The one goal that is always offerable, exempt from cooldown, category
 #: alternation and the health gate. Named here so the forced-mission menu and
@@ -697,6 +703,98 @@ def _done_gang_trouble(state: GameState, snap: dict[str, Any]) -> bool:
     )
 
 
+#: A car worth chasing: fast class, moving (an NPC at the wheel), within reach.
+CHASE_CLASSES: tuple[str, ...] = ("Super", "Sports", "SportsClassics", "Muscle", "Motorcycles")
+CHASE_RADIUS_M = 60.0
+#: How long a tail counts as "done" — long enough to be a bit, short enough that
+#: he does not follow one hatchback to Paleto Bay.
+CHASE_DONE_S = 45.0
+#: An occupied car he can jack must be close: `enter_nearest_vehicle` takes no
+#: handle, so proximity is the only way to say WHICH one.
+JACK_RADIUS_M = 12.0
+#: A honk run: how far he has to have driven, leaning on the horn, before the bit lands.
+HONK_RUN_M = 300.0
+
+
+def _driven_nice_car(state: GameState) -> NearbyVehicle | None:
+    cars = [
+        v for v in state.nearby.vehicles
+        if v.driver == "npc" and v.vehicle_class in CHASE_CLASSES and v.distance <= CHASE_RADIUS_M
+    ]
+    return min(cars, key=lambda v: v.distance) if cars else None
+
+
+def _needs_chase_that_car(state: GameState, view: RoamView) -> bool:
+    return state.player.in_vehicle and state.player.wanted == 0 and _driven_nice_car(state) is not None
+
+
+def _plan_chase_that_car(state, view):
+    v = _driven_nice_car(state)
+    assert v is not None
+    # `follow_entity` on a moving car is the one action that keeps pace with a
+    # target rather than driving to where it used to be (CONTRACTS v1.9).
+    return (
+        [{"type": "follow_entity", "params": {"handle": v.handle, "in_vehicle": True}}],
+        {"target": v.handle, "started": view.now if hasattr(view, "now") else None},
+    )
+
+
+def _done_chase_that_car(state: GameState, snap: dict[str, Any]) -> bool:
+    """Done when the target has gone (lost or streamed out) — the tail ended on
+    its own terms — or, via the goal's timeout, when he has had his fun."""
+    return all(v.handle != snap.get("target") for v in state.nearby.vehicles)
+
+
+def _jackable(state: GameState) -> NearbyVehicle | None:
+    cars = [v for v in state.nearby.vehicles if v.driver == "npc" and v.distance <= JACK_RADIUS_M]
+    return min(cars, key=lambda v: v.distance) if cars else None
+
+
+def _needs_jack_a_driver(state: GameState, view: RoamView) -> bool:
+    return (
+        not state.player.in_vehicle
+        and state.player.wanted == 0
+        and state.player.health >= FIGHT_MIN_HEALTH
+        and _jackable(state) is not None
+    )
+
+
+def _plan_jack_a_driver(state, view):
+    v = _jackable(state)
+    assert v is not None
+    # The bridge always seats him as DRIVER; on an occupied car that is a jack —
+    # the owner gets pulled out, and usually objects. The vehicle loop then
+    # drives away on its own (vehicle.py), which is the whole bit.
+    return _approach_then_enter(v, "any", PROXIMITY_SEARCH_RADIUS_M), {"target": v.handle}
+
+
+def _done_jack_a_driver(state: GameState, snap: dict[str, Any]) -> bool:
+    return state.player.in_vehicle and state.vehicle is not None and state.vehicle.handle == snap.get("target")
+
+
+def _needs_honk_run(state: GameState, view: RoamView) -> bool:
+    return state.player.in_vehicle and state.player.wanted == 0
+
+
+def _plan_honk_run(state, view):
+    # A primitive is a legal plan step (activities runner: "a step that posts no
+    # bridge task"). Drive, lean on the horn, drive some more. Pointless, and
+    # exactly the kind of pointless a stream is for.
+    return (
+        [
+            _wander("ignore_lights"),
+            {"type": "horn", "params": {"ms": 1500}},
+            {"type": "horn", "params": {"ms": 400}},
+            {"type": "horn", "params": {"ms": 2000}},
+        ],
+        {"start": player_pos(state)},
+    )
+
+
+def _done_honk_run(state: GameState, snap: dict[str, Any]) -> bool:
+    return planar_distance(player_pos(state), snap["start"]) >= HONK_RUN_M
+
+
 def _needs_cop_car(state: GameState, view: RoamView) -> bool:
     return police_vehicle(state) is not None
 
@@ -1030,6 +1128,41 @@ CATALOG: tuple[Goal, ...] = (
         wants_heat=True,
     ),
     Goal(
+        id="chase_that_car",
+        category="stunt",
+        description="tail the nicest thing on the road and see where it goes",
+        why="where's he going in that",
+        needs=_needs_chase_that_car,
+        plan=_plan_chase_that_car,
+        done_when=_done_chase_that_car,
+        timeout_s=CHASE_DONE_S,
+        cooldown_s=6 * 60.0,
+    ),
+    Goal(
+        id="jack_a_driver",
+        category="trouble",
+        description="take a car that still has someone in it",
+        why="he's not using it properly",
+        needs=_needs_jack_a_driver,
+        plan=_plan_jack_a_driver,
+        done_when=_done_jack_a_driver,
+        timeout_s=60.0,
+        cooldown_s=8 * 60.0,
+        chaos_cost=1.0,
+        wants_heat=True,
+    ),
+    Goal(
+        id="honk_run",
+        category="scenic",
+        description="drive through town leaning on the horn for no reason",
+        why="they need to know I'm here",
+        needs=_needs_honk_run,
+        plan=_plan_honk_run,
+        done_when=_done_honk_run,
+        timeout_s=90.0,
+        cooldown_s=10 * 60.0,
+    ),
+    Goal(
         id="hijack_bus",
         category="acquisition",
         description="take the bus, and I mean the whole bus",
@@ -1334,6 +1467,12 @@ class RoamEngine:
         self._last_run: dict[str, float] = {}
         self._chaos_spent: list[tuple[float, float]] = []
         self._last_category: str | None = None
+        #: The last few goal ids he actually ran, newest last. Two rules hang off
+        #: it: the SAME id is never offered twice running (hard), and anything in
+        #: this window is sorted to the back of the menu (soft), so a viewer does
+        #: not watch "steal a car, drive to the sign, steal a car, drive to the
+        #: sign" — the operator's "make sure no same pattern is followed".
+        self._recent_ids: collections.deque[str] = collections.deque(maxlen=NOVELTY_WINDOW)
         self._completed_since_mission = 0
         self._roam_started_at = clock()
         self._next_allowed_at = clock()
@@ -1537,6 +1676,8 @@ class RoamEngine:
             # scenic drives in a row with a personality bolted on.
             if self._last_category is not None and goal.category == self._last_category:
                 continue
+            if self._recent_ids and goal.id == self._recent_ids[-1]:
+                continue  # never the exact same goal twice running
             if not goal.needs(state, view):
                 continue
             offers.append(Offer(goal, goal.why))
@@ -1551,6 +1692,13 @@ class RoamEngine:
         # filter above for the same reason.
         fallback = next(g for g in CATALOG if g.fallback)
         offers = [o for o in offers if o.id != fallback.id]
+        # Soft novelty: a triggered offer keeps the front (the world just handed
+        # him a reason); everything else that ran recently goes to the back.
+        recent = set(self._recent_ids)
+        head = [o for o in offers if o.triggered]
+        rest = [o for o in offers if not o.triggered]
+        rest.sort(key=lambda o: o.id in recent)
+        offers = head + rest
         offers.append(Offer(fallback, fallback.why))
 
         self._offers = offers
@@ -1690,6 +1838,7 @@ class RoamEngine:
         now = self._clock()
         self._last_run[goal.id] = now
         self._last_category = goal.category
+        self._recent_ids.append(goal.id)
         if goal.chaos_cost > 0:
             self._chaos_spent.append((now, goal.chaos_cost))
 
@@ -1825,12 +1974,15 @@ class RoamEngine:
 
         Primitives are never blocked — radio, horn, look_around and a short wait
         cost nothing, change no movement, and keep the commentary alive, which is
-        the difference between committing to a goal and going mute.
+        the difference between committing to a goal and going mute. CONTRACTS
+        v1.13's `answer_call`/`reject_call` are not blocked either, for the same
+        reason: they are `POST /task`, but they move nobody, and a locked goal
+        has no business deciding whether the agent may hang up on a ringing phone.
         """
-        from ..brain.schemas import BRIDGE_TASKS
+        from ..brain.schemas import MOVEMENT_TASKS
 
         locked = self.current
-        if locked is None or action_type not in BRIDGE_TASKS:
+        if locked is None or action_type not in MOVEMENT_TASKS:
             return False
         # The goal id has to be NAMED in the decision's own goal text for the
         # task to survive. Anything else — a new plan, a different destination,

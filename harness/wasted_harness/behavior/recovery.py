@@ -255,6 +255,70 @@ STATIONARY_TASK_TYPES: frozenset[str] = frozenset(
 )
 
 
+
+#: A task the GAME cleared is a "not now", and re-posting it instantly is a storm.
+#: Measured live 2026-09-03 (bridge log): `enter_nearest_vehicle` started and
+#: `failed: cleared_by_game` ~1 s later, then was re-posted within 300 ms by
+#: whichever owner got the wheel next — day plan, brain, roam in turn — with an
+#: empty car 2.8 m away, for minutes. The game clears ped tasks for reasons the
+#: harness cannot see (a ringing phone taking the ped, a scripted moment, a
+#: cutscene fade). Backing off is the only honest response; the cause is not
+#: in our hands. First clear: a short pause; repeats: longer, capped.
+CLEARED_BACKOFF_FIRST_S = 4.0
+CLEARED_BACKOFF_MAX_S = 20.0
+#: Forget the history once the type has been quiet this long — a clear from ten
+#: minutes ago says nothing about now.
+CLEARED_BACKOFF_FORGET_S = 60.0
+
+
+@dataclass
+class ClearedByGameBackoff:
+    """Per-task-type backoff after the game itself clears a task.
+
+    Fed `state.last_task` every tick; consulted by the action funnel before any
+    bridge task is posted. It never blocks a DIFFERENT type, so a cleared
+    `enter_nearest_vehicle` still lets `walk_to` or `look_around` through —
+    which is exactly the variety a stuck ped needs.
+    """
+
+    clock: Any = time.monotonic
+    _seen_id: str | None = None
+    _until: dict[str, float] = field(default_factory=dict)
+    _strikes: dict[str, int] = field(default_factory=dict)
+    _last_clear: dict[str, float] = field(default_factory=dict)
+
+    def feed(self, state: GameState) -> str | None:
+        """Record a fresh `cleared_by_game` failure. Returns the type when one
+        was just recorded (for logging), else None."""
+        task = state.last_task
+        if task is None or task.id is None or task.id == self._seen_id:
+            return None
+        self._seen_id = task.id
+        if task.status != "failed" or (task.detail or "") != "cleared_by_game":
+            return None
+        now = self.clock()
+        t = task.type or ""
+        if now - self._last_clear.get(t, -1e12) > CLEARED_BACKOFF_FORGET_S:
+            self._strikes[t] = 0
+        self._strikes[t] = self._strikes.get(t, 0) + 1
+        self._last_clear[t] = now
+        wait = min(CLEARED_BACKOFF_FIRST_S * (2 ** (self._strikes[t] - 1)), CLEARED_BACKOFF_MAX_S)
+        self._until[t] = now + wait
+        log.warning(
+            "the game cleared a task; backing off that type",
+            extra={"kv": {"type": t, "strike": self._strikes[t], "backoff_s": round(wait, 1)}},
+        )
+        return t
+
+    def refuses(self, action_type: str) -> float:
+        """Seconds of backoff remaining for this type, or 0.0 when it may post."""
+        return max(0.0, self._until.get(action_type, 0.0) - self.clock())
+
+    def reset(self) -> None:
+        self._until.clear()
+        self._strikes.clear()
+        self._last_clear.clear()
+
 @dataclass
 class TaskStallDetector:
     """A RUNNING task that has not moved him for :data:`STALL_WINDOW_S`.

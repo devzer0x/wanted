@@ -70,3 +70,17 @@ export function formatDuration(seconds: number | null | undefined): string {
   const h = Math.floor(m / 60);
   return `${h}h ${m % 60}m`;
 }
+
+/** "3 days, 7 hours" — the age of something born at `iso`, for the born-ago line. */
+export function formatBornAge(iso: string, nowMs: number): string {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return "";
+  const totalHours = Math.max(0, Math.floor((nowMs - t) / 3_600_000));
+  const days = Math.floor(totalHours / 24);
+  const hours = totalHours % 24;
+  const d = days === 1 ? "1 day" : `${days} days`;
+  const h = hours === 1 ? "1 hour" : `${hours} hours`;
+  if (days === 0) return h;
+  return `${d}, ${h}`;
+}
+

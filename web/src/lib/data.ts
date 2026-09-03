@@ -89,6 +89,18 @@ export function fetchEvents(limit = FEED_EVENT_LIMIT): Promise<Fetched<EventRow>
   );
 }
 
+/**
+ * When the agent was born: the `started_at` of the very first session ever recorded. Read from
+ * `sessions` (anon-readable, RLS `sessions_public_read`) rather than derived from `stats`,
+ * because the operator's own verdict on the counters was "statistics are not accurate" — a
+ * timestamp the harness wrote once and never touched is the one number here that cannot drift.
+ */
+export async function fetchBorn(): Promise<Fetched<{ started_at: string }>> {
+  return selectRows<{ started_at: string }>("sessions", (c) =>
+    c.from("sessions").select("started_at").order("started_at", { ascending: true }).limit(1)
+  );
+}
+
 /** Latest-heartbeat stats row = the current/most recent session. */
 export async function fetchStats(): Promise<Fetched<StatsRow>> {
   return selectRows<StatsRow>("stats", (c) =>

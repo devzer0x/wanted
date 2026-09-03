@@ -263,11 +263,23 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
              "relationship": "neutral", "pos": {"x": 18.0, "y": 0.0, "z": 0.0}},
         ],
     )
+    driven = make_state(
+        in_vehicle=True, health=200,
+        vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+        nearby_vehicles=[veh(9, "adder", "Super", 25.0, driver="npc", pos=(25.0, 0.0, 0.0))],
+    )
+    jackable = make_state(
+        in_vehicle=False, health=200,
+        nearby_vehicles=[veh(5, "taxi", "Sedans", 6.0, driver="npc", pos=(6.0, 0.0, 0.0))],
+    )
     special = {
         "lose_the_cops": make_state(wanted=2),
         "take_my_car_back": on_foot,
         "pick_a_fight": brawl,
         "gang_trouble": gang,
+        "chase_that_car": driven,
+        "honk_run": driven,
+        "jack_a_driver": jackable,
     }
     jacked_view = RoamView(rng=random.Random(1), stolen_from=(5, (6.0, 0.0, 0.0)))
     for goal in CATALOG:
@@ -1291,4 +1303,74 @@ def test_a_locked_goal_names_the_exact_value_to_return() -> None:
     e.note()  # drains the transition line
     note = e.note()
     assert 'Set your "goal" field to exactly: roam_the_block' in note
+
+
+# --- novelty: "make sure no same pattern is followed" ---------------------------
+
+
+def _car_state(**kw):
+    kw.setdefault("in_vehicle", True); kw.setdefault("health", 200)
+    kw.setdefault("vehicle", {"class": "Sports", "model": "banshee", "speed": 5.0})
+    return make_state(**kw)
+
+
+def test_the_same_goal_is_never_offered_twice_running() -> None:
+    e, clock = engine()
+    state = observed(e, _car_state())
+    e.pick(state, goal_id="drive_to_landmark")
+    e.close("done")
+    clock.tick(15.0)
+    state = observed(e, state)
+    assert "drive_to_landmark" not in [o.id for o in e.available(state)], "just did that"
+
+
+def test_recent_goals_sink_to_the_back_of_the_menu() -> None:
+    e, clock = engine()
+    state = observed(e, _car_state())
+    first = [o.id for o in e.available(state) if not o.triggered]
+    assert len(first) >= 3, first
+    picked = first[1]
+    e.pick(state, goal_id=picked)
+    e.close("done")
+    clock.tick(15.0)
+    later = [o.id for o in e.available(observed(e, state))]
+    if picked in later:
+        assert later.index(picked) >= len(later) - 2, f"{picked} should be near the back: {later}"
+
+
+def test_chase_that_car_wants_a_moving_nice_car_and_ends_when_it_is_gone() -> None:
+    e, _ = engine()
+    car = veh(9, "adder", "Super", 25.0, driver="npc", pos=(25.0, 0.0, 0.0))
+    state = observed(e, _car_state(vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+                                   nearby_vehicles=[car]))
+    picked = e.pick(state, goal_id="chase_that_car")
+    assert picked is not None
+    _, step = picked
+    assert step["type"] == "follow_entity" and step["params"]["handle"] == 9
+    gone = observed(e, _car_state(vehicle={"class": "Sports", "model": "banshee", "speed": 20.0},
+                                  nearby_vehicles=[]))
+    assert e.judge(gone) == "done"
+
+
+def test_jack_a_driver_is_done_only_in_that_car() -> None:
+    e, _ = engine()
+    taxi = veh(5, "taxi", "Sedans", 6.0, driver="npc", pos=(6.0, 0.0, 0.0))
+    state = observed(e, make_state(in_vehicle=False, health=200, nearby_vehicles=[taxi]))
+    assert e.pick(state, goal_id="jack_a_driver") is not None
+    wrong = observed(e, _car_state(vehicle={"handle": 77, "class": "Sedans", "model": "prairie", "speed": 3.0}))
+    assert e.judge(wrong) != "done", "a different car is not the jack"
+    right = observed(e, _car_state(vehicle={"handle": 5, "class": "Sedans", "model": "taxi", "speed": 3.0}))
+    assert e.judge(right) == "done"
+
+
+def test_honk_run_uses_the_horn_primitive_and_ends_on_distance() -> None:
+    e, _ = engine()
+    state = observed(e, _car_state(pos=(0.0, 0.0, 0.0), vehicle={"class": "Sedans", "model": "prairie", "speed": 10.0}))
+    picked = e.pick(state, goal_id="honk_run")
+    assert picked is not None
+    locked, first = picked
+    assert first["type"] == "wander_drive"
+    assert any(s["type"] == "horn" for s in locked.plan)
+    far = observed(e, _car_state(pos=(400.0, 0.0, 0.0), vehicle={"class": "Sedans", "model": "prairie", "speed": 10.0}))
+    assert e.judge(far) == "done"
 

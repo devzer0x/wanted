@@ -1,6 +1,6 @@
 import type { Metadata } from "next";
 import { LiveDashboard } from "@/components/live/LiveDashboard";
-import { fetchDecisions, fetchEvents, fetchStats, resolveStreamConfig } from "@/lib/data";
+import { fetchDecisions, fetchEvents, fetchBorn, fetchStats, resolveStreamConfig } from "@/lib/data";
 import { routeMetadata } from "@/lib/metadata";
 
 // Live page: request-time render (no-store initial rows), then the client takes over via
@@ -12,11 +12,12 @@ export const dynamic = "force-dynamic";
 export const metadata: Metadata = routeMetadata({ path: "/" });
 
 export default async function LivePage() {
-  const [decisions, events, stats, stream] = await Promise.all([
+  const [decisions, events, stats, stream, born] = await Promise.all([
     fetchDecisions(),
     fetchEvents(),
     fetchStats(),
     resolveStreamConfig(),
+    fetchBorn(),
   ]);
 
   const linkDown = !decisions.ok || !events.ok || !stats.ok;
@@ -28,6 +29,7 @@ export default async function LivePage() {
         initialDecisions={decisions.ok ? decisions.rows : []}
         initialEvents={events.ok ? events.rows : []}
         initialStats={stats.ok ? (stats.rows[0] ?? null) : null}
+        bornAt={born.ok ? (born.rows[0]?.started_at ?? null) : null}
         stream={stream}
         initialLinkDown={linkDown}
         serverNowMs={Date.now()}

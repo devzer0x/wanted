@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StreamEmbed } from "@/components/StreamEmbed";
-import { Counters } from "@/components/live/Counters";
+import { Born } from "@/components/live/Born";
 import { Feed } from "@/components/live/Feed";
 import { GoalCard } from "@/components/live/GoalCard";
 import { Hud } from "@/components/live/Hud";
@@ -75,6 +75,7 @@ export function LiveDashboard({
   initialDecisions,
   initialEvents,
   initialStats,
+  bornAt,
   stream,
   initialLinkDown,
   serverNowMs,
@@ -82,6 +83,7 @@ export function LiveDashboard({
   initialDecisions: DecisionRow[];
   initialEvents: EventRow[];
   initialStats: StatsRow | null;
+  bornAt: string | null;
   stream: StreamConfig | null;
   initialLinkDown: boolean;
   /** Server render clock. Seeding state with it (instead of Date.now() on both sides) keeps the
@@ -274,7 +276,7 @@ export function LiveDashboard({
           <StreamEmbed config={stream} offline={offline} />
         </div>
         <div className="order-2 min-w-0 lg:col-start-1 lg:row-start-2">
-          <Counters stats={stats} />
+          <Born bornAt={bornAt} />
         </div>
         <div className="order-3 min-w-0 lg:sticky lg:top-16 lg:col-start-2 lg:row-start-1 lg:row-span-3 lg:self-start">
           <Feed items={feedItems} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />

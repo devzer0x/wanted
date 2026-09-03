@@ -159,11 +159,14 @@ test("the live page publishes no running-cost figures @current-build", async ({ 
   await expect(page.getByText(/brain bill/i)).toHaveCount(0);
   await expect(page.getByText(/per hour/i)).toHaveCount(0);
 
-  // The counters row carries session facts, never money.
+  // The counters row was replaced by a single born-ago line: the operator's verdict on the
+  // per-session counters was "statistics are not accurate", and a number nobody trusts is worse
+  // than no number. This is one timestamp the harness wrote exactly once.
   const labels = await page
-    .locator('section[aria-label="Session counters"] span.ticker')
+    .locator('section[aria-label="Born"] span.ticker')
     .allTextContents();
-  expect(labels.map((l) => l.trim())).toEqual(["Wasted", "Busted", "Missions", "Hours"]);
+  expect(labels.length).toBe(1);
+  expect(labels[0]).toMatch(/since the agent was born|not born yet/);
 
   const html = await (await request.get("/")).text();
   for (const column of ["cost_per_hour_usd", "cost_today_usd", "cost_usd", "cached_tokens"]) {
