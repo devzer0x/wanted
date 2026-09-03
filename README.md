@@ -114,12 +114,14 @@ mission wants from him, and he has to infer the rest.
 
 ## The three layers
 
-Decisions are made by three tiers that disagree on purpose, with a fixed precedence.
+Decisions are made by three layers that disagree on purpose, with a fixed precedence. The tactical
+layer runs on one of two models depending on whether a story mission is active.
 
 | Layer | Model | Runs | Job |
 |---|---|---|---|
 | **Reflex** | none — plain Python | every tick | Survival and stuck-detection. No API call, no latency, no cost. Overrides the others when something is actively going wrong. |
 | **Tactical** | `claude-haiku-4-5` | every 8–25 s | "What do I do right now?" Picks one action from the vocabulary and writes the line of commentary that goes with it. |
+| **Tactical (mission)** | `claude-sonnet-5` | same cadence, only while `mission.active` | The *same* tactical decision on the same prompt, but on the smarter model. Story missions punish a wrong move in a way free roam does not, so the tier swaps up when one is running — and swaps back when it ends. This is the single biggest driver of cost variance; see [Operating cost](#operating-cost). |
 | **Director** | `claude-sonnet-5` | occasionally | "What am I doing with this hour?" Sets the mission or free-roam goal the tactical layer works inside. Text, plus the occasional screenshot. |
 
 When the director fails, it is retried once, and then the reflex layer keeps control and the failure
@@ -142,11 +144,12 @@ is effectively free.
 
 ## What the agent can do
 
-The vocabulary is **19 actions and nothing else**. Eleven are tasks handed to the game engine, which
+The vocabulary is **20 actions and nothing else**. Twelve are tasks handed to the game engine, which
 may take seconds to minutes; eight are direct key presses that are near-instant.
 
 **Engine tasks:** `drive_to` · `walk_to` · `enter_nearest_vehicle` · `exit_vehicle` · `wander_drive` ·
-`flee_police` · `combat_hated_targets_around` · `seek_cover` · `follow_entity` · `set_waypoint` · `stop`
+`flee_police` · `combat_hated_targets_around` · `fight_ped` · `seek_cover` · `follow_entity` ·
+`set_waypoint` · `stop`
 
 **Manual primitives:** `look_around` · `brake_tap` · `swerve` · `reverse_out` · `press_prompt_key` ·
 `wait` · `radio` · `horn`
@@ -280,75 +283,107 @@ dependency is up.
 ## Operating cost
 
 Running an agent 24/7 is not free, and the number is not hidden. Costs split into a **fixed**
-infrastructure floor and a **variable** inference cost that scales with how often the agent thinks.
+infrastructure floor and a **variable** inference cost that scales with how often the agent thinks —
+and, more than anything else, with *what he is doing at the time*.
 
-### The formula
+### What drives it
 
 ```
 inference cost/hour  =  (tactical calls/hour × cost per tactical call)
                       + (director  calls/hour × cost per director  call)
 ```
 
-Cost per call is dominated by *input* tokens, not output, because the system prompt is large and the
-decision is small. That is why prompt caching matters so much here: a cache read is billed at 0.1×
-the input price, and the 8–25 s decision cadence keeps the 5-minute cache warm, with every read
-refreshing the TTL for free.
+Two things make that more interesting than it looks:
+
+1. **Cost per call is dominated by input, not output.** The system prompt is large and the decision
+   is small. Prompt caching is therefore load-bearing: a cache read is billed at 0.1× the input
+   price, and the 8–25 s cadence keeps the 5-minute cache warm, every read refreshing the TTL free.
+2. **The tactical tier changes model mid-mission.** While `mission.active` is true, tactical
+   decisions run on Sonnet 5 instead of Haiku 4.5 — same prompt, same cadence, ~4× the price per
+   call. A mission hour and a free-roam hour are genuinely different products.
 
 ### Model prices
 
-From `harness/config/pricing.yaml`, which cites the official pricing page and its retrieval date, and
+From `harness/config/pricing.yaml`, which cites the official pricing page and its retrieval date and
 is re-verified at harness startup with a 1-token call per model. USD per million tokens:
 
-| Layer | Model | Input | Output | Cache read | Cache write (5m) |
+| Tier | Model | Input | Output | Cache read | Cache write (5m) |
 |---|---|---|---|---|---|
 | tactical | `claude-haiku-4-5` | $1.00 | $5.00 | $0.10 | $1.25 |
+| tactical (mission) | `claude-sonnet-5` | $2.00 | $10.00 | $0.20 | $2.50 |
 | director | `claude-sonnet-5` | $2.00 | $10.00 | $0.20 | $2.50 |
 
-### Measured variable cost
+### Measured inputs
 
-These are measured against the real API, not estimated:
-
-| Item | Measured | Source |
+| Quantity | Value | Status |
 |---|---|---|
-| Tactical call, cold (cache write) | **$0.011331** | real API verification run |
-| Tactical call, warm (cache read) | **$0.001714** | same run, `cache_read_input_tokens=8373` |
-| Tactical layer at 240 calls/hour | **≈ $0.41/hour** | design estimate was $0.37 — confirmed |
-| Director call, output portion (443 tokens) | **$0.0044** | real API, after the `max_tokens` fix |
-| Director layer at ~40 calls/hour | ≈ $0.33/hour *(design model)* | not yet independently measured |
-| Knowledge-retrieval block (~450 uncached input tokens/call) | **+$0.119/hour** | measured |
+| Tactical static prefix | **14,484 tokens** | measured (`--prompt-audit`) |
+| Director static prefix | **15,144 tokens** | measured (`--prompt-audit`) |
+| Warm tactical call (Haiku, cache hit) | **$0.0026** | measured |
+| Cold tactical call (cache write) | $0.0113 | measured |
+| Knowledge-retrieval block | ~450 uncached input tokens/call | measured |
 
-**Working total: ≈ $0.86 per streamed hour** at normal cadence — tactical $0.41 + director $0.33
-(design) + knowledge $0.119. The director figure is the one still carrying a design estimate rather
-than a measurement, so treat the total as *approximately* right and the tactical half as *measured*.
+The prompt has grown substantially as the agent was taught the game: the tactical prefix went from
+7,617 to **14,484 tokens** (1.9×), and a warm tactical call from $0.001714 to **$0.0026** (+52%).
 
-| | at ≈$0.86/h (working) | at $1.50/h (governor ceiling) |
+### Derived per-call and per-hour cost
+
+Sonnet-tier calls are built from first principles rather than measured directly, so they are
+estimates. **Assumptions, stated:** ~1,000 uncached dynamic input tokens per call (knowledge block +
+state context), and ~600 output tokens including Sonnet's thinking block, which is billed as output.
+
+| Call type | Cost/call | Basis |
 |---|---|---|
-| per minute | ≈ $0.014 | $0.025 |
-| per hour | ≈ $0.86 | $1.50 |
-| per 24 hours | ≈ $20.60 | $36.00 |
-| per 30 days, continuous | ≈ **$620** | **$1,080** |
+| Tactical, free roam (Haiku) | **$0.0026** | measured |
+| Tactical, mid-mission (Sonnet) | ≈ $0.0109 | derived — **4.2× a free-roam call** |
+| Director (Sonnet) | ≈ $0.0110 | derived |
 
-### The budget governor
+At 240 tactical calls/hour (one every 15 s, the midpoint of the 8–25 s cadence) and ~40 director
+calls/hour:
 
-The variable cost has a hard ceiling, enforced in code. A governor tracks spend against an hourly cap
-(`WASTED_HOURLY_CAP_USD`, default $1.50) and sheds capability from the top down as it approaches it.
-Every level change is announced on stream as an event and a feed line — the audience is told when
-The agent is being throttled:
+| | Free-roam hour | Mission hour | Governor ceiling |
+|---|---|---|---|
+| tactical | $0.62 | $2.62 | — |
+| director | $0.44 | $0.44 | — |
+| **total/hour** | **≈ $1.07** | **≈ $3.06** | **$1.50** |
+| per minute | ≈ $0.018 | ≈ $0.051 | $0.025 |
+| per 24 hours | ≈ $25.60 | ≈ $73.40 | $36.00 |
+| per 30 days, continuous | ≈ **$770** | ≈ **$2,200** | **$1,080** |
 
-| Level | Behaviour |
-|---|---|
-| **L0** | normal cadence |
-| **L1** | slower tactical timers, no flavour shots |
-| **L2** | director only; the reflex layer drives |
-| **L3** | "asleep in the car" — parks somewhere scenic, commentary paused with an honest on-screen note, resumes when the hourly window resets |
+### The budget governor — which now actually bites
 
-So $1.50/hour is a genuine ceiling for inference, not a hope. That is **$36/day**, **≈$1,080/month**
-worst case at 24/7.
+A governor tracks spend against an hourly cap (`WASTED_HOURLY_CAP_USD`, default **$1.50**) and sheds
+capability from the top down. Every level change is announced on stream as an event and a feed line,
+so the audience is told when the agent is being throttled:
+
+| Level | Engages at | Behaviour |
+|---|---|---|
+| **L0** | — | normal cadence |
+| **L1** | 70% of cap | slower tactical timers, no flavour shots |
+| **L2** | 90% of cap | director only; the reflex layer drives |
+| **L3** | 100% of cap | "asleep in the car" — parks somewhere scenic, commentary paused with an honest on-screen note, resumes when the hourly window resets |
+
+**This is the headline change since the mission tier was introduced.** A free-roam hour (≈$1.07)
+fits under the cap, only touching L1 right at the hour boundary. A sustained mission hour (≈$3.06)
+does not:
+
+| | L1 (70%, $1.05) | L2 (90%, $1.35) | L3 (100%, $1.50) |
+|---|---|---|---|
+| free-roam hour | ~59 min | not reached | not reached |
+| mission hour | **~21 min** | ~26 min | **~29 min** |
+
+So roughly half an hour of continuous story-mission play exhausts the default hourly budget and
+parks him. In practice the cap, not the model, decides how much mission play a 24/7 stream can
+afford, and the honest ceiling for continuous operation is the **$1,080/month** governor line rather
+than either uncapped figure above.
+
+Raising `WASTED_HOURLY_CAP_USD` raises the ceiling proportionally. Nothing in the design assumes the
+default.
 
 ### Fixed infrastructure
 
 Approximate monthly figures, from the hardware research in `docs/research/brief-winserver.json`
-(prices are list prices at time of research, ex VAT, and will drift):
+(list prices at time of research, ex VAT, and they will drift):
 
 | Item | Approx. cost | Note |
 |---|---|---|
@@ -359,25 +394,29 @@ Approximate monthly figures, from the hardware research in `docs/research/brief-
 | Vercel | free → Pro tier | static shell + dynamic snapshot |
 | GTA V | one-time purchase | not distributed by this project |
 
-**≈ €215/month fixed**, before inference.
+**≈ €215/month fixed**, before any inference.
 
 ### The scaling cliff worth knowing about
 
 Supabase Realtime bills **per recipient**, not per message. At roughly 300 concurrent viewers
-receiving ~1 message/second, that is on the order of **$1,900/month** — an order of magnitude above
-everything else here. This is fine at launch scale and becomes the dominant cost long before the
-model bill does. The migration path (batching updates into periodic digests rather than fanning out
-every event) is specified in `docs/CONTRACTS.md` §5 rather than left to be discovered in a bill.
+receiving ~1 message/second, that is on the order of **$1,900/month** — comparable to the entire
+model bill even at the mission-hour rate, and an order of magnitude above the fixed infrastructure.
+It is fine at launch scale and becomes the dominant cost long before the model bill does. The
+migration path (batching updates into periodic digests instead of fanning out every event) is
+specified in `docs/CONTRACTS.md` §5 rather than left to be discovered in a bill.
 
-### Assumptions
+### Assumptions and caveats
 
 - 240 tactical calls/hour ≈ one every 15 s, the midpoint of the 8–25 s cadence.
-- Director cadence of ~40 calls/hour is a design figure and the least certain number here.
-- Cache-warm pricing assumes continuous operation; a cold start costs ~6.6× a warm tactical call.
+- The ~40 director calls/hour figure is a design number and remains the least certain input.
+- Sonnet-tier per-call costs are derived, not measured; the ~600-token output assumption is the
+  largest single source of error, because Sonnet's thinking block is billed as output and scales
+  with the `max_tokens` it is offered.
+- The free-roam/mission split assumes an hour is entirely one or the other. Real hours are mixed,
+  so a real bill lands between $1.07 and $3.06 — weighted by how much of the hour was on-mission.
+- Cache-warm pricing assumes continuous operation; a cold start costs ~4.3× a warm tactical call.
 - Prices are USD/EUR list prices at their stated retrieval dates and are not contractual.
 - Streaming bandwidth is not itemised; it is included in the machine's allowance.
-
----
 
 ## What is verified, and what isn't
 
