@@ -162,6 +162,8 @@ def make_state(**over: Any) -> GameState:
         "location": {"street": "Cavalry Blvd", "zone": "North Yankton"},
         "world": {"clock": "05:00", "weather": "SNOWING", "timescale": 1.0},
         "mission": mission,
+        # CONTRACTS v1.13: the phone. Quiet unless a test says otherwise.
+        "phone": over.pop("phone", {"ringing": False, "in_call": False}),
         "nearby": {
             "vehicles": over.pop("nearby_vehicles", []),
             "peds": over.pop("nearby_peds", []),
@@ -2566,3 +2568,64 @@ def test_with_missions_off_the_brain_is_told_and_sees_no_job_markers() -> None:
     ctx_on = Harness._dynamic_context(stub, state, Delta(wanted_from=0, wanted_to=0), "poll", "tactical")
     assert "MISSIONS ARE OFF" not in ctx_on
     assert '"starts":[]' not in ctx_on.replace(" ", "")
+
+
+# -- the phone (CONTRACTS v1.13) ---------------------------------------------------------------
+# The executor that built the phone stopped at its turn limit before writing these.
+
+
+def _phone_harness(missions_enabled: bool) -> Harness:
+    from types import SimpleNamespace
+
+    h = _bare_harness(cutscene_active=False)
+    h.settings = SimpleNamespace(missions_enabled=missions_enabled)
+    h._phone_rejected_this_ring = False
+    h._phone_hung_up_this_call = False
+    return h
+
+
+def _phone_state(*, ringing: bool, in_call: bool) -> GameState:
+    return make_state(phone={"ringing": ringing, "in_call": in_call})
+
+
+def test_a_ringing_phone_is_refused_once_per_ring_while_missions_are_off() -> None:
+    h = _phone_harness(missions_enabled=False)
+    ringing = _phone_state(ringing=True, in_call=False)
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, ringing) is True
+    assert [t for t, _ in h.bridge.posted] == ["reject_call"]
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, ringing) is False, "one attempt per ring, not every tick"
+    assert len(h.bridge.posted) == 1
+    # the ring ends, a new one starts: the latch re-arms
+    h.wheel.begin_tick()
+    Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, ringing) is True
+    assert len(h.bridge.posted) == 2
+
+
+def test_a_connected_call_is_hung_up_once_while_missions_are_off() -> None:
+    """Some story calls auto-answer, and the reject soft key is hidden for a few. An
+    already-connected call must be ENDED (PhoneCancel is END CALL mid-call), once."""
+    h = _phone_harness(missions_enabled=False)
+    live = _phone_state(ringing=False, in_call=True)
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is True
+    assert [t for t, _ in h.bridge.posted] == ["reject_call"]
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is False, "latched: one hang-up per call"
+    assert len(h.bridge.posted) == 1
+    h.wheel.begin_tick()
+    Harness._phone_reflex(h, _phone_state(ringing=False, in_call=False))  # call over -> re-arm
+    h.wheel.begin_tick()
+    assert Harness._phone_reflex(h, live) is True
+    assert len(h.bridge.posted) == 2
+
+
+def test_with_missions_on_the_phone_is_left_to_the_brain() -> None:
+    h = _phone_harness(missions_enabled=True)
+    for st in (_phone_state(ringing=True, in_call=False), _phone_state(ringing=False, in_call=True)):
+        h.wheel.begin_tick()
+        assert Harness._phone_reflex(h, st) is False
+    assert h.bridge.posted == [], "no automatic answer or refusal when jobs are allowed"

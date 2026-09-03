@@ -897,6 +897,7 @@ class Harness:
         #: at the 2-4 Hz poll rate would cancel whatever he was doing several
         #: times a second for the length of the ring.
         self._phone_rejected_this_ring = False
+        self._phone_hung_up_this_call = False
         #: Set each tick from `BlockingScreenWatchdog.blocked`: the game is on
         #: a modal screen (MISSION FAILED / a menu), the SHVDN script thread is
         #: not ticking, and therefore every field in `state` is a frozen lie.
@@ -1633,6 +1634,18 @@ class Harness:
         later in this tick stand down for it.
         """
         phone = state.phone
+        if phone.in_call and not self.settings.missions_enabled:
+            # A call that is already CONNECTED — some story calls auto-answer, and the
+            # research is explicit that the reject soft key is hidden for a few of
+            # them — is hung up the same way: Control.PhoneCancel (177) is END CALL
+            # during an ongoing call. Once per call, latched on the in_call edge.
+            if not self._phone_hung_up_this_call and not self.wheel.posted_this_tick:
+                self._phone_hung_up_this_call = True
+                log.info("phone: a call is connected and missions are off; hanging up")
+                self._execute_action("reject_call", {})
+                return True
+            return False
+        self._phone_hung_up_this_call = False
         if not phone.ringing or phone.in_call:
             # The ring is over — answered, refused, or the caller gave up — or
             # a call is connected, in which case there is nothing to refuse
@@ -3189,6 +3202,7 @@ class Harness:
         self.perceptor = Perceptor()
         self.stuck = StuckDetector()
         self._phone_rejected_this_ring = False
+        self._phone_hung_up_this_call = False
         self.task_stall = TaskStallDetector()
         self.cleared_backoff = ClearedByGameBackoff()
         self.stranded = StrandedEscalator()
