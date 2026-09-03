@@ -48,6 +48,7 @@ from wasted_harness.behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    IdleBreaker,
     JackHandoffGate,
     RoadDodge,
     StrandedEscalator,
@@ -489,6 +490,7 @@ def _bare_harness(cutscene_active: bool, player_down: bool = False) -> Harness:
     #: movement task, so the real method cannot run without one.
     h.control_regained = ControlRegained()
     h.cleared_backoff = ClearedByGameBackoff()
+    h.idle_breaker = IdleBreaker()
     return h
 
 
@@ -594,6 +596,7 @@ class _RecordingStub:
         #: game, and the log can answer "who was driving on that tick".
         self.wheel = MovementWheel()
         self.cleared_backoff = ClearedByGameBackoff()
+        self.idle_breaker = IdleBreaker()
         self.wheel.begin_tick()
         self._mission_token = None
         self.posted: list[tuple[str, dict[str, Any]]] = []
@@ -697,6 +700,7 @@ class _ReflexStub:
         #: behaviour, not racing the wall clock.
         self.control_regained = ControlRegained(clock=self.clock)
         self.cleared_backoff = ClearedByGameBackoff()
+        self.idle_breaker = IdleBreaker()
         #: Production wiring: what losing the wheel MEANS for each owner.
         self.wheel.on_preempt("roam", self._roam_preempted)
         self.wheel.on_preempt("mission", self._mission_preempted)
@@ -759,6 +763,7 @@ class _ReflexStub:
     _game_owns_controls = Harness._game_owns_controls
     _game_control_reason = Harness._game_control_reason
     _reflex_act = Harness._reflex_act
+    _break_the_idle = Harness._break_the_idle
     _roam_preempted = Harness._roam_preempted
     _mission_preempted = Harness._mission_preempted
     _day_plan_preempted = Harness._day_plan_preempted

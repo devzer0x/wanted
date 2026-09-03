@@ -39,6 +39,7 @@ from wasted_harness.behavior.recovery import (
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
+    IdleBreaker,
     JackHandoffGate,
     OffLoopGrab,
     RoadDodge,
@@ -392,6 +393,7 @@ def _tick_harness(bridge: Any, grabber: Any = None) -> Harness:
     h.stuck = StuckDetector()
     h.task_stall = TaskStallDetector()
     h.cleared_backoff = ClearedByGameBackoff()
+    h.idle_breaker = IdleBreaker()
     h.stranded = StrandedEscalator()
     # T9 (findings.md R1/R5): production collaborators of a tick too — `_reflex`
     # feeds all three every tick.

@@ -35,6 +35,7 @@ from wasted_harness.behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    IdleBreaker,
     JackHandoffGate,
     RoadDodge,
     StrandedEscalator,
@@ -130,6 +131,7 @@ class StubHarness:
         self.planner = DayPlanner(random.Random(1))
         self.stuck = StuckDetector()
         self.task_stall = TaskStallDetector()
+        self.idle_breaker = IdleBreaker()
         self.stranded = StrandedEscalator()
         # T9 (findings.md R1/R5): fed every tick by `_reflex`, same as every
         # other stateful reflex tracker on this list.
@@ -179,6 +181,7 @@ class StubHarness:
     _game_owns_controls = Harness._game_owns_controls
     _game_control_reason = Harness._game_control_reason
     _reflex_act = Harness._reflex_act
+    _break_the_idle = Harness._break_the_idle
     _governor_preempted = Harness._governor_preempted
     _interior_preempted = Harness._interior_preempted
     _release_interior_wheel = Harness._release_interior_wheel

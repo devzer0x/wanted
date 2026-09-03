@@ -2065,3 +2065,187 @@ class ApiBackoff:
 
     def blocked_for_s(self) -> float:
         return max(0.0, self._blocked_until - self.clock())
+
+
+# --- the anti-idle breaker ------------------------------------------------------
+
+#: How far he has to actually travel for this not to count as standing still.
+IDLE_MOVE_M = 6.0
+#: How long he may stand inside that circle before the breaker fires. Longer
+#: than the bridge's own no-progress cycle (10 s, one re-issue, 10 s more) on
+#: purpose: a task that is quietly failing gets its full chance to say so before
+#: this rung overrules everybody. Still a fraction of the ten minutes in one
+#: spot that made it necessary.
+IDLE_WINDOW_S = 25.0
+#: How long a rung is given to work before the next, different one is tried.
+IDLE_RUNG_HOLD_S = 9.0
+#: How far the "just go somewhere" rungs aim. Comfortably inside the bridge's
+#: own nav-mesh leg length, so the walk is one order the game will honour.
+IDLE_WALK_NEAR_M = 55.0
+IDLE_WALK_FAR_M = 110.0
+#: A task type that was running while he stood still is not tried again for
+#: this long. Observed live: `enter_nearest_vehicle` failed and was re-issued
+#: for ten minutes at a car in a garage he could not reach.
+IDLE_TYPE_BAN_S = 90.0
+
+
+@dataclass
+class IdleBreaker:
+    """He is not actually moving. Do something DIFFERENT — and keep doing things.
+
+    Everything else that watches for "stuck" is bookkeeping: a goal's own
+    watchdog, the step machine's timeout, the bridge's per-task no-progress
+    check. All of them can be satisfied while the man on screen stands in one
+    spot, because each only judges its own task and the goal engine happily
+    re-plans into the same impossible step. Observed live 2026-09-03: ten
+    minutes beside a Buffalo in a garage, `enter_nearest_vehicle` failing and
+    being re-issued, the brain narrating "taking it" the whole time.
+
+    So this measures the only thing that cannot be argued with — how far the
+    player has actually travelled — and when the answer is "nowhere", it forces
+    a rung that is deliberately NOT what he was just doing. The rungs cycle, so
+    a spot that defeats one is escaped by the next rather than retried:
+
+    0. go somewhere near, on foot (a plain `walk_to`, the one movement order
+       measured to work from anywhere);
+    1. start a fight with whoever is nearest — loud, always available, and it
+       moves him;
+    2. go somewhere far, in a different direction;
+    3. shoot at the nearest ped if he is holding a gun, else walk again.
+
+    It also reports the task type that was running while he stood still, so the
+    caller can refuse that type for a while: re-issuing the exact order that
+    was not working is the loop this class exists to break.
+    """
+
+    clock: Any = time.monotonic
+    rng: Any = field(default_factory=random.Random)
+    _anchor: tuple[float, float] | None = None
+    _anchor_at: float = 0.0
+    _rung: int = 0
+    _fired_at: float = 0.0
+    _health: int | None = None
+    #: Task types seen running while he was stuck, and when they may be tried again.
+    _banned: dict[str, float] = field(default_factory=dict)
+
+    def reset(self) -> None:
+        self._anchor = None
+        self._anchor_at = self.clock()
+        self._rung = 0
+        self._fired_at = 0.0
+
+    def bans(self, task_type: str) -> bool:
+        """Is this task type refused right now because it left him standing?"""
+        return self.clock() < self._banned.get(task_type, 0.0)
+
+    def observe(self, state: GameState) -> None:
+        """Track real displacement. Called every tick, before :meth:`check`."""
+        here = (state.player.pos.x, state.player.pos.y)
+        now = self.clock()
+        health = state.player.health
+        losing_health = self._health is not None and health < self._health
+        self._health = health
+        if self._anchor is None:
+            self._anchor, self._anchor_at = here, now
+            return
+        dx, dy = here[0] - self._anchor[0], here[1] - self._anchor[1]
+        if math.sqrt((dx * dx) + (dy * dy)) >= IDLE_MOVE_M or losing_health:
+            # He genuinely moved — or something is happening TO him, which is
+            # not the dead-quiet nothing this rung exists for. Standing still
+            # while a ped works him over is the survival ladder's business, and
+            # it is directly above this one. Re-anchor and forgive the ladder.
+            self._anchor, self._anchor_at = here, now
+            self._rung = 0
+
+    def still_for_s(self) -> float:
+        """Seconds inside the same six-metre circle. Zero until first observed —
+        an instance that has never seen a snapshot has not been standing still
+        since the epoch, which is what an unset anchor would otherwise mean."""
+        if self._anchor is None:
+            return 0.0
+        return self.clock() - self._anchor_at
+
+    def check(self, state: GameState) -> dict[str, Any] | None:
+        """The next thing to try, or None while he is moving or unable to act.
+
+        Feeds itself: the displacement anchor and the health reading are updated
+        here rather than relying on a separate per-tick call, so any caller gets
+        honest numbers and a fresh instance can never believe it has been
+        standing still since the epoch.
+        """
+        self.observe(state)
+        p = state.player
+        if p.dead or p.arrested or not p.control_enabled or state.mission.cutscene_active:
+            self.reset()
+            return None
+        if p.in_vehicle:
+            # In a car, "not moving" already has an owner: `VehicleController`
+            # drives away from a seat that has been idle, and runs its own
+            # BLOCKED/STUCK ladder for a car that will not go. Walking away from
+            # a working car would be worse television than either. This rung is
+            # the ON-FOOT case, which is where the ten-minute freeze happened.
+            self.reset()
+            return None
+        now = self.clock()
+        if self.still_for_s() < IDLE_WINDOW_S:
+            return None
+        if now - self._fired_at < IDLE_RUNG_HOLD_S:
+            return None
+        # Whatever was running while he stood there does not get another go.
+        lt = state.last_task
+        if lt is not None and lt.type:
+            self._banned[lt.type] = now + IDLE_TYPE_BAN_S
+        self._fired_at = now
+        rung, self._rung = self._rung % 4, (self._rung + 1) % 4
+        action = self._rung_action(state, rung)
+        log.warning(
+            "not moving; forcing something different",
+            extra={
+                "kv": {
+                    "still_for_s": round(self.still_for_s(), 1),
+                    "rung": rung,
+                    "action": action["type"],
+                    "banned": lt.type if lt is not None else None,
+                }
+            },
+        )
+        return action
+
+    def _rung_action(self, state: GameState, rung: int) -> dict[str, Any]:
+        if rung == 1:
+            mark = self._nearest_ped(state)
+            if mark is not None:
+                return {"type": "fight_ped", "params": {"handle": mark, "weapon": "unarmed"}}
+            return self._walk(state, IDLE_WALK_NEAR_M)
+        if rung == 3:
+            mark = self._nearest_ped(state)
+            weapon = getattr(state.player, "weapon", None)
+            armed = weapon is not None and getattr(weapon, "class_", None) == "gun"
+            if mark is not None and armed:
+                return {"type": "shoot_at", "params": {"handle": mark, "duration_s": 5.0}}
+            return self._walk(state, IDLE_WALK_NEAR_M)
+        return self._walk(state, IDLE_WALK_FAR_M if rung == 2 else IDLE_WALK_NEAR_M)
+
+    def _walk(self, state: GameState, distance: float) -> dict[str, Any]:
+        """A point `distance` away on a bearing he is not already facing."""
+        bearing = math.radians(state.player.heading + self.rng.uniform(60.0, 300.0))
+        p = state.player.pos
+        return {
+            "type": "walk_to",
+            "params": {
+                "x": p.x - (distance * math.sin(bearing)),
+                "y": p.y + (distance * math.cos(bearing)),
+                "z": p.z,
+                "run": True,
+            },
+        }
+
+    def _nearest_ped(self, state: GameState) -> int | None:
+        best, best_d = None, 1e9
+        for ped in state.nearby.peds:
+            model = (ped.model or "").lower()
+            if any(bad in model for bad in ("player_zero", "player_one", "player_two")):
+                continue
+            if ped.distance < best_d:
+                best, best_d = ped.handle, ped.distance
+        return best if best_d <= HOSTILE_CLOSE_RADIUS_M else None

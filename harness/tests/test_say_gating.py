@@ -17,6 +17,7 @@ from typing import Any
 import pytest
 from support.states import make_state
 
+from wasted_harness.behavior.recovery import IdleBreaker
 from wasted_harness.behavior.roam import RoamEngine
 from wasted_harness.brain.schemas import ActionModel, DecisionModel
 from wasted_harness.brain.tactical import DecisionResult
@@ -164,6 +165,7 @@ class _ApplyDecisionStub:
         self.mood = _MoodStub()
         self._tick_roam_transition = False
         self._mission_active = False
+        self.idle_breaker = IdleBreaker()
         self.executed: list[tuple[str, dict[str, Any]]] = []
 
     def _free_roam_owns_movement(self, action_type: str) -> bool:

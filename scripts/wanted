@@ -1,0 +1,252 @@
+#!/usr/bin/env bash
+# The agent — poke the agent from the operator's Mac while the stream is live.
+#
+# WHY THIS EXISTS. Three automatic stall detectors failed him in three different
+# ways in one week, and a live stream cannot wait for the fourth to be written:
+# a human needs a button that works regardless of which watchdog is asleep.
+# Every verb below maps onto something that ALREADY exists in the harness — a
+# free-roam catalog goal or a bridge task. Nothing new is invented behind them
+# and nothing changes unless a command is fired.
+#
+# HOW IT REACHES HIM. The harness serves a localhost-only HTTP app on the game
+# server (127.0.0.1:7788). This script tunnels one request to it over SSH —
+# reusing the persistent master socket if one is open, otherwise a fresh
+# key-based connection. Nothing is exposed to the internet.
+#
+# HONESTY. Every accepted command is logged on the box and emitted as an
+# `operator_nudge` event, so it shows up in the feed. The show's promise is
+# "no human plays for him"; the human is allowed to say "do something else".
+#
+# USAGE: scripts/wanted <verb> [arg]     (no args prints the menu)
+set -euo pipefail
+
+HOST="${WANTED_HOST:?set WANTED_HOST to the game server (no default: the address is not public)}"
+USER_="${WANTED_USER:-Administrator}"
+KEY="${WANTED_KEY:-$HOME/.ssh/wasted_server}"
+PORT_="${WANTED_PORT:-7788}"
+DRY_RUN="${WANTED_DRY_RUN:-0}"
+
+menu() {
+  cat <<'EOF'
+The agent — operator commands (all human-legal GTA play; no cheats behind any of these)
+
+  he's stuck, just make him DO something
+    nudge              drop the current goal, ban the stalled task; HE picks a new goal now
+    drive              universal un-stick: nearest car -> wander_drive (always moves)
+    stop               clear his task + goal, hand him to the game (use inside missions)
+
+  violence
+    rampage            keep firing at everything around him        (armed_rampage_block)
+    fight              fistfight the nearest ped                    (pick_a_fight)
+    driveby            shoot from a moving car                      (drive_by_run)
+    gang               go start something with a gang               (gang_trouble)
+    shoot              fire at the nearest hostile/ped RIGHT NOW    (bridge task shoot_at)
+    kill <handle>      fight one named ped; handle from `status`   (bridge task fight_ped)
+
+  driving
+    rash               drive fast and reckless down the freeway     (freeway_run)
+    chase              pick a car and chase it                      (chase_that_car)
+    steal              take a nicer car                             (steal_nice_car)
+    copcar             steal a police car                           (steal_cop_car)
+    bus                hijack a bus                                 (hijack_bus)
+    jack               pull a driver out of a moving car            (jack_a_driver)
+    bike               bike into the hills                          (bike_hills)
+    landmark           drive somewhere scenic                       (drive_to_landmark)
+    jump               find a ramp                                  (big_jump)
+    honk               lean on the horn and go                      (honk_run)
+    taxi               take a taxi somewhere                        (taxi_ride)
+    heli               go get a helicopter, if one is reachable     (helicopter_grab)
+
+  police
+    cops               find cops / get a wanted level               (earn_two_stars)
+    survive            survive a three-star chase                   (three_star_survival)
+    losecops           break line of sight and lose them            (lose_the_cops)
+
+  story / world
+    mission            nearest mission marker, start it             (start_nearest_mission)
+    event              go to the nearest ? blip                     (random_event)
+    block              wander the neighbourhood                     (roam_the_block)
+
+  info
+    status             where he is, how long still, task, goal, and WHAT IS HOLDING HIM
+    goals              which of the above he can actually do right now
+    goal <id>          any catalog id directly (the verbs above are just aliases)
+
+  env: WANTED_HOST WANTED_USER WANTED_KEY WANTED_PORT WANTED_DRY_RUN=1 (print the request, send nothing)
+EOF
+}
+
+# verb -> harness command. The harness accepts only five shapes: nudge, goal <id>,
+# task <type> [handle], stop, status. Everything friendly lives here, on purpose:
+# the surface on the box stays tiny and auditable.
+resolve() {
+  local verb="$1" arg="${2:-}"
+  case "$verb" in
+    nudge)    echo "nudge|";;
+    drive)    echo "task|drive";;              # the harness expands: enter_nearest_vehicle -> wander_drive
+    stop)     echo "stop|";;
+    status)   echo "status|";;
+    goals)    echo "status|goals";;
+    goal)     [[ -n "$arg" ]] || { echo "goal needs an id (try: the agent goals)" >&2; return 2; }; echo "goal|$arg";;
+    shoot)    echo "task|shoot_at";;
+    kill)     [[ "$arg" =~ ^[0-9]+$ ]] || { echo "kill needs a numeric ped handle (from: the agent status)" >&2; return 2; }; echo "task|fight_ped|$arg";;
+    rampage)  echo "goal|armed_rampage_block";;
+    fight)    echo "goal|pick_a_fight";;
+    driveby)  echo "goal|drive_by_run";;
+    gang)     echo "goal|gang_trouble";;
+    rash)     echo "goal|freeway_run";;
+    chase)    echo "goal|chase_that_car";;
+    steal)    echo "goal|steal_nice_car";;
+    copcar)   echo "goal|steal_cop_car";;
+    bus)      echo "goal|hijack_bus";;
+    jack)     echo "goal|jack_a_driver";;
+    bike)     echo "goal|bike_hills";;
+    landmark) echo "goal|drive_to_landmark";;
+    jump)     echo "goal|big_jump";;
+    honk)     echo "goal|honk_run";;
+    taxi)     echo "goal|taxi_ride";;
+    heli)     echo "goal|helicopter_grab";;
+    cops)     echo "goal|earn_two_stars";;
+    survive)  echo "goal|three_star_survival";;
+    losecops) echo "goal|lose_the_cops";;
+    mission)  echo "goal|start_nearest_mission";;
+    event)    echo "goal|random_event";;
+    block)    echo "goal|roam_the_block";;
+    *)        echo "unknown verb: $verb" >&2; menu >&2; return 2;;
+  esac
+}
+
+# Reuse a live master socket when one exists (no new TCP handshake — the box's
+# sshd resets rapid reconnects), else fall back to a plain key connection.
+ssh_target() {
+  local sock
+  for sock in /tmp/wasted-ssh-*.sock; do
+    [[ -S "$sock" ]] || continue
+    if ssh -S "$sock" -O check "$USER_@$HOST" >/dev/null 2>&1; then
+      echo "-S $sock"
+      return 0
+    fi
+  done
+  echo "-i $KEY -o BatchMode=yes -o ConnectTimeout=15"
+}
+
+# JSON-escape a short string (only what these payloads can contain).
+jesc() { printf '%s' "$1" | sed 's/\\/\\\\/g; s/"/\\"/g'; }
+
+send() {
+  local cmd="$1" arg="$2" handle="$3"
+  local method="POST" path="/operator" body=""
+  if [[ "$cmd" == "status" ]]; then
+    method="GET"; path="/operator/status"
+  else
+    body="{\"cmd\":\"$(jesc "$cmd")\",\"arg\":\"$(jesc "$arg")\",\"handle\":\"$(jesc "$handle")\"}"
+  fi
+  local url="http://127.0.0.1:$PORT_$path"
+
+  if [[ "$DRY_RUN" == "1" ]]; then
+    echo "DRY RUN — would send $method $url"
+    [[ -n "$body" ]] && echo "  body: $body"
+    return 0
+  fi
+
+  # PowerShell on the box makes the HTTP call and returns {"http": code, "body": ...} as one
+  # JSON document, so this side can tell accepted from refused. The template is a QUOTED heredoc
+  # (no shell expansion — PowerShell's own `$` and backticks survive intact); the three values are
+  # spliced in by python, which also handles escaping. -EncodedCommand then sidesteps every quoting
+  # layer between here and pwsh on the box.
+  local template
+  template=$(cat <<'PSEOF'
+$ErrorActionPreference = 'Stop'
+try {
+  if ('__METHOD__' -eq 'GET') {
+    $r = Invoke-WebRequest -Uri '__URL__' -TimeoutSec 8 -UseBasicParsing
+  } else {
+    $r = Invoke-WebRequest -Uri '__URL__' -Method Post -ContentType 'application/json' -Body '__BODY__' -TimeoutSec 8 -UseBasicParsing
+  }
+  Write-Output ('{"http":' + $r.StatusCode + ',"body":' + $r.Content + '}')
+} catch [System.Net.WebException] {
+  $resp = $_.Exception.Response
+  if ($resp -ne $null) {
+    $sr = New-Object System.IO.StreamReader($resp.GetResponseStream()); $c = $sr.ReadToEnd()
+    Write-Output ('{"http":' + [int]$resp.StatusCode + ',"body":' + $c + '}')
+  } else {
+    Write-Output ('{"http":0,"body":{"error":"' + ($_.Exception.Message -replace '"','\"') + '"}}')
+  }
+} catch {
+  Write-Output ('{"http":0,"body":{"error":"' + ($_.Exception.Message -replace '"','\"') + '"}}')
+}
+PSEOF
+)
+  local enc
+  enc=$(WANTED_T="$template" WANTED_M="$method" WANTED_U="$url" WANTED_B="$body" python3 - <<'PYEOF2'
+import base64, os
+t = os.environ["WANTED_T"]
+t = t.replace("__METHOD__", os.environ["WANTED_M"]).replace("__URL__", os.environ["WANTED_U"])
+t = t.replace("__BODY__", os.environ["WANTED_B"].replace("'", "''"))  # PowerShell single-quote escape
+print(base64.b64encode(t.encode("utf-16le")).decode())
+PYEOF2
+)
+  # shellcheck disable=SC2046  # ssh_target intentionally yields multiple args
+  ssh $(ssh_target) "$USER_@$HOST" "powershell -NoProfile -EncodedCommand $enc" 2>/dev/null \
+    | grep -v '^#< CLIXML' | grep -v '^<Objs'
+}
+
+pretty() {
+  # Human summary from the reply. The reply is captured first and handed to python through the
+  # environment: `python3 -` reads its PROGRAM from stdin, so the piped reply cannot also be there.
+  local raw
+  raw=$(cat)
+  WANTED_RAW="$raw" python3 - "$1" <<'PYEOF' || { printf '%s\n' "$raw"; return 1; }
+import json, os, sys
+raw = os.environ.get("WANTED_RAW", "").strip()
+try:
+    outer = json.loads(raw)
+except Exception:
+    print(raw); sys.exit(0)
+http = outer.get("http", 0); body = outer.get("body", {})
+mode = sys.argv[1]
+if isinstance(body, str):
+    try: body = json.loads(body)
+    except Exception: pass
+if http == 0:
+    print("could not reach the harness:", body.get("error") if isinstance(body, dict) else body)
+    print("is the harness running? (the agent status needs it up; start it from the WASTED-Harness task)")
+    sys.exit(3)
+if mode == "status":
+    s = body
+    print(f"where     : {s.get('street','?')} / {s.get('zone','?')}  pos={s.get('pos')}")
+    print(f"still for : {s.get('still_for_s','?')} s    in_vehicle={s.get('in_vehicle')}  hp={s.get('health')}  wanted={s.get('wanted')}")
+    print(f"task      : {s.get('last_task')}")
+    print(f"goal      : {s.get('goal')}")
+    print(f"mission   : active={s.get('mission_active')} script={s.get('mission_script')} cutscene={s.get('cutscene')} switch={s.get('switch_in_progress')} retry={s.get('retry_in_flight')}")
+    print(f"holding   : {s.get('held_by') or 'nothing — he is free to act'}")
+    if s.get("attacker_handle"): print(f"attacker  : handle {s['attacker_handle']}")
+    peds = s.get("nearby_peds") or []
+    if peds: print("nearby    : " + ", ".join(f"{p.get('name') or p.get('model')}#{p.get('handle')}@{p.get('distance')}m" for p in peds[:6]))
+    print("can do now: " + (", ".join(s.get("available_goals") or []) or "(nothing offered right now)"))
+    sys.exit(0)
+if mode == "goals":
+    print("he can do right now: " + (", ".join(body.get("available_goals") or []) or "(nothing offered)"))
+    if body.get("goal"): print(f"(currently locked on: {body['goal']})")
+    sys.exit(0)
+if http == 200 and body.get("accepted"):
+    print(f"accepted: {body.get('cmd')} {body.get('arg') or ''}".rstrip() + f"  — applied on the next tick ({body.get('note','')})".rstrip("( )"))
+    sys.exit(0)
+print(f"REFUSED ({http}): {body.get('error') or body}")
+if body.get("available_goals") is not None:
+    print("available right now: " + (", ".join(body["available_goals"]) or "(nothing)"))
+sys.exit(1)
+PYEOF
+}
+
+main() {
+  [[ $# -ge 1 ]] || { menu; exit 0; }
+  local verb="$1" arg="${2:-}"
+  local spec cmd carg handle
+  spec=$(resolve "$verb" "$arg") || exit $?
+  IFS='|' read -r cmd carg handle <<<"$spec"
+  local mode="cmd"
+  [[ "$cmd" == "status" ]] && mode="${carg:-status}"
+  send "$cmd" "$carg" "${handle:-}" | pretty "$mode"
+}
+main "$@"

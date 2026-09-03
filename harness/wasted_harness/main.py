@@ -49,6 +49,7 @@ from .behavior.recovery import (
     DamageTracker,
     DeathArrestRecovery,
     GameRestartDetector,
+    IdleBreaker,
     JackHandoffGate,
     OffLoopGrab,
     RoadDodge,
@@ -193,6 +194,13 @@ NEUTRAL_GOAL_TEXT = "seeing what Los Santos throws at him next"
 #: — both are "no coordinates, find/keep going" tasks that a restart resets to
 #: zero, unlike `walk_to`/`drive_to` which carry a target and redirect cleanly.
 RESTART_HOSTILE_TASKS: frozenset[str] = frozenset({"enter_nearest_vehicle", "wander_drive"})
+
+#: He stops narrating once he has stood in the same spot this long. Commentary
+#: is gated on events, but a goal being picked IS an event, so a man who cannot
+#: move still generated a line per attempt — which is exactly what made the feed
+#: read as fake (operator, 2026-09-03: "he talks like he is doing but standing
+#: at one place ... then it looks fake").
+IDLE_SILENCE_S = 15.0
 
 #: T3 (findings.md R2): action types that mean "he is fighting" for the
 #: purposes of gating `say` on an event — the decision itself choosing one of
@@ -861,6 +869,7 @@ class Harness:
         #: 0.2 m of movement).
         self.task_stall = TaskStallDetector()
         self.cleared_backoff = ClearedByGameBackoff()
+        self.idle_breaker = IdleBreaker(rng=self.rng)
         self.stranded = StrandedEscalator()
         #: T9 (findings.md R1/R5): `vehicle.in_water` past 10 s → exit, then
         #: one walk toward known land; an NPC vehicle closing fast while he is
@@ -1742,6 +1751,12 @@ class Harness:
                     # getting him there, and it has its own stuck watchdog
                     # (GOAL_STUCK_S, two strikes) for when it genuinely cannot.
                     self.stranded.reset()
+                    # But a locked goal is not proof of progress. Observed live
+                    # 2026-09-03: ten minutes beside a car in a garage with a
+                    # goal locked, re-issuing an entry the game would never
+                    # grant, narrated the whole time as if it were happening. If
+                    # he has not actually moved, the goal does not keep him there.
+                    self._break_the_idle(state)
                 elif state.phone.in_call:
                     # On the phone: the game will not walk him to a car, so a
                     # widening search only re-posts a task that cannot run.
@@ -1775,6 +1790,8 @@ class Harness:
                         strand = self.stranded.check(state)
                         if strand is not None:
                             self._reflex_act("stranded", strand, "on foot with no car")
+                        else:
+                            self._break_the_idle(state)
                 # Governor L2: reflex drives — keep a wander task alive with
                 # mood style. The activity runner is also reflex-layer
                 # behaviour and outranks this; posting a wander on top of a
@@ -2033,6 +2050,19 @@ class Harness:
         if state.mission.retry_in_flight:
             return "mission retry/checkpoint reload in progress"
         return "control_enabled is false"
+
+    def _break_the_idle(self, state: GameState) -> None:
+        """Last resort: he has not moved and nothing above had an answer.
+
+        Consulted only after every other rung declined, because
+        :meth:`IdleBreaker.check` advances its ladder and bans a task type when
+        it fires — not something to spend on a tick somebody else owns.
+        """
+        if self._vehicle_hold(state) is not None:
+            return  # standing still is correct right now, and has a name
+        action = self.idle_breaker.check(state)
+        if action is not None:
+            self._reflex_act("idle_breaker", action, "not moving: something different")
 
     def _reflex_act(
         self, owner: str, action: dict[str, Any], reason: str
@@ -2766,6 +2796,22 @@ class Harness:
                 extra={"kv": {"layer": layer, "would_have_said": d.say[:120]}},
             )
             say = ""
+        elif self.idle_breaker.still_for_s() >= IDLE_SILENCE_S:
+            # He has not actually moved for a quarter of a minute. Whatever the
+            # event was, a running line about taking a car he is not walking to
+            # reads as fake to anyone watching the screen — and it was: observed
+            # 2026-09-03, a wall of "Empty sports car. That'll do." while he
+            # stood on a verge. If he is not doing anything, he does not talk.
+            log.info(
+                "commentary suppressed: he has not moved",
+                extra={
+                    "kv": {
+                        "still_for_s": round(self.idle_breaker.still_for_s(), 1),
+                        "would_have_said": d.say[:120],
+                    }
+                },
+            )
+            say = ""
         # GROUNDING (live 2026-09-02): he narrated "keep Dave alive" and
         # "Trevor's got the rifle" through a whole mission in which neither man
         # existed. Naming somebody who is not there is the most damaging thing
@@ -2976,6 +3022,15 @@ class Harness:
             log.info(
                 "task refused: the game just cleared this type; backing off",
                 extra={"kv": {"action": action_type, "wait_s": round(wait, 1)}},
+            )
+            return None
+        if action_type in BRIDGE_TASKS and self.idle_breaker.bans(action_type):
+            # This exact type was running while he stood still, so it is not
+            # tried again for a while. Every OTHER type still goes through,
+            # which is the variety that actually gets him out of a bad spot.
+            log.info(
+                "task refused: this type left him standing still",
+                extra={"kv": {"action": action_type}},
             )
             return None
         if action_type in RESTART_HOSTILE_TASKS:
@@ -3829,6 +3884,7 @@ class Harness:
         self._phone_call_connected_at = None
         self.task_stall = TaskStallDetector()
         self.cleared_backoff = ClearedByGameBackoff()
+        self.idle_breaker = IdleBreaker(rng=self.rng)
         self.stranded = StrandedEscalator()
         # T9: every timer here is keyed on wall-clock time or an ephemeral
         # vehicle handle, void behind a new game process — same rule as

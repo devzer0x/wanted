@@ -70,6 +70,7 @@ from wasted_harness.behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    IdleBreaker,
     JackHandoffGate,
     RoadDodge,
     StrandedEscalator,
@@ -371,6 +372,7 @@ class ReplayHarness:
     _game_owns_controls = Harness._game_owns_controls
     _game_control_reason = Harness._game_control_reason
     _reflex_act = Harness._reflex_act
+    _break_the_idle = Harness._break_the_idle
     _roam_preempted = Harness._roam_preempted
     _mission_preempted = Harness._mission_preempted
     _day_plan_preempted = Harness._day_plan_preempted
@@ -443,6 +445,9 @@ class ReplayHarness:
         self.stuck = StuckDetector(clock=self.clock)
         self.task_stall = TaskStallDetector(clock=self.clock)
         self.cleared_backoff = ClearedByGameBackoff(clock=self.clock)
+        # Seeded and on the fake clock: the breaker picks a bearing at random,
+        # and a replay has to be reproducible from (seed, states) alone.
+        self.idle_breaker = IdleBreaker(clock=self.clock, rng=random.Random(seed))
         self.stranded = StrandedEscalator(clock=self.clock)
         self.threat_latch = ThreatLatch(clock=self.clock)
         self.damage = DamageTracker(clock=self.clock)

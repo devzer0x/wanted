@@ -23,12 +23,20 @@ export function buildFeed(
   limit = 120
 ): FeedItem[] {
   const items: FeedItem[] = [
-    ...decisions.map<FeedItem>((row) => ({
-      kind: "decision",
-      key: `d-${row.id}`,
-      ts: row.ts,
-      row,
-    })),
+    // A decision with nothing to SAY is not a transmission. The harness records every brain call
+    // (a timer fires it every 8-25 s), but its event gate blanks the spoken line when nothing
+    // happened; those rows exist for audit and cost, not for the audience. Rendering them put a
+    // fresh "…" card in the feed every cycle while he stood still (operator, 2026-09-03: "only
+    // shares random AI thoughts without doing anything"). The thought is still there for anyone
+    // reading the row, but a silence is not something to scroll past.
+    ...decisions
+      .filter((row) => Boolean(row.say && row.say.trim()))
+      .map<FeedItem>((row) => ({
+        kind: "decision",
+        key: `d-${row.id}`,
+        ts: row.ts,
+        row,
+      })),
     ...events
       .filter((row) => !FEED_HIDDEN_EVENTS.has(row.type))
       .map<FeedItem>((row) => ({

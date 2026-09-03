@@ -997,6 +997,12 @@ MOVEMENT_OWNER_TABLE: tuple[MovementOwner, ...] = (
     MovementOwner("exit_interior", WHEEL_REFLEX, 3, "indoors (player.interior): walk out"),
     MovementOwner("house_escape", WHEEL_REFLEX, 2, "apparently indoors: walk out"),
     MovementOwner("stranded", WHEEL_REFLEX, 1, "on foot with no car"),
+    # He has genuinely not moved for fifteen seconds and every layer above had
+    # its chance. Ranked just under `stranded` (whose answer, a wider vehicle
+    # search, is the cheaper thing to try first) and above `resume`, because
+    # "nothing has moved him for a quarter of a minute" is a stronger signal
+    # than "control came back three seconds ago". See `recovery.IdleBreaker`.
+    MovementOwner("idle_breaker", WHEEL_REFLEX, 1, "not moving: force something different"),
     # F6. The LAST reflex rung, and the only one whose trigger is the absence of
     # everything else: control came back, three seconds passed, and not one layer
     # in this table posted a movement task. It is bottom of the reflex class
