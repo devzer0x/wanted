@@ -194,6 +194,8 @@ namespace WastedBridge
                 Threat = threat,
                 // v1.13: two natives, guarded (see ReadPhoneSafe).
                 Phone = ReadPhoneSafe(ped),
+                // 1.9.0: the cheat effects currently on. ArsenalState.Read never throws.
+                Effects = new EffectsDto { Arsenal = ArsenalState.Read() },
                 LastTask = engine.ToDto(),
                 Bridge = new BridgeInfoDto
                 {

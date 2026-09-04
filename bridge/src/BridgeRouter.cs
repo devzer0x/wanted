@@ -98,6 +98,8 @@ namespace WastedBridge
                     return RequireMethod(method, "POST", path) ?? HandleHorn(body);
                 case "/unstick":
                     return RequireMethod(method, "POST", path) ?? HandleUnstick();
+                case "/arsenal":
+                    return RequireMethod(method, "POST", path) ?? HandleArsenal(body);
                 default:
                     return BridgeResponse.Error(404, "not_found", "unknown path " + path);
             }
@@ -410,6 +412,30 @@ namespace WastedBridge
                     }
                     return true;
                 }
+                // --- bridge 1.9.0 --------------------------------------------------------------
+                case "throw_at":
+                {
+                    // Target-explicit, same frozen "handle" wire key as shoot_at; the handle
+                    // may be a ped OR a vehicle (a parked car is the honest grenade target).
+                    // WHICH throwable is chosen bridge-side (WeaponState.SelectThrowable) from
+                    // what has rounds at task start, for the reason shoot_at documents.
+                    if (!TryInt(p, "handle", out req.Handle))
+                    {
+                        return Invalid(out error, out detail, "throw_at requires integer handle");
+                    }
+                    int count;
+                    JToken countToken = p["count"];
+                    if (countToken == null)
+                    {
+                        count = 1;
+                    }
+                    else if (!TryInt(p, "count", out count) || count < 1 || count > 5)
+                    {
+                        return Invalid(out error, out detail, "count must be an integer 1..5");
+                    }
+                    req.Count = count;
+                    return true;
+                }
                 case "enter_vehicle_seat":
                 {
                     if (!TryInt(p, "handle", out req.Handle))
@@ -527,6 +553,43 @@ namespace WastedBridge
             }
             int clamped = (int)Math.Min(3000f, Math.Max(1f, ms));
             return RunOnGameThread(new BridgeCommand { Kind = CommandKind.Horn, HornMs = clamped });
+        }
+
+        // ---- POST /arsenal (1.9.0) -------------------------------------------------------------
+
+        /// <summary>
+        /// Body `{"on": bool, "ttl_s": 30–300}` (ttl_s optional, default ArsenalState.DefaultTtlMs).
+        /// The HTTP thread only validates and clamps; the grant/clear and every 409 reason are
+        /// decided on the game thread (WastedBridgeScript.ApplyArsenal) against fresh reads.
+        /// </summary>
+        private BridgeResponse HandleArsenal(string rawBody)
+        {
+            JObject body;
+            BridgeResponse bad = TryParseBody(rawBody, out body);
+            if (bad != null)
+            {
+                return bad;
+            }
+            JToken onToken = body["on"];
+            if (onToken == null || onToken.Type != JTokenType.Boolean)
+            {
+                return BridgeResponse.Error(400, "invalid_params",
+                    "arsenal requires boolean \"on\"");
+            }
+            bool on = (bool)onToken;
+            float ttlS = OptFloat(body, "ttl_s", ArsenalState.DefaultTtlMs / 1000f);
+            if (float.IsNaN(ttlS) || ttlS <= 0f)
+            {
+                return BridgeResponse.Error(400, "invalid_params", "ttl_s must be positive");
+            }
+            int ttlMs = (int)Math.Max(ArsenalState.MinTtlMs,
+                Math.Min(ArsenalState.MaxTtlMs, ttlS * 1000f));
+            return RunOnGameThread(new BridgeCommand
+            {
+                Kind = CommandKind.Arsenal,
+                ArsenalOn = on,
+                ArsenalTtlMs = ttlMs
+            });
         }
 
         // ---- POST /unstick -------------------------------------------------------------------

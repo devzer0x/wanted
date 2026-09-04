@@ -77,6 +77,12 @@ namespace WastedBridge
         /// reasoning fight_ped already documents for reading the target's weapon class fresh.</summary>
         private const float ShotgunRangeM = 10f;
 
+        /// <summary>Bridge 1.9.0: standoff the arsenal's explosives need before they are the
+        /// pick (see <see cref="SelectForRange"/>). Rockets further out than launcher rounds
+        /// because the blast is bigger.</summary>
+        private const float ArsenalRocketMinRangeM = 30f;
+        private const float ArsenalLauncherMinRangeM = 18f;
+
         private static string _mode;
         private static bool _modeLogged;
         private static bool _wasDead;
@@ -280,6 +286,36 @@ namespace WastedBridge
         /// </summary>
         internal static WeaponHash SelectForRange(Ped ped, float distanceM)
         {
+            // Bridge 1.9.0: WHILE THE ARSENAL IS ON, the kit's guns come first — that is the
+            // whole point of the bit, and the ordinary three below stay exactly as they were
+            // for every tick the arsenal is off (ArsenalState.IsActive is false by default and
+            // after every restore edge). Explosives need standoff: a rocket at 7 m is a death
+            // clip we did not choose, so the launchers are only picked with room, and inside
+            // that the belt-fed guns take over. The harness's `loaded_gun_for` mirrors the
+            // arsenal-on answer as "any kit gun with rounds -> armed". Change one, change both.
+            if (ArsenalState.IsActive)
+            {
+                if (distanceM > ArsenalRocketMinRangeM && HasRounds(ped, WeaponHash.RPG))
+                {
+                    ped.Weapons.Select(WeaponHash.RPG, true);
+                    return WeaponHash.RPG;
+                }
+                if (distanceM > ArsenalLauncherMinRangeM && HasRounds(ped, WeaponHash.GrenadeLauncher))
+                {
+                    ped.Weapons.Select(WeaponHash.GrenadeLauncher, true);
+                    return WeaponHash.GrenadeLauncher;
+                }
+                if (HasRounds(ped, WeaponHash.Minigun))
+                {
+                    ped.Weapons.Select(WeaponHash.Minigun, true);
+                    return WeaponHash.Minigun;
+                }
+                if (HasRounds(ped, WeaponHash.AssaultRifle))
+                {
+                    ped.Weapons.Select(WeaponHash.AssaultRifle, true);
+                    return WeaponHash.AssaultRifle;
+                }
+            }
             if (distanceM <= ShotgunRangeM && HasRounds(ped, WeaponHash.PumpShotgun))
             {
                 ped.Weapons.Select(WeaponHash.PumpShotgun, true);
@@ -357,6 +393,16 @@ namespace WastedBridge
                     return FiringPattern.BurstFireSMG;
                 case WeaponHash.Pistol:
                     return FiringPattern.BurstFirePistol;
+                // Bridge 1.9.0, the arsenal's guns. Members verified present in the pinned
+                // GTA.FiringPattern enum by reflection (SingleShot 0x5D60E4E0, FullAuto
+                // 0xC6EE6B4C, BurstFireRifle 0x9C74B406). Still a cadence, still not accuracy.
+                case WeaponHash.RPG:
+                case WeaponHash.GrenadeLauncher:
+                    return FiringPattern.SingleShot;
+                case WeaponHash.Minigun:
+                    return FiringPattern.FullAuto;
+                case WeaponHash.AssaultRifle:
+                    return FiringPattern.BurstFireRifle;
                 default:
                     return FiringPattern.Default;
             }
@@ -388,6 +434,45 @@ namespace WastedBridge
             }
             Weapon w = ped.Weapons[hash];
             return w == null ? 0 : w.Ammo;
+        }
+
+        /// <summary>Bridge 1.9.0: <see cref="AmmoFor"/> for other files (ArsenalState's
+        /// pre-grant record, TaskEngine's throw grading). Never throws; a native failure reads
+        /// as 0 rounds, the same safe direction every read in this file degrades in.</summary>
+        internal static int RoundsFor(Ped ped, WeaponHash hash)
+        {
+            try
+            {
+                return AmmoFor(ped, hash);
+            }
+            catch (System.Exception)
+            {
+                return 0;
+            }
+        }
+
+        /// <summary>
+        /// Bridge 1.9.0, throw_at: the throwable with rounds, or Unarmed when there is none.
+        /// Grenade first (it is the one the bit is named for), molotov second. Selected through
+        /// the same HAS_PED_GOT_WEAPON-guarded `WeaponCollection.Select(WeaponHash, bool)`
+        /// wrapper every other selection here uses — XML: "Selects the specified weapon ...
+        /// equipNow: Specifies if the owner ped will equip in hands immediately." Nothing is
+        /// conjured: with no grenade in the inventory this answers Unarmed and the task fails
+        /// `no_throwable`.
+        /// </summary>
+        internal static WeaponHash SelectThrowable(Ped ped)
+        {
+            if (HasRounds(ped, WeaponHash.Grenade))
+            {
+                ped.Weapons.Select(WeaponHash.Grenade, true);
+                return WeaponHash.Grenade;
+            }
+            if (HasRounds(ped, WeaponHash.Molotov))
+            {
+                ped.Weapons.Select(WeaponHash.Molotov, true);
+                return WeaponHash.Molotov;
+            }
+            return WeaponHash.Unarmed;
         }
 
         internal static WeaponHash CurrentHash(Ped ped)
@@ -425,6 +510,18 @@ namespace WastedBridge
                 AddOwned(dto, ped, WeaponHash.Pistol);
                 AddOwned(dto, ped, WeaponHash.MicroSMG);
                 AddOwned(dto, ped, WeaponHash.PumpShotgun);
+                // Bridge 1.9.0: while the arsenal is ON the tracked set widens to the kit, so
+                // the harness can grade "rounds gone" for the bit the same way it does for the
+                // three above (`_ammo_spent` / `_arsenal_spent` are `owned` deltas). The
+                // moment the arsenal is off the names drop out again — "not in owned" keeps
+                // its documented meaning of "not tracked", never "unarmed".
+                if (ArsenalState.IsActive)
+                {
+                    foreach (uint kitHash in ArsenalState.KitHashes)
+                    {
+                        AddOwned(dto, ped, (WeaponHash)kitHash);
+                    }
+                }
             }
             catch (System.Exception)
             {

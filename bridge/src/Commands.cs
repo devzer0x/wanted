@@ -34,6 +34,11 @@ namespace WastedBridge
         // (-1) is deliberately unreachable through this task - that is enter_nearest_vehicle,
         // which has the "nicer" chooser and the seat verification that go with driving.
         public int Seat;
+
+        // --- bridge 1.9.0 -------------------------------------------------------------------
+        // throw_at: how many throws to make at the target (1..5). Each one is graded on the
+        // throwable's ammo actually dropping — see TaskEngine.UpdateThrowAt.
+        public int Count;
     }
 
     /// <summary>
@@ -83,7 +88,9 @@ namespace WastedBridge
         SetControl,
         SetRadio,
         Horn,
-        Unstick
+        Unstick,
+        // 1.9.0: POST /arsenal — switch the cheat weapon layer on (with a TTL) or off.
+        Arsenal
     }
 
     /// <summary>One queued unit of work handed from the HTTP thread to the game thread.</summary>
@@ -95,6 +102,8 @@ namespace WastedBridge
         public bool ControlEnabled;   // SetControl
         public string RadioStation;   // SetRadio ("off" or a station name)
         public int HornMs;            // Horn (already clamped)
+        public bool ArsenalOn;        // Arsenal: true = grant with ArsenalTtlMs, false = clear
+        public int ArsenalTtlMs;      // Arsenal (already clamped to ArsenalState's bounds)
         public CommandReply Reply;    // null for NewTask (202 was already returned)
     }
 }

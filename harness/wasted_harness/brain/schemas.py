@@ -71,6 +71,13 @@ BRIDGE_TASKS: tuple[str, ...] = (
     # mission block or a survival rung takes the wheel off it exactly as they
     # take it off a `drive_to`.
     "fly_to",
+    # --- bridge 1.9.0 (CONTRACTS §1 proposal): `throw_at{handle, count}`.
+    # Throw the grenade/molotov he is CARRYING at a ped or a vehicle — raw
+    # TASK_THROW_PROJECTILE, graded bridge-side on the throwable's ammo actually
+    # dropping (fails `no_throwable` with nothing to throw, `did_not_throw` if
+    # the native does nothing visible). It reuses the frozen `handle` key and
+    # adds one small key, `count`. A movement-wheel task like `shoot_at`.
+    "throw_at",
 )
 
 #: CONTRACTS v1.13. The two bridge tasks that MOVE NOBODY: they inject one
@@ -126,6 +133,7 @@ ActionType = Literal[
     "drive_by",
     "enter_vehicle_seat",
     "fly_to",
+    "throw_at",
     "look_around",
     "brake_tap",
     "swerve",
@@ -168,6 +176,8 @@ REQUIRED_PARAMS: dict[str, tuple[str, ...]] = {
     "shoot_at": ("handle",),
     "drive_by": ("handle",),
     "enter_vehicle_seat": ("handle",),
+    # bridge 1.9.0: a throw at nothing is a 400, same as a shot at nothing.
+    "throw_at": ("handle",),
 }
 
 
@@ -378,6 +388,15 @@ class ActionParamsModel(BaseModel):
             "2 rear-right. The driver's seat is enter_nearest_vehicle."
         ),
     )
+    # bridge 1.9.0. Non-nullable with a default for the same 15-union-param
+    # reason as `weapon` and `seat`: a nullable `count` would be the sixteenth
+    # union param and the API hangs at sixteen. It rides along on throw_at only
+    # (ACTION_PARAM_KEYS) and the default of one throw is what the bridge
+    # would assume anyway.
+    count: Literal[1, 2, 3, 4, 5] = Field(
+        default=1,
+        description="throw_at: how many throws to make at the target (1-5).",
+    )
 
 
 class ActionModel(BaseModel):
@@ -469,6 +488,8 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     # bridge 1.8.0: drive_to's keys minus `style` (an aircraft has no traffic
     # lights to ignore). No new key — see BRIDGE_TASKS.
     "fly_to": ("x", "y", "z", "speed_mps", "arrive_radius_m"),
+    # bridge 1.9.0: the frozen `handle` plus `count` (1..5 throws).
+    "throw_at": ("handle", "count"),
     "look_around": (),
     "brake_tap": (),
     "swerve": ("direction",),

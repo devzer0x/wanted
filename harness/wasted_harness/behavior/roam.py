@@ -355,6 +355,39 @@ def seat_reported(state: GameState) -> bool:
     return v is not None and "seat" in v.model_fields_set and v.seat is not None
 
 
+def effects_reported(state: GameState) -> bool:
+    """Did the bridge SEND `effects` (1.9.0)? Presence, not a version string,
+    for :func:`supports_v17`'s reason: the field's arrival is the fact. A cheat
+    bit is never offered on a bridge that cannot report the cheat, because then
+    `done_when` could not read whether it was ever on."""
+    return "effects" in state.model_fields_set
+
+
+def arsenal_active(state: GameState) -> bool:
+    """Is the ARSENAL cheat bit on right now, per the bridge's own `effects`?"""
+    effects = getattr(state, "effects", None)
+    arsenal = getattr(effects, "arsenal", None)
+    return bool(arsenal is not None and arsenal.active)
+
+
+def arsenal_weapons(state: GameState) -> tuple[str, ...]:
+    """The kit's `WeaponHash` names the bridge says are on, or () when off."""
+    effects = getattr(state, "effects", None)
+    arsenal = getattr(effects, "arsenal", None)
+    if arsenal is None or not arsenal.active:
+        return ()
+    return tuple(arsenal.weapons or ())
+
+
+def arsenal_kit(state: GameState) -> dict[str, int]:
+    """Name -> rounds the bridge says it GRANTED, or {} when the bit is off."""
+    effects = getattr(state, "effects", None)
+    arsenal = getattr(effects, "arsenal", None)
+    if arsenal is None or not arsenal.active:
+        return {}
+    return dict(arsenal.kit or {})
+
+
 def riding_as_passenger(state: GameState) -> bool:
     """In a vehicle somebody ELSE is driving. Needs `vehicle.seat` (1.7.0)."""
     v = state.vehicle
@@ -506,6 +539,23 @@ def _env_float(name: str, default: float) -> float:
             extra={"kv": {"var": name, "value": raw[:40], "using": default}},
         )
         return default
+
+
+def _env_flag(name: str, default: bool) -> bool:
+    """`on|true|1|yes` -> True, `off|false|0|no` -> False, anything else -> default."""
+    raw = os.environ.get(name)
+    if raw is None or not raw.strip():
+        return default
+    value = raw.strip().lower()
+    if value in ("on", "true", "1", "yes"):
+        return True
+    if value in ("off", "false", "0", "no"):
+        return False
+    log.warning(
+        "ignoring a non-boolean switch override",
+        extra={"kv": {"var": name, "value": raw[:40], "using": default}},
+    )
+    return default
 
 
 @dataclass(frozen=True)
@@ -933,6 +983,14 @@ class Goal:
     #: nuisance with no bodies, L2 is trouble that answers back, L3 is the ones
     #: that can genuinely end him. See the ladder block at the top of the module.
     level: int = 1
+    #: A CHEAT BIT (CLAUDE.md rule 5, 2026-09-04). The goal's lifecycle owns the
+    #: cheat: `main` switches the bridge effect on when the goal is picked and
+    #: off when it closes, announces it in the `activity_start` payload and the
+    #: brain's note, and the bridge's own TTL/edges restore it if this process
+    #: dies. The cadence policy is enforced by :meth:`RoamEngine._filtered` and
+    #: asserted by the tests: `level == 3`, `chaos_cost == 2.0`,
+    #: `cooldown_s >= 20 min`, never two cheat bits in a row, `calm` False.
+    cheat: bool = False
 
 
 # --- needs / plan / done_when --------------------------------------------------
@@ -2168,6 +2226,131 @@ def _done_shoot_a_cop(state: GameState, snap: dict[str, Any]) -> bool:
     return snap.get("_elapsed", 0.0) >= COP_FIGHT_S
 
 
+# -- burn_the_city (L3, CHEAT) ---------------------------------------------------
+#
+# THE MAXIMUM-CHAOS BIT, and the first goal built under the rewritten CLAUDE.md
+# rule 5 ("cheats allowed, on purpose, since 2026-09-04"): weapons via cheat
+# codes, plus a BURN THE CITY task that throws grenades and everything.
+# The four guardrails, and where each one lives:
+#
+#   * SAY SO — `main._begin_roam_goal` puts `cheat: "arsenal"` in the
+#     `activity_start` payload and the brain's note says CHEAT ON; the bridge
+#     reports it every tick in `effects.arsenal` so the overlay and `done_when`
+#     read the same fact.
+#   * NO TYPED CODES — the effect is `POST /arsenal`, natives bridge-side.
+#   * DELIBERATE, NOT AMBIENT — the arsenal is switched on for THIS goal and
+#     switched off when it closes (plus the bridge's own TTL and death/arrest/
+#     cutscene/mission edges). `Goal.cheat` is the marker; nothing else in the
+#     catalog can turn it on, and the model has no action that can.
+#   * STORY MODE ONLY — unchanged.
+#
+# CADENCE (settled policy, asserted by the tests): `level=3` so the six-deaths-
+# an-hour ladder withdraws it like any other L3 goal, `chaos_cost=2.0`, a
+# thirty-minute cooldown, never two cheat bits in a row, gated on health /
+# no stars / no mission / on foot, and `calm` False so it is withheld when hurt.
+#
+# THE PLAN, and why it survives the grenade question. The bridge's `throw_at` is
+# raw TASK_THROW_PROJECTILE, which has NO SHVDN wrapper and whose behaviour on
+# a PLAYER ped is unverified (TaskEngine.StartThrowAt records the evidence). It
+# is graded on a throwable actually leaving his inventory and fails
+# `did_not_throw` otherwise — so step 1 can fail honestly, and step 2 does not
+# depend on it: `fight_ped {weapon: "armed"}` selects the kit's LAUNCHERS while
+# the arsenal is on (WeaponState.SelectForRange, arsenal-first), which fire
+# through the same TASK_COMBAT_PED path that is already live. Either way the
+# `done_when` reads rounds gone from the kit, never a claim.
+#
+# What this deliberately is NOT: invincible (nothing here touches health), a
+# trigger, a default, or something the model can ask for by name.
+
+#: How long the bridge keeps the arsenal on. The bridge clamps to 30–300 s;
+#: three minutes covers a throw, a fight and the run without the kit ever
+#: becoming his baseline.
+ARSENAL_TTL_S = 180.0
+#: Kit rounds gone before the bit counts as having happened. Three is a
+#: barrage, not a click; one rocket alone is a miss he can narrate.
+BURN_MIN_ROUNDS = 3
+#: Seconds on the clock before "done" — the scene needs to be a scene.
+BURN_S = 45.0
+#: Throws requested from `throw_at`.
+BURN_THROWS = 2
+#: How far he runs from where he started it.
+BURN_RUN_M = 120.0
+#: How far a target vehicle may be. A parked car is the honest grenade target:
+#: it goes up, everybody sees it, nobody had to be standing next to it.
+BURN_TARGET_M = TRIGGER_RADIUS_M
+
+
+def _burn_vehicle(state: GameState) -> NearbyVehicle | None:
+    """The nearest vehicle within :data:`BURN_TARGET_M` that he is not in."""
+    best: NearbyVehicle | None = None
+    for v in state.nearby.vehicles:
+        if v.distance > BURN_TARGET_M or v.driver == "player":
+            continue
+        if best is None or v.distance < best.distance:
+            best = v
+    return best
+
+
+def _needs_burn_the_city(state: GameState, view: RoamView) -> bool:
+    if not effects_reported(state) or not weapon_reported(state):
+        return False
+    if arsenal_active(state):
+        return False  # one bit at a time; the bridge refuses a second grant anyway
+    if state.mission.active or state.player.in_vehicle:
+        return False
+    if state.player.wanted > 0 or state.player.health < GANG_MIN_HEALTH:
+        return False
+    return _burn_vehicle(state) is not None or nearest_mark(state) is not None
+
+
+def _plan_burn_the_city(state, view):
+    vehicle = _burn_vehicle(state)
+    mark = nearest_mark(state)
+    assert vehicle is not None or mark is not None
+    here = player_pos(state)
+    target = vehicle.handle if vehicle is not None else mark.handle
+    bearing = math.radians(state.player.heading + view.rng.uniform(120.0, 240.0))
+    away = (
+        here[0] - (BURN_RUN_M * math.sin(bearing)),
+        here[1] + (BURN_RUN_M * math.cos(bearing)),
+        here[2],
+    )
+    steps: list[dict[str, Any]] = [
+        {"type": "throw_at", "params": {"handle": target, "count": BURN_THROWS}},
+    ]
+    if mark is not None:
+        # The launcher half. `weapon: "armed"` is the bridge's arsenal-first
+        # selection while the bit is on; this step is what makes the goal
+        # gradeable even if the throw native does nothing on a player ped.
+        steps.append({"type": "fight_ped", "params": {"handle": mark.handle, "weapon": "armed"}})
+    steps.append(_walk_to(away, run=True))
+    return (
+        steps,
+        {
+            "start": here,
+            "target": target,
+            "task_before": state.last_task.id,
+            "ammo_start": _ammo_snapshot(state),
+        },
+    )
+
+
+def _done_burn_the_city(state: GameState, snap: dict[str, Any]) -> bool:
+    """Kit rounds actually gone, and the scene has either run its time or the
+    bridge has already taken the arsenal back.
+
+    `_arsenal_spent` is the engine's fold over `player.weapon.owned` for the
+    names in `effects.arsenal.weapons` (the bridge widens `owned` to the kit
+    for the duration). It is the only evidence this goal accepts: not a task
+    status, not stars, not a claim. The second arm — `not arsenal_active` —
+    is what keeps a bit the bridge ended early (TTL, a cutscene) from locking
+    free roam until the timeout when the rounds were already spent.
+    """
+    if snap.get("_arsenal_spent", 0) < BURN_MIN_ROUNDS:
+        return False
+    return snap.get("_elapsed", 0.0) >= BURN_S or not arsenal_active(state)
+
+
 # -- helicopter_grab (L3) --------------------------------------------------------
 
 
@@ -2672,6 +2855,28 @@ CATALOG: tuple[Goal, ...] = (
         level=3,
     ),
     Goal(
+        id="burn_the_city",
+        category="trouble",
+        description="cheat in an arsenal, blow the block up, run",
+        why="somebody typed the cheat, and it was not me",
+        needs=_needs_burn_the_city,
+        plan=_plan_burn_the_city,
+        done_when=_done_burn_the_city,
+        # ARSENAL_TTL_S plus a minute for the run; the bridge takes the kit back
+        # at the TTL whatever this clock says.
+        timeout_s=ARSENAL_TTL_S + 60.0,
+        cooldown_s=30 * 60.0,
+        chaos_cost=2.0,
+        # Rockets on a city block are stars. Without the exemption the wanted
+        # override ends the goal at the first one, before a round is graded.
+        wants_heat=True,
+        # L3, with everything else that can genuinely end him, so the ladder's
+        # six-deaths step-down withdraws it. See the block comment above
+        # `_needs_burn_the_city` for the cadence policy this is built to.
+        level=3,
+        cheat=True,
+    ),
+    Goal(
         id="roam_the_block",
         category="errand",
         description="drive around and see what turns up",
@@ -2908,6 +3113,11 @@ class RoamEngine:
         # `WASTED_CHAOS_LEVEL=1|2|3` pins the starting tier from the box's .env
         # (docs/go-live.md §6); the ladder still moves itself from there.
         self.ladder = ChaosLadder(clock, int(_env_float("WASTED_CHAOS_LEVEL", float(level))))
+        #: The operator's switch for cheat bits (`WASTED_CHEATS=off` pulls every
+        #: `Goal.cheat` goal off the menu without a deploy). Default ON, per the
+        #: 2026-09-04 rule change; the ladder, the cooldown and the never-twice
+        #: rule still apply on top.
+        self.cheats_enabled = _env_flag("WASTED_CHEATS", True)
         #: Death EDGE detection lives here, not in the ladder: `player.dead` is
         #: true for every tick of the wasted screen, so counting ticks would
         #: spend the whole hour's death budget on one death.
@@ -3238,6 +3448,15 @@ class RoamEngine:
                 continue
             if goal.handoff and not self._missions_enabled:
                 continue  # the operator has missions switched off
+            if goal.cheat:
+                # The cheat cadence (CLAUDE.md rule 5, "deliberate, not ambient"):
+                # the operator's switch, and never two cheat bits in a row — a
+                # cheat that follows a cheat is a baseline wearing a costume.
+                if not self.cheats_enabled:
+                    continue
+                last = self._recent_ids[-1] if self._recent_ids else None
+                if last is not None and GOALS_BY_ID[last].cheat:
+                    continue
             if now - self._last_run.get(goal.id, -1e12) < goal.cooldown_s:
                 continue
             if goal.chaos_cost > chaos:
@@ -3361,6 +3580,12 @@ class RoamEngine:
                 f"ROAM GOAL PICKED: {offer.goal.id} — {offer.goal.description} "
                 f"(\"{offer.why}\"). Say it once, in your own words, then do it."
             )
+            if offer.goal.cheat:
+                self._transition += (
+                    " CHEAT ON: the harness is switching on an ARSENAL (rockets, grenades, a "
+                    "minigun) for this bit only. Say on air that it is a cheat — you did not "
+                    "find these — and that it goes away when the bit ends."
+                )
             log.info(
                 "roam goal picked",
                 extra={
@@ -3456,6 +3681,7 @@ class RoamEngine:
         "_climb_m",
         "_drop_from_peak_m",
         "_airborne_s",
+        "_arsenal_spent",
     )
 
     def _fold_goal_progress(self, state: GameState, locked: LockedGoal) -> None:
@@ -3539,6 +3765,29 @@ class RoamEngine:
                 spent += max(0, int(started) - int(now_ammo))
             snap["_ammo_spent"] = max(int(snap.get("_ammo_spent", 0)), spent)
 
+        # Bridge 1.9.0: kit rounds gone while the ARSENAL cheat bit is on. The
+        # kit is not in `ammo_start` — the goal is picked BEFORE `main` switches
+        # the arsenal on — so the baseline per kit name is the count the bridge
+        # says it GRANTED (`effects.arsenal.kit`), raised to anything higher
+        # actually seen (a pre-owned rifle keeps its extra rounds; a magazine
+        # picked up mid-bit), and only decreases from that baseline count.
+        # Seeding from the grant rather than from the first poll is what keeps
+        # a rocket fired between the grant and the first 2-4 Hz snapshot from
+        # vanishing. The running total is kept once the bit ends (the names
+        # drop out of `owned` and are simply skipped), so a `done_when` graded
+        # after the TTL still sees what was spent.
+        granted = arsenal_kit(state)
+        if granted:
+            peaks: dict[str, int] = snap.setdefault("_arsenal_peak", {})
+            spent_kit = 0
+            for name, count in granted.items():
+                now_ammo = weapon_ammo(state, name)
+                if now_ammo is None:
+                    continue
+                peaks[name] = max(int(peaks.get(name, count)), int(count), int(now_ammo))
+                spent_kit += peaks[name] - int(now_ammo)
+            snap["_arsenal_spent"] = max(int(snap.get("_arsenal_spent", 0)), spent_kit)
+
     def replan(self, state: GameState) -> dict[str, Any] | None:
         """Rebuild the locked goal's plan from where he actually is now.
 
@@ -3617,12 +3866,17 @@ class RoamEngine:
                 }
             },
         )
-        return {
+        extra = {
             "goal_id": locked.goal.id,
             "why": locked.why,
             "category": locked.goal.category,
             "verified": done,
         }
+        if locked.goal.cheat:
+            # "Say so" (CLAUDE.md rule 5): the cheat rides in the event payload
+            # on both ends of the bit, not only when it starts.
+            extra["cheat"] = "arsenal"
+        return extra
 
     # -- the model's hands ------------------------------------------------------
 

@@ -383,6 +383,19 @@ def test_no_goal_can_ask_for_an_action_the_schema_rejects() -> None:
             in_vehicle=False,
             nearby_vehicles=[veh(88, "polmav", "Helicopters", 25.0, pos=(25.0, 0.0, 0.0))],
         ),
+        # The cheat bit: a 1.9.0 bridge (effects reported, arsenal OFF), on foot,
+        # healthy, no stars, a parked car and a bystander in range.
+        "burn_the_city": armed_state(
+            in_vehicle=False,
+            health=200,
+            weapon=_weapon(owned=dict(full_kit)),
+            effects=_effects(active=False),
+            nearby_vehicles=[veh(12, "sultan", "Sedans", 18.0, pos=(18.0, 0.0, 0.0))],
+            nearby_peds=[
+                {"handle": 44, "model": "a_m_y_hipster_01", "distance": 9.0,
+                 "relationship": "neutral", "pos": {"x": 9.0, "y": 0.0, "z": 0.0}},
+            ],
+        ),
         "taxi_ride": taxi_kerb,
         # On foot with a mower at the kerb: the whole offer is "there is
         # something absurd within walking distance".
@@ -1511,6 +1524,26 @@ def test_honk_run_uses_the_horn_primitive_and_ends_on_distance() -> None:
 # injected clock and is meant to be driven.
 
 
+#: The bridge 1.9.0 arsenal kit, exactly as `ArsenalState.Kit` grants it.
+ARSENAL_KIT: dict[str, int] = {
+    "Grenade": 8, "Molotov": 6, "RPG": 4, "GrenadeLauncher": 10, "Minigun": 600, "AssaultRifle": 150,
+}
+
+
+def _effects(active: bool = False, expires_in_s: float = 0.0, weapons: list[str] | None = None,
+             last_cleared: str = "") -> dict[str, Any]:
+    """A bridge-1.9.0 `effects` object, shaped exactly like the DTO."""
+    return {
+        "arsenal": {
+            "active": active,
+            "expires_in_s": expires_in_s,
+            "weapons": (list(ARSENAL_KIT) if active else []) if weapons is None else weapons,
+            "kit": dict(ARSENAL_KIT) if active else {},
+            "last_cleared": last_cleared,
+        }
+    }
+
+
 def _weapon(
     name: str = "Pistol",
     weapon_class: str = "gun",
@@ -1539,9 +1572,16 @@ def armed_state(**over: Any) -> GameState:
     weapon = over.pop("weapon", _weapon())
     in_air = over.pop("in_air", None)
     seat = over.pop("seat", None)
+    # Bridge 1.9.0 `effects`. Absent by default (the pre-1.9.0 shape, on which no
+    # cheat bit may ever be offered); pass a dict to graft it on.
+    effects = over.pop("effects", None)
     state = make_state(**over)
     body = state.model_dump(by_alias=True)
     body["player"]["weapon"] = weapon
+    if effects is not None:
+        body["effects"] = effects
+    else:
+        body.pop("effects", None)
     if body.get("vehicle") is not None:
         if in_air is not None:
             body["vehicle"]["in_air"] = in_air

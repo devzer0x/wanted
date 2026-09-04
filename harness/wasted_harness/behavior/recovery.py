@@ -853,6 +853,14 @@ SHOTGUN_RANGE_M = 10.0
 #: "armed with the pistol" on both sides of the boundary.
 SHOTGUN_RANGE_MARGIN_M = 4.0
 
+#: Bridge 1.9.0: the ARSENAL kit's guns, in the order `WeaponState.SelectForRange`
+#: prefers them while the cheat bit is on (rockets and launcher only with
+#: standoff; the split is the bridge's). Names are `WeaponHash` members exactly
+#: as `player.weapon.owned` carries them for the duration of the bit. The
+#: throwables (Grenade, Molotov) are deliberately NOT here: they are thrown by
+#: `throw_at`, never put in his hands by `weapon: "armed"`.
+ARSENAL_GUNS: tuple[str, ...] = ("RPG", "GrenadeLauncher", "Minigun", "AssaultRifle")
+
 
 def loaded_gun_for(state: GameState, distance_m: float | None) -> bool:
     """Would ``fight_ped {weapon: "armed"}`` / ``shoot_at`` put a gun WITH
@@ -890,6 +898,18 @@ def loaded_gun_for(state: GameState, distance_m: float | None) -> bool:
     if w is None:
         return False
     owned = w.owned or {}
+    # Bridge 1.9.0: while the ARSENAL cheat bit is on, `SelectForRange` picks
+    # the kit's guns first (rockets with standoff, then the belt-fed ones), and
+    # `owned` carries the kit's names for the duration. The mirror of that rule
+    # is "any kit gun with rounds -> a loaded gun will be in his hands"; the
+    # range split is the bridge's and is not duplicated here. Change one,
+    # change both (WeaponState.SelectForRange).
+    effects = getattr(state, "effects", None)
+    arsenal = getattr(effects, "arsenal", None)
+    if arsenal is not None and arsenal.active:
+        for name in ARSENAL_GUNS:
+            if (owned.get(name) or 0) > 0:
+                return True
     shotgun = owned.get("PumpShotgun") or 0
     pistol = owned.get("Pistol") or 0
     smg = owned.get("MicroSMG") or 0

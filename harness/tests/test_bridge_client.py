@@ -87,6 +87,9 @@ def test_bridge_task_types_match_contract() -> None:
         # bridge 1.8.0 (CONTRACTS §1 proposal): TASK_PLANE_MISSION /
         # TASK_HELI_MISSION behind one verb, the flight step of `go_flying`.
         "fly_to",
+        # bridge 1.9.0 (CONTRACTS §1 proposal): raw TASK_THROW_PROJECTILE, graded on
+        # the throwable's ammo dropping; the throw step of `burn_the_city`.
+        "throw_at",
     )
 
 

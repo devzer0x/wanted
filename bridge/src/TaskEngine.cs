@@ -336,6 +336,14 @@ namespace WastedBridge
         // Primitive-typed for the same offline-checks reason as the fields above.
         private bool _flyEverAirborne;
 
+        // bridge 1.9.0: throw_at's state, reset per task episode in Start(). The hash is a
+        // uint, not GTA.WeaponHash, for the same offline-checks reason as _expectedTaskHash.
+        private uint _throwHash;             // the throwable selected at Start
+        private int _throwAmmoAtIssue;       // rounds of it when the current throw was issued
+        private int _throwIssuedAt;          // Game.GameTime ms of the current issue
+        private int _throwsDone;             // throws graded as real (ammo dropped) this episode
+        private bool _throwReissuePending;   // a drop was counted; the next issue waits for spacing
+
         // Item 5: anti-stuck recovery ladder state, reset per task episode in Start().
         private enum StuckStage { Idle, Reversing, Turning }
         private StuckStage _stuckStage = StuckStage.Idle;
@@ -392,6 +400,11 @@ namespace WastedBridge
             _progressEscalations = 0;
             _progressAt = 0;
             _flyEverAirborne = false;    // 1.8.0: fly_to's take-off watchdog
+            _throwHash = 0;              // 1.9.0: throw_at's grading state
+            _throwAmmoAtIssue = 0;
+            _throwIssuedAt = 0;
+            _throwsDone = 0;
+            _throwReissuePending = false;
 
             Ped ped = Game.Player.Character;
             if (ped == null || !ped.Exists())
@@ -505,6 +518,11 @@ namespace WastedBridge
                 // --- bridge 1.7.0 (fix-opus-b, T6) --------------------------------------
                 case "shoot_at":
                     StartShootAt(ped, req);
+                    break;
+
+                // --- bridge 1.9.0 ---------------------------------------------------------
+                case "throw_at":
+                    StartThrowAt(ped, req);
                     break;
 
                 case "drive_by":
@@ -721,6 +739,11 @@ namespace WastedBridge
                 case "shoot_at":
                 case "drive_by":
                     UpdateTimedFire(elapsed);
+                    break;
+
+                // --- bridge 1.9.0 ---------------------------------------------------------
+                case "throw_at":
+                    UpdateThrowAt(ped);
                     break;
 
                 case "enter_vehicle_seat":
@@ -1967,6 +1990,149 @@ namespace WastedBridge
             if (elapsed >= System.Math.Max(FireTaskMinMs, budget))
             {
                 Done("");
+            }
+        }
+
+        // ---- throw_at (bridge 1.9.0) ---------------------------------------------------------
+        //
+        // CAN A GRENADE ACTUALLY BE THROWN BY A TASK WE HAVE? Established 2026-09-04:
+        //
+        //   * The pinned SHVDN 3.7.0-nightly.189 has NO TaskInvoker wrapper for throwing.
+        //     Every `M:GTA.TaskInvoker.*` member in lib/Docs/ScriptHookVDotNet3.xml was listed;
+        //     the combat set is Combat / CombatTimed / CombatHatedTargets* / ShootAt / AimGunAt*
+        //     / PutDirectlyIntoMelee. Nothing throws.
+        //   * The raw native IS in the pinned GTA.Native.Hash enum: TASK_THROW_PROJECTILE =
+        //     0x7285951DBF6B5A51 (read by reflection over the pinned DLL — enum members carry
+        //     no XML doc text). Its parameter list is NOT in any pinned doc, so it was taken
+        //     from the two public native references this repo's research briefs already cite:
+        //       citizenfx/natives (TASK/TaskThrowProjectile.md):
+        //         "void TASK_THROW_PROJECTILE(Ped ped, float x, float y, float z)" + a note that
+        //         "parameters 5 and 6 exist as additional inputs, though their purposes remain
+        //         undocumented"; "instructs a ped to throw a projectile toward the designated
+        //         location. Documented uses include peds in vehicles performing drive-by
+        //         attacks, and tactical units deploying grenades from cover positions."
+        //       alloc8or gta5-nativedb-data (natives.json, fetched 2026-09-04):
+        //         params [Ped ped, float x, float y, float z, int ignoreCollisionEntityIndex,
+        //         BOOL createInvincibleProjectile]; comment: "used on a ped who was in a vehicle
+        //         to throw a projectile out the window at the player ... possible ... this is how
+        //         SWAT throws smoke grenades at the player when in cover"; and, from R*'s
+        //         decompiled finale_heist2b, the first parameter is confirmed to be the ped
+        //         (the same local is passed to GIVE_WEAPON_TO_PED six lines earlier).
+        //     All six are passed, the last two as 0/false, so the native never reads garbage.
+        //   * WHAT IS NOT ESTABLISHED: whether it does anything on the PLAYER ped. Every cited
+        //     use is an NPC. The alternative — TASK_COMBAT_PED with a grenade in his hands and
+        //     hoping the combat AI throws it — is worse: the pinned CombatAttributes has only
+        //     CanThrowSmokeGrenade, no "may use grenades", and the combat AI on a player ped
+        //     is the same unverified territory. So the honest design is: issue the native and
+        //     GRADE ON EVIDENCE ONLY. A throw counts when the throwable's ammo drops; if it
+        //     never drops within ThrowTimeoutMs the task fails `did_not_throw` and the harness
+        //     sees a failed step, not a success it has to take on faith. The explosive HALF of
+        //     the arsenal that does not depend on this at all is the launchers (RPG, grenade
+        //     launcher): those fire through the already-live TASK_SHOOT_AT_ENTITY /
+        //     TASK_COMBAT_PED path via WeaponState.SelectForRange's arsenal-first rule.
+        //
+        // No SetExpectedHash, for drive_by's reason: the pinned ScriptTaskNameHash enum does
+        // have `ThrowProjectile` (0xAD37BF03), but arming the v1.10 liveness check on a native
+        // whose player-ped behaviour is the open question would fail every throw after ~1 s
+        // with "cleared_by_game" and bury the real answer under a wrong diagnosis.
+
+        /// <summary>Longest a single issued throw is given to show up as ammo gone.</summary>
+        private const int ThrowTimeoutMs = 6000;
+        /// <summary>Gap between throws once one has landed as evidence.</summary>
+        private const int ThrowSpacingMs = 1500;
+
+        private void StartThrowAt(Ped ped, TaskRequest req)
+        {
+            // XML (Entity.FromHandle): "Returns a Ped if this handle corresponds to a Ped ...
+            // Returns a Vehicle if this handle corresponds to a Vehicle ... Returns null if no
+            // Entity associated with handle exists". A car is as good a target as a man here.
+            Entity target = Entity.FromHandle(req.Handle);
+            if (target == null || !target.Exists())
+            {
+                Fail("target_lost");
+                return;
+            }
+            WeaponHash throwable = WeaponState.SelectThrowable(ped);
+            if (throwable == WeaponHash.Unarmed)
+            {
+                // Nothing with rounds in the throwable slots. Not a cheat path: he simply has
+                // no grenade, the same way a man without one has no grenade.
+                Fail("no_throwable");
+                return;
+            }
+            _throwHash = (uint)throwable;
+            _throwsDone = 0;
+            IssueThrow(ped, target, throwable);
+            BridgeLog.Info("task " + req.Id + " (throw_at): " + throwable + " x" + req.Count
+                           + " at handle " + req.Handle + " — TASK_THROW_PROJECTILE is UNVERIFIED "
+                           + "on a player ped; graded on ammo dropping, fails did_not_throw otherwise");
+        }
+
+        private void IssueThrow(Ped ped, Entity target, WeaponHash throwable)
+        {
+            _throwAmmoAtIssue = WeaponState.RoundsFor(ped, throwable);
+            _throwIssuedAt = Game.GameTime;
+            // XML (Entity.Position): "Gets or sets the position of this Entity ... in world
+            // space." Re-read at every issue: the target moves.
+            Vector3 at = target.Position;
+            // Raw native; signature sourced above. (ped, x, y, z, ignoreCollisionEntityIndex,
+            // createInvincibleProjectile). ignoreCollision 0 = nothing special; an INVINCIBLE
+            // projectile would be a second cheat nobody asked for, so false.
+            Function.Call(Hash.TASK_THROW_PROJECTILE, ped.Handle, at.X, at.Y, at.Z, 0, false);
+        }
+
+        private void UpdateThrowAt(Ped ped)
+        {
+            WeaponHash throwable = (WeaponHash)_throwHash;
+            int rounds = WeaponState.RoundsFor(ped, throwable);
+            int now = Game.GameTime;
+            if (rounds < _throwAmmoAtIssue)
+            {
+                // Evidence: a projectile left the inventory. That is the whole test. The
+                // baseline moves to the new count at once so one throw is never counted twice;
+                // the next issue waits for the spacing (below) rather than firing this tick.
+                _throwsDone++;
+                _throwAmmoAtIssue = rounds;
+                _throwReissuePending = true;
+                if (_throwsDone >= _req.Count)
+                {
+                    Done("threw " + _throwsDone);
+                    return;
+                }
+                if (rounds <= 0)
+                {
+                    Done("threw " + _throwsDone + ", out of throwables");
+                    return;
+                }
+                return;
+            }
+            if (_throwReissuePending)
+            {
+                if (now - _throwIssuedAt < ThrowSpacingMs)
+                {
+                    return;
+                }
+                Entity target = Entity.FromHandle(_req.Handle);
+                if (target == null || !target.Exists())
+                {
+                    Done("threw " + _throwsDone + ", target gone");
+                    return;
+                }
+                _throwReissuePending = false;
+                IssueThrow(ped, target, throwable);
+                return;
+            }
+            if (now - _throwIssuedAt > ThrowTimeoutMs)
+            {
+                if (_throwsDone > 0)
+                {
+                    Done("threw " + _throwsDone + " of " + _req.Count);
+                }
+                else
+                {
+                    // The honest answer the brief asked for: the native did nothing we can see.
+                    Fail("did_not_throw");
+                }
             }
         }
 

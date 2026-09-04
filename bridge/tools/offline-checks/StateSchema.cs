@@ -231,6 +231,18 @@ namespace WastedBridge.OfflineChecks
             new FieldSpec("phone.ringing", Kind.Boolean),
             new FieldSpec("phone.in_call", Kind.Boolean),
 
+            // Bridge 1.9.0 (CONTRACTS §1 proposal): cheat effects currently on. Always a
+            // present object; `arsenal` always a present object inside it. `weapons` is the
+            // kit's WeaponHash member names while on ([] off); `kit` is name -> rounds
+            // granted ({} off); `last_cleared` is why the last bit ended ("" if never).
+            new FieldSpec("effects", Kind.Object),
+            new FieldSpec("effects.arsenal", Kind.Object),
+            new FieldSpec("effects.arsenal.active", Kind.Boolean),
+            new FieldSpec("effects.arsenal.expires_in_s", Kind.Number),
+            new FieldSpec("effects.arsenal.weapons", Kind.Array),
+            new FieldSpec("effects.arsenal.kit", Kind.Object),
+            new FieldSpec("effects.arsenal.last_cleared", Kind.String),
+
             new FieldSpec("last_task", Kind.Object),
             // CONTRACTS v1.2: present-and-null before the first task, never absent.
             new FieldSpec("last_task.id", Kind.String, nullable: true),

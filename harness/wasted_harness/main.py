@@ -63,6 +63,7 @@ from .behavior.recovery import (
     threat_action,
 )
 from .behavior.roam import (
+    ARSENAL_TTL_S,
     PREEMPTED_OUTCOME as ROAM_PREEMPTED,
 )
 from .behavior.roam import HouseEscape, InteriorEscape, RoamEngine, as_activity
@@ -3485,6 +3486,14 @@ class Harness:
         # owners below `roam` would wait on it forever.
         self._roam_token = None
         self.wheel.release_owner("roam")
+        # A cheat bit ends with its goal, whatever the outcome (done, timeout,
+        # stuck, preempted, player_down, game restart). Best effort: the bridge
+        # owns the same restore on its TTL and on every death/arrest/cutscene/
+        # mission edge, so a POST that does not land is a tick or two of extra
+        # arsenal, never a permanent one.
+        locked = self.roam.current
+        if locked is not None and locked.goal.cheat:
+            self._switch_arsenal(False)
         # One slot, one owner: closing the step machine also closes the roam
         # goal that owned it, so the two can never disagree about whether
         # something is running. `close` returns the goal id, the quotable `why`
@@ -3796,22 +3805,39 @@ class Harness:
             )
             self.memory.log_day("activity", f"goal: {locked.goal.description}")
             return
+        start_payload: dict[str, Any] = {
+            "activity": locked.goal.id,
+            "why": locked.why,
+            "params": dict(first.get("params", {})),
+        }
+        if locked.goal.cheat:
+            # A CHEAT BIT (CLAUDE.md rule 5, 2026-09-04). The goal owns the effect:
+            # switched on HERE, once, for this goal; switched off in
+            # `_end_activity_if_running`; and the bridge's own TTL and
+            # death/arrest/cutscene/mission edges restore it if this process
+            # dies first. A refusal (409: dead, cutscene, mission, already on)
+            # or a bridge blip ends the goal right now — a "cheat bit" that runs
+            # without the cheat would be `burn_the_city` with a pistol, which
+            # is a lie on the dashboard.
+            if not self._switch_arsenal(True):
+                self._roam_token = None
+                self.wheel.release(token)
+                self.roam.close("cheat_refused")
+                return
+            # "Say so": the cheat is in the event payload as well as the note.
+            start_payload["cheat"] = "arsenal"
+            start_payload["cheat_ttl_s"] = ARSENAL_TTL_S
         activity = as_activity(locked.goal)
         step = self.activity_runner.start_plan(activity, locked.plan)
         if step is None:
             self._roam_token = None
             self.wheel.release(token)
+            if locked.goal.cheat:
+                self._switch_arsenal(False)
             self.roam.close("no_plan")
             return
         self.planner.roam_activity_started(locked.goal.id)
-        self.writer.record_event(
-            "activity_start",
-            {
-                "activity": locked.goal.id,
-                "why": locked.why,
-                "params": dict(first.get("params", {})),
-            },
-        )
+        self.writer.record_event("activity_start", start_payload)
         self.memory.log_day(
             "activity", f"goal {locked.goal.id}: {locked.goal.description} ({locked.why})"
         )
@@ -4076,6 +4102,40 @@ class Harness:
         # screen now correctly reads as no fresh screenshot.
         self._frame_at = captured_at
         return objective_hash
+
+    # -- cheat effects (bridge 1.9.0) --------------------------------------------
+
+    def _switch_arsenal(self, on: bool) -> bool:
+        """Turn the bridge's ARSENAL cheat layer on (for :data:`ARSENAL_TTL_S`) or off.
+
+        The one place the harness touches a cheat effect. Returns whether the
+        request landed: a 409 (dead, cutscene, mission, already on), a bridge
+        blip or an unknown reply all read as "no", and the caller ends the bit
+        rather than running a cheat goal without its cheat. Turning it OFF is
+        best effort and logged; the bridge's own TTL and edges are the guarantee
+        (see ArsenalState in the bridge), this is only the prompt restore.
+        """
+        try:
+            result = self.bridge.set_arsenal(on, ttl_s=ARSENAL_TTL_S)
+        except BridgeApiError as exc:
+            log.warning(
+                "arsenal request refused" if on else "arsenal restore refused",
+                extra={"kv": {"on": on, "status": exc.status, "error": exc.error,
+                              "detail": exc.detail[:160]}},
+            )
+            return False
+        except BridgeError as exc:
+            log.warning(
+                "arsenal request lost: bridge unavailable",
+                extra={"kv": {"on": on, "error": str(exc)[:160]}},
+            )
+            return False
+        log.info(
+            "CHEAT ON: arsenal granted" if on else "arsenal restored",
+            extra={"kv": {"active": result.active, "expires_in_s": round(result.expires_in_s, 1),
+                          "weapons": list(result.weapons), "cleared": result.cleared}},
+        )
+        return result.active == on
 
     # -- timescale guard -------------------------------------------------------
 

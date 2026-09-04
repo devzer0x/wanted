@@ -280,6 +280,37 @@ namespace WastedBridge
         [JsonProperty("in_call")] public bool InCall;
     }
 
+    /// <summary>
+    /// Bridge 1.9.0 (CONTRACTS §1 proposal): <c>effects</c> — every cheat-driven effect the
+    /// bridge currently has switched on, so `done_when`, the overlay and the commentary can
+    /// all be honest about it (CLAUDE.md rule 5, "say so"). Always a present object, never
+    /// null; each effect inside is always a present object too (PhoneDto's rule). An effect
+    /// that is off reads `active: false` with an empty list, never a missing key.
+    /// </summary>
+    internal sealed class EffectsDto
+    {
+        [JsonProperty("arsenal")] public ArsenalEffectDto Arsenal = new ArsenalEffectDto();
+    }
+
+    /// <summary>
+    /// <c>effects.arsenal</c>: the time-boxed cheat weapon layer (see <see cref="ArsenalState"/>).
+    /// `expires_in_s` is the bridge's own TTL clock, which runs whether or not a harness is
+    /// alive; `weapons` is the kit's `WeaponHash` member names while on (the same names that
+    /// appear in `player.weapon.owned` for the duration); `last_cleared` is the reason the
+    /// most recent bit ended (`ttl_expired`, `player_dead`, `goal_end`, ...) or "" if never.
+    /// </summary>
+    internal sealed class ArsenalEffectDto
+    {
+        [JsonProperty("active")] public bool Active;
+        [JsonProperty("expires_in_s")] public float ExpiresInS;
+        [JsonProperty("weapons")] public List<string> Weapons = new List<string>();
+        // Name -> rounds GRANTED, while on ({} when off). The harness's "rounds gone" fold
+        // seeds its baseline from this rather than from its first poll, so a shot fired
+        // between the grant and the first 2-4 Hz snapshot is still counted.
+        [JsonProperty("kit")] public Dictionary<string, int> Kit = new Dictionary<string, int>();
+        [JsonProperty("last_cleared")] public string LastCleared = "";
+    }
+
     internal sealed class LastTaskDto
     {
         // CONTRACTS v1.2: id and type are NULL — key present, value null — until the first task is
@@ -314,6 +345,9 @@ namespace WastedBridge
         // v1.13: always a present object (see PhoneDto); defaulted the same way threat is, so a
         // builder that forgets to set it still serializes the documented shape rather than null.
         [JsonProperty("phone")] public PhoneDto Phone = new PhoneDto();
+        // 1.9.0: always a present object (see EffectsDto); defaulted like phone/threat so a
+        // builder that forgets to set it still serializes the documented shape.
+        [JsonProperty("effects")] public EffectsDto Effects = new EffectsDto();
         [JsonProperty("last_task")] public LastTaskDto LastTask;
         [JsonProperty("bridge")] public BridgeInfoDto Bridge;
     }

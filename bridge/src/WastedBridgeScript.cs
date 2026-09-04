@@ -13,7 +13,21 @@ namespace WastedBridge
     /// </summary>
     public sealed class WastedBridgeScript : Script
     {
-        public const string BridgeVersion = "1.8.0";   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
+        public const string BridgeVersion = "1.9.0";
+        // v1.9.0: CONTRACTS §1 proposal — THE ARSENAL and `throw_at`, the bridge half of the
+        // `burn_the_city` cheat bit (CLAUDE.md rule 5 rewritten 2026-09-04: cheats allowed, on
+        // purpose, announced, time-boxed, never ambient). `POST /arsenal {on, ttl_s}` grants a
+        // fixed explosive kit (ArsenalState.Kit) through the pinned WeaponCollection.Give
+        // wrapper and the BRIDGE owns taking it back: goal end (`on:false`), death, arrest,
+        // cutscene, a story mission starting, script abort, and a TTL so a dead harness still
+        // restores (the timescale-stuck-at-0.15 failure class). `/state` gains `effects
+        // {arsenal {active, expires_in_s, weapons[], last_cleared}}`, `player.weapon.owned`
+        // carries the kit's names while it is on, and `weapon: "armed"` selection prefers the
+        // kit's guns while it is on (WeaponState.SelectForRange). One new §1 task type:
+        // `throw_at {handle, count}` — raw TASK_THROW_PROJECTILE (no SHVDN wrapper exists in the
+        // pinned build), graded ONLY on the throwable's ammo actually dropping, so if the native
+        // does nothing on a player ped it fails `did_not_throw` rather than pretending. Nothing
+        // here touches invincibility or infinite ammo; his deaths stay the clip pipeline.   // v1.2.0: CONTRACTS v1.10 - blip->entity handle fix, nearby.peds[].in_vehicle_handle, mission.script, task liveness (cleared_by_game)
         // v1.3.0: CONTRACTS v1.11 (part 1) - mission.entity_blips[] (entity-attached blips,
         // throttled ~4 Hz); driving overhaul: driveAgainstTraffic explicit false on the new
         // StartVehicleMission call, avoid_traffic retuned off the brake-free
@@ -242,6 +256,25 @@ namespace WastedBridge
                 }
             }
 
+            // v1.9.0: the arsenal's restore edges and TTL, every tick, in its own guard. This
+            // is the "a dead harness still restores" half of the guarantee: nothing below
+            // depends on an HTTP request ever arriving. A failure here is logged and costs
+            // nothing else; the load-time sweep inside Maintain is the backstop for a restore
+            // that never ran.
+            try
+            {
+                ArsenalState.Maintain(playerPed, dead, arrested);
+            }
+            catch (Exception ex)
+            {
+                int now = Environment.TickCount;
+                if (unchecked(now - _lastWeaponErrorAt) > ErrorLogIntervalMs)
+                {
+                    _lastWeaponErrorAt = now;
+                    BridgeLog.Error("arsenal maintenance failed; the TTL/edge restore may lag a tick", ex);
+                }
+            }
+
             try
             {
                 _engine.Update(playerPed, dead, arrested);
@@ -293,6 +326,9 @@ namespace WastedBridge
             {
                 _server.Stop();
             }
+            // v1.9.0: a reload must not leave the cheat kit in his inventory. Guarded inside
+            // (the game may be mid-shutdown); the next instance's load-time sweep is the backstop.
+            ArsenalState.OnAbort();
             BridgeLog.Info("script aborted; bridge shut down");
         }
 
@@ -355,7 +391,58 @@ namespace WastedBridge
                 case CommandKind.Unstick:
                     ApplyUnstick(cmd.Reply);
                     break;
+
+                case CommandKind.Arsenal:
+                    ApplyArsenal(cmd);
+                    break;
             }
+        }
+
+        /// <summary>
+        /// v1.9.0 POST /arsenal on the game thread. `on:true` grants the kit for the clamped
+        /// TTL (409 with a named reason when refused — dead/arrested, cutscene, mission, or
+        /// already on); `on:false` clears it (200 either way; `cleared` says whether there was
+        /// anything to clear). The flags are read fresh here rather than off the snapshot:
+        /// the grant must not be a tick behind a death.
+        /// </summary>
+        private static void ApplyArsenal(BridgeCommand cmd)
+        {
+            Ped ped = Game.Player.Character;
+            if (!cmd.ArsenalOn)
+            {
+                bool cleared = ArsenalState.Clear(ped, "goal_end");
+                cmd.Reply.Complete(200, new JObject
+                {
+                    ["active"] = false,
+                    ["cleared"] = cleared
+                });
+                return;
+            }
+            bool dead = Game.Player.IsDead; // IS_PLAYER_DEAD, same read TickCore makes
+            int playerHandle = Game.Player.Handle;
+            bool arrested = Function.Call<bool>(Hash.IS_PLAYER_BEING_ARRESTED, playerHandle, true)
+                            || Function.Call<bool>(Hash.IS_PLAYER_BEING_ARRESTED, playerHandle, false);
+            string error, detail;
+            if (!ArsenalState.Grant(ped, cmd.ArsenalTtlMs, dead, arrested, out error, out detail))
+            {
+                cmd.Reply.Complete(error == "not_ready" ? 503 : 409, new JObject
+                {
+                    ["error"] = error,
+                    ["detail"] = detail
+                });
+                return;
+            }
+            var weapons = new JArray();
+            foreach (uint hash in ArsenalState.KitHashes)
+            {
+                weapons.Add(ArsenalState.NameOf(hash));
+            }
+            cmd.Reply.Complete(200, new JObject
+            {
+                ["active"] = true,
+                ["expires_in_s"] = ArsenalState.ExpiresInS(),
+                ["weapons"] = weapons
+            });
         }
 
         private static void ApplyRadio(string station)

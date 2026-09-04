@@ -73,6 +73,12 @@ BRIDGE_TASK_TYPES: tuple[str, ...] = (
     # roam goal `go_flying`. Added here the same day as `brain.schemas`, for the
     # same reason as `flee_ped` above.
     "fly_to",
+    # --- bridge 1.9.0 (CONTRACTS §1 proposal) --------------------------------
+    # `throw_at{handle, count}`: raw TASK_THROW_PROJECTILE at a ped or a vehicle,
+    # graded bridge-side on the throwable's ammo actually dropping (fails
+    # `no_throwable` / `did_not_throw` otherwise). The throw step of the
+    # `burn_the_city` cheat bit. Added here the same day as `brain.schemas`.
+    "throw_at",
 )
 
 DrivingStyle = Literal["normal", "rushed", "ignore_lights", "avoid_traffic"]
@@ -601,6 +607,49 @@ class PhoneState(BaseModel):
     in_call: bool = False
 
 
+class ArsenalEffect(BaseModel):
+    """Bridge 1.9.0 ``effects.arsenal``: the time-boxed cheat weapon layer.
+
+    ``active`` is the only field a policy may gate on; ``expires_in_s`` is the
+    BRIDGE's own TTL clock (it runs whether or not this process is alive, which
+    is the restore guarantee); ``weapons`` is the kit's `WeaponHash` member
+    names while on — the same names that appear in `player.weapon.owned` for
+    the duration; ``last_cleared`` is why the most recent bit ended.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    active: bool = False
+    expires_in_s: float = 0.0
+    weapons: list[str] = []
+    #: Name -> rounds GRANTED while on ({} off). The "rounds gone" fold seeds
+    #: its baseline from this, so a shot fired between the grant and the first
+    #: 2-4 Hz poll still counts.
+    kit: dict[str, int] = {}
+    last_cleared: str = ""
+
+
+class EffectsState(BaseModel):
+    """Bridge 1.9.0 ``effects``: every cheat-driven effect the bridge has on.
+
+    Always a present object on a 1.9.0 bridge; defaulted here (all off) so a
+    pre-1.9.0 bridge still parses and every cheat gate reads "cannot tell".
+    Whether the bridge actually SENT it is :func:`behavior.roam.effects_reported`.
+    """
+
+    model_config = ConfigDict(extra="ignore")
+    arsenal: ArsenalEffect = ArsenalEffect()
+
+
+class ArsenalResult(BaseModel):
+    """``POST /arsenal`` reply. ``weapons`` is empty when the bit is off."""
+
+    model_config = ConfigDict(extra="ignore")
+    active: bool
+    expires_in_s: float = 0.0
+    weapons: list[str] = []
+    cleared: bool = False
+
+
 class GameState(BaseModel):
     model_config = ConfigDict(extra="ignore")
     ts: str
@@ -622,6 +671,10 @@ class GameState(BaseModel):
     #: phone policy below is a no-op, which is the correct reading of a bridge
     #: that cannot see the phone at all.
     phone: PhoneState = PhoneState()
+    #: Bridge 1.9.0. Optional with an all-off default so every earlier bridge
+    #: still parses; "nothing cheat-driven is on" is the correct reading of a
+    #: bridge that has no cheats to report.
+    effects: EffectsState = EffectsState()
 
 
 class Health(BaseModel):
@@ -724,3 +777,20 @@ class BridgeClient:
     def unstick(self) -> UnstickResult:
         """POST /unstick. Raises BridgeApiError(409, unstick_conditions_not_met) when refused."""
         return UnstickResult.model_validate(self._request("POST", "/unstick", {}))
+
+    def set_arsenal(self, on: bool, ttl_s: float = 180.0) -> ArsenalResult:
+        """POST /arsenal (bridge 1.9.0) — the cheat weapon layer, on for ``ttl_s`` or off.
+
+        This is a CHEAT (CLAUDE.md rule 5, 2026-09-04) and the caller owns saying
+        so: only :meth:`main.Harness._begin_roam_goal` calls it with ``on=True``,
+        for a goal marked ``cheat``, and it announces the bit in the
+        `activity_start` payload and the brain's note. ``on=False`` is the goal-end
+        restore; the bridge's own TTL and death/arrest/cutscene/mission edges
+        restore without this call ever arriving. Raises BridgeApiError(409) with
+        `player_down` / `cutscene_active` / `mission_active` / `arsenal_active`
+        when the bridge refuses the grant.
+        """
+        body: dict[str, Any] = {"on": bool(on)}
+        if on:
+            body["ttl_s"] = max(30.0, min(300.0, float(ttl_s)))
+        return ArsenalResult.model_validate(self._request("POST", "/arsenal", body))
