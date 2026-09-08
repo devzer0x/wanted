@@ -169,6 +169,37 @@ and a line containing it is rejected in `say` or `thought`, in any casing. Prove
 regression test — it is not hypothetical, because the production `decisions` table already contains
 two lines where the agent addressed itself by that name, and those render on the public site.
 
+**LIVE at wanted.money since 2026-09-09**, serving the deployment built from commit `8e6ea09`.
+Domain registered through Vercel, nameservers verified, 17 environment variables set in production
+and preview, rewards deliberately OFF (`REWARDS_ENABLED=false`).
+
+Deployments were BLOCKED three times first, with `TEAM_ACCESS_REQUIRED`: Vercel attributes a CLI
+deploy to the git commit author, and `agent@wanted.run` holds no seat on the team. Resolved by the
+operator's decision to author the commit as the Vercel account owner instead.
+
+**A production-only security bug was found immediately after going live, and is fixed in
+`20260909000000_fix_function_grants.sql` — but that migration is NOT YET APPLIED to the live
+project.** Confirmed by probing the real project with the browser's own publishable key:
+`enter_prediction` returned `false` and both tick functions returned `0` to an `anon` caller, where
+`42501` was expected. Anyone holding that key — which ships to every browser — could submit
+prediction entries for a wallet they did not own, bypassing sign-in and the API's rate limits.
+
+The cause is Supabase-specific and unreachable by local testing as it stood. Supabase ships
+`alter default privileges in schema public grant all on functions to anon, authenticated,
+service_role`, so every new function is granted to those roles DIRECTLY. The policies migration
+revoked only `from public`, which clears the PUBLIC pseudo-role grant and leaves the direct one
+intact. A plain Postgres has no such default, so every local run passed. `create_reward_claim` and
+`finalize_reward_claim` were never exposed — their migration happened to name `anon, authenticated`
+in its revoke, which is now the pattern everywhere.
+
+`infra/verify-predictions.sh` now installs the same default privileges before applying migrations,
+so a local run reproduces Supabase. Proven non-vacuous: with the old `from public` revoke the check
+reports **0 of 3** functions denied to anon; with the fix, **3 of 3**.
+
+Everything else on the live project was verified correct at the same time: every direct table write
+by `anon` is denied, `reward_ledger`/`reward_claims`/`wallet_sessions` are unreadable, and both
+money functions are denied.
+
 **NOT verified, and cannot be from here:**
 - **The agent was not playing.** Last heartbeat `2026-09-07T15:54:57Z`, ~25 h stale at time of
   writing; the session had ended. Steps 1–2 of the end-to-end flow (agent live → telemetry

@@ -55,13 +55,27 @@ grant select on public.prediction_distribution to anon, authenticated, service_r
 grant execute on function public.leaderboard(text) to anon, authenticated, service_role;
 
 -- `enter_prediction`, `lock_due_predictions`, `settle_due_predictions` are server-side only.
--- PostgreSQL grants EXECUTE on a newly created function to PUBLIC by default — revoke that first,
--- or anon/authenticated could call `enter_prediction` directly with an arbitrary `p_wallet` and
--- submit entries for a wallet they don't own (identity is verified by the API route before it
--- calls this function, not by the function itself; it only enforces the time lock).
-revoke execute on function public.enter_prediction(uuid, text, text) from public;
-revoke execute on function public.lock_due_predictions() from public;
-revoke execute on function public.settle_due_predictions() from public;
+--
+-- Revoke from `anon` and `authenticated` BY NAME, not just from `public`. Two separate grants have
+-- to be removed and only one of them is the PUBLIC pseudo-role:
+--
+--   1. PostgreSQL grants EXECUTE on a new function to PUBLIC by default.
+--   2. Supabase additionally ships
+--      `alter default privileges in schema public grant all on functions to anon, authenticated,
+--      service_role`, which grants EXECUTE to those roles DIRECTLY.
+--
+-- `revoke ... from public` clears (1) and leaves (2) completely untouched. A plain Postgres has no
+-- (2), so an earlier version of this migration that revoked only from `public` passed every local
+-- test — and left `enter_prediction` callable by anon on the real project, where anyone could
+-- submit entries for a wallet they do not own, bypassing sign-in and the API's rate limits
+-- entirely. Identity is verified by the API route before it calls this function; the function
+-- itself only enforces the time lock.
+--
+-- infra/verify-predictions.sh now installs the same default privileges so a local run reproduces
+-- this instead of hiding it.
+revoke execute on function public.enter_prediction(uuid, text, text) from public, anon, authenticated;
+revoke execute on function public.lock_due_predictions() from public, anon, authenticated;
+revoke execute on function public.settle_due_predictions() from public, anon, authenticated;
 grant execute on function public.enter_prediction(uuid, text, text) to service_role;
 grant execute on function public.lock_due_predictions() to service_role;
 grant execute on function public.settle_due_predictions() to service_role;

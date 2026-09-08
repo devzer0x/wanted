@@ -31,6 +31,14 @@ until docker exec "$CONTAINER" pg_isready -U postgres -q; do sleep 1; done
 # Supabase's roles, which the policies migration grants against.
 $PSQL -c "create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;"
 
+# Supabase ships these default privileges, and a plain Postgres does not. Without them a local run
+# CANNOT reproduce the grant Supabase adds to every new function, and a migration that revokes only
+# from the PUBLIC pseudo-role passes here while leaving the function callable by `anon` in
+# production. That happened; this line is why it cannot happen again.
+$PSQL -c "alter default privileges in schema public grant all on tables to anon, authenticated, service_role;
+          alter default privileges in schema public grant all on functions to anon, authenticated, service_role;
+          alter default privileges in schema public grant all on sequences to anon, authenticated, service_role;"
+
 echo "== applying ALL migrations in order (base schema, then the prediction layer) =="
 for f in supabase/migrations/*.sql; do
   docker cp "$f" "$CONTAINER:/tmp/m.sql" >/dev/null
