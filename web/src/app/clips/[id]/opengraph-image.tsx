@@ -71,7 +71,7 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
                 textShadow: "8px 6px 0 #e02418",
               }}
             >
-              WASTED
+              WANTED
             </div>
             <div
               style={{
@@ -82,7 +82,7 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
                 color: "#93897a",
               }}
             >
-              AN AI PLAYS. FOREVER.
+              AN AI PLAYS. YOU PREDICT.
             </div>
           </div>
           <div style={{ display: "flex", flexDirection: "column" }}>
@@ -109,7 +109,7 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
             >
               <div style={{ display: "flex" }}>{meta}</div>
               <div style={{ display: "flex", color: "#e02418" }}>
-                WANTED IS AN AI · COMMENTARY IS AI-GENERATED
+                THE AGENT IS AN AI · COMMENTARY IS AI-GENERATED
               </div>
             </div>
           </div>

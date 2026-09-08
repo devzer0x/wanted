@@ -5,7 +5,7 @@ commentary — CONTRACTS §2); this module never generates a second model call.
 What it adds:
 
 - feed lines for the overlay/site derived from decisions,
-- **recent-line memory**: the last lines the agent said, fed back into the prompt so
+- **recent-line memory**: the last lines WANTED said, fed back into the prompt so
   he can actually honour "never repeat a line you've said recently". The prompt
   claims the harness tracks this; this is where that claim becomes true.
 - prepared banner lines for death/busted moments (the model isn't consulted at
@@ -59,9 +59,9 @@ SIMILARITY_THRESHOLD = 0.8
 #: WORDING, so "Buffalo's still where I left it" and "back in the Buffalo" score
 #: far below its threshold and both go through — different sentences, same
 #: subject, over and over. Watching that back it reads like a stuck bot rather
-#: than someone talking, which is the one thing the feed cannot afford: repeated
-#: narration about one subject reads as fake, AI-generated filler.
-#: Two mentions inside the window is a callback; a third is
+#: than someone talking, which is the one thing the feed cannot afford (operator,
+#: 2026-09-04: "he talks about random buffalo buffalo loop... it sounds fake like
+#: fake AI generated"). Two mentions inside the window is a callback; a third is
 #: a loop.
 SUBJECT_REPEAT_MAX = 2
 
@@ -70,7 +70,7 @@ SUBJECT_REPEAT_MAX = 2
 #: sentence-initial "I" that survives the mid-sentence test in quoted speech.
 #: Kept deliberately tiny — anything else repeated three times in five lines is
 #: a loop whether it is a car, a street or a person.
-SUBJECT_STOPWORDS: frozenset[str] = frozenset({"i", "im", "ive", "ill", "id", "the agent", "los", "santos"})
+SUBJECT_STOPWORDS: frozenset[str] = frozenset({"i", "im", "ive", "ill", "id", "wanted", "los", "santos"})
 
 _WRITE_RETRIES = 8
 _WRITE_DELAY_S = 0.12
@@ -216,7 +216,7 @@ class LineRotation:
 
 
 class RecentLines:
-    """The last things the agent said, so the prompt's no-repeat rule is enforceable."""
+    """The last things WANTED said, so the prompt's no-repeat rule is enforceable."""
 
     def __init__(self, state_path: Path, key: str = "recent_say") -> None:
         self.state_path = state_path

@@ -14,12 +14,12 @@ import type { Metadata } from "next";
 // deliberately declares no `url` and no `canonical` — so the 404 boundary (which resolves with
 // the root's metadata only) claims neither.
 
-export const SITE_NAME = "WASTED";
-export const SITE_OG_ALT = "WANTED — an AI called the agent plays an open-world story mode, live";
-export const SITE_TITLE = "WANTED — the agent plays. Forever.";
-export const TITLE_TEMPLATE = "%s · WASTED";
+export const SITE_NAME = "WANTED";
+export const SITE_OG_ALT = "WANTED — an AI plays GTA. Predict what happens next.";
+export const SITE_TITLE = "WANTED — an AI plays GTA. Predict what happens next.";
+export const TITLE_TEMPLATE = "%s · WANTED";
 export const SITE_DESCRIPTION =
-  "An AI called the agent plays a famous open-world story mode 24/7, live. No cheats, no god mode — just a robot, a car, and bad decisions. All commentary is AI-generated.";
+  "An AI plays a famous open-world story mode 24/7, live. Predict what it does next — correct calls earn TTWO. All commentary and gameplay decisions are AI-generated.";
 
 /**
  * The document title a page ends up with, resolved here rather than left to Next's template.

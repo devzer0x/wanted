@@ -143,8 +143,8 @@ def _gate():
 
 
 def test_the_same_subject_three_lines_running_is_a_loop_and_is_dropped() -> None:
-    """Repeated commentary about one subject reads as fake, AI-generated filler
-    even when the sentences share almost no wording.
+    """Operator, 2026-09-04: "he talks about random buffalo buffalo loop... it
+    sounds fake like fake AI generated".
 
     These three sentences share almost no wording, so the Jaccard gate passes
     every one of them — but they are all about the Buffalo, and back to back
@@ -191,3 +191,60 @@ def test_sentence_initial_capitals_are_not_treated_as_subjects() -> None:
     assert c.gate_say("Traffic is heavy today.") is True
     assert c.gate_say("Traffic has not moved in a while.") is True
     assert c.gate_say("Traffic finally broke up.") is True
+
+
+def test_his_own_name_is_never_read_as_a_repeating_subject() -> None:
+    """The subject gate drops a third line about the same proper noun. The show
+    says his name and the city's constantly, by design, so those are stopwords —
+    otherwise the gate would silence him for being himself."""
+    c = _gate()
+    assert c.gate_say("Two stars and the WANTED level is still climbing.") is True
+    assert c.gate_say("Cruiser behind me, so the WANTED level holds.") is True
+    assert c.gate_say("Lost him at the underpass; the WANTED level drops.") is True
+
+def test_the_agents_old_character_name_can_never_reach_the_public_feed() -> None:
+    """The knowledge base still refers to the character by an internal name in
+    hundreds of places, and that text is model INPUT. This is the gate on model
+    OUTPUT, and it is what makes those references safe to leave alone.
+
+    It is not hypothetical: before the gate existed, the production `decisions`
+    table already contained lines where the agent addressed itself by that name,
+    and those lines render on the public site.
+    """
+    from wasted_harness.brain.prompts import banned_phrases
+    from wasted_harness.brain.schemas import (
+        DecisionModel,
+        DecisionValidationContext,
+        validate_decision_content,
+    )
+
+    ctx = DecisionValidationContext(banned_phrases=tuple(banned_phrases()))
+
+    def verdict(say: str) -> str | None:
+        decision = DecisionModel(
+            thought="t",
+            say=say,
+            mood="bored",
+            goal="roam_the_block",
+            action={"type": "wander_drive", "params": {}},
+            confidence=0.5,
+        )
+        return validate_decision_content(decision, ctx).say_reason
+
+    # Matched case-insensitively as a substring, so every casing is caught.
+    for line in ("Focus, the agent.", "focus, the agent.", "WANTED, go.", "that is the agent's car"):
+        assert verdict(line) is not None, f"the old name slipped through: {line!r}"
+
+    # And it catches it in `thought` too, not only in the spoken line.
+    thought_only = DecisionModel(
+        thought="the agent should take the alley",
+        say="Alley.",
+        mood="bored",
+        goal="roam_the_block",
+        action={"type": "wander_drive", "params": {}},
+        confidence=0.5,
+    )
+    assert validate_decision_content(thought_only, ctx).say_reason is not None
+
+    # A clean line is untouched — the gate must not be a blanket refusal.
+    assert verdict("That car's mine.") is None

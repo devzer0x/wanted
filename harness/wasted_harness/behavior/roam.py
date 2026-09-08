@@ -1027,8 +1027,8 @@ def _done_nicer_car(state: GameState, snap: dict[str, Any]) -> bool:
 #: show — killing Lamar ends the story arc the whole channel is built around —
 #: and the law is kept out of the ambient menu because a cop turns any bit into
 #: a wanted level the engine then has to spend a goal escaping. Starting on
-#: police is not forbidden any more; it is its OWN goal, `shoot_a_cop`,
-#: gated on chaos tier 3, a
+#: police is not forbidden any more (operator, 2026-09-04: "so he can shoot
+#: cops as well"); it is its OWN goal, `shoot_a_cop`, gated on chaos tier 3, a
 #: loaded gun and full health, so it is a deliberate bit and never the default
 #: answer to "there is a man nearby". Matched as substrings because the bridge
 #: emits lowercased model names (`SnapshotBuilder.PedModelName`) and the family
@@ -2138,9 +2138,9 @@ def _done_rampage(state: GameState, snap: dict[str, Any]) -> bool:
 
 # -- shoot_a_cop (L3) -----------------------------------------------------------
 #
-# THE ONE PLACE HE STARTS ON THE LAW. He could not previously fight back or
-# shoot people properly; initiating against police is now a deliberate, gated
-# skill. Defending against a cop who is already shooting was always allowed
+# THE ONE PLACE HE STARTS ON THE LAW. Operator, 2026-09-04: "He can't fight back
+# yet or shoot people properly — give him that skill so he can shoot cops as
+# well." Defending against a cop who is already shooting was always allowed
 # (the threat reflex fights any `hostile` in reach, uniform or not). What was
 # forbidden — by rules.md rule 6, by PROTECTED_PED_MODELS and by the catalog's
 # own "the nearest man who is not a cop" — was INITIATING. This goal is that
@@ -2229,9 +2229,9 @@ def _done_shoot_a_cop(state: GameState, snap: dict[str, Any]) -> bool:
 # -- burn_the_city (L3, CHEAT) ---------------------------------------------------
 #
 # THE MAXIMUM-CHAOS BIT, and the first goal built under the rewritten CLAUDE.md
-# rule 5 ("cheats allowed, on purpose, since 2026-09-04"): weapons via cheat
-# codes, plus a BURN THE CITY task that throws grenades and everything.
-# The four guardrails, and where each one lives:
+# rule 5 ("cheats allowed, on purpose, since 2026-09-04"). Operator: "Give him
+# weapons with cheat codes, and a BURN THE CITY task — throw grenades and
+# everything." The four guardrails, and where each one lives:
 #
 #   * SAY SO — `main._begin_roam_goal` puts `cheat: "arsenal"` in the
 #     `activity_start` payload and the brain's note says CHEAT ON; the bridge

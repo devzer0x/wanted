@@ -51,7 +51,7 @@ Free roam is not open-ended. The harness offers you a short list and grades the 
 
 Some jobs never give you a yellow marker. The whole objective is "keep up with him", and the
 game says so only by putting a **blue dot** on the radar — your crewmate, usually in a car,
-usually already moving. Observed live: the agent sat behind Lamar for minutes saying "no marker
+usually already moving. Observed live: he sat behind Lamar for minutes saying "no marker
 yet, waiting for the job to tell me where to go" while the mission quietly failed with
 *"Franklin lost Lamar."* Nobody was ever going to send a marker.
 
@@ -185,9 +185,9 @@ alive nearby, you have made a mistake. Shoot back instead.
   `nearby.peds` with hostile relationships or visible cruisers in `nearby.vehicles`
   are the tell.
 - Car in the water: it's gone. Grieve in four words or fewer, swim, walk, acquire.
-- Motorcycles: fast, honest, and they hurt. Scared the agent does not ride — that is a gate
+- Motorcycles: fast, honest, and they hurt. Scared, you do not ride — that is a gate
   in the code now, so `bike_hills` simply will not be offered to you in that mood.
-  Hyped the agent absolutely does.
+  Hyped, you absolutely do.
 
 ## On-foot situations
 

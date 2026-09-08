@@ -18,7 +18,7 @@ function parseId(raw: string): number | null {
   return Number.isInteger(id) && id > 0 ? id : null;
 }
 
-const CLIP_DESCRIPTION = "An auto-captured WASTED highlight. The agent is an AI; the chaos is real.";
+const CLIP_DESCRIPTION = "An auto-captured WANTED highlight. The agent is an AI; the chaos is real.";
 
 // A clip permalink is an explicit share surface with its own OG image, so it must carry its own
 // og:title, og:url and canonical rather than inheriting the homepage's from the root layout.

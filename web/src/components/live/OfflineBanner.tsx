@@ -18,13 +18,13 @@ export function OfflineBanner({
 }) {
   if (!isAgentOffline(stats, nowMs)) return null;
 
-  // With the database unreachable we do not know what the agent is doing — claiming he is off the
-  // air would be a guess. The two cases get different headlines for that reason.
+  // With the database unreachable we do not know what the agent is doing — claiming it is off
+  // the air would be a guess. The two cases get different headlines for that reason.
   if (linkDown) {
     return (
       <Banner state="no-data" headline="NO DATA">
-        We can&apos;t reach the telemetry database, so we can&apos;t tell you what the agent is doing
-        right now. We would rather say that than guess.
+        We can&apos;t reach the telemetry database, so we can&apos;t tell you what the agent is
+        doing right now. We would rather say that than guess.
       </Banner>
     );
   }
@@ -40,7 +40,7 @@ export function OfflineBanner({
 
   return (
     <Banner state="offline" headline="OFF AIR">
-      the agent is not on the air right now. {detail} Nothing on this page is a replay.
+      The agent is not on the air right now. {detail} Nothing on this page is a replay.
     </Banner>
   );
 }

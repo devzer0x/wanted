@@ -1,0 +1,12 @@
+# Vercel builds from source; nothing below needs uploading, and some of it is
+# large enough to stall the upload.
+node_modules
+.next
+.next-e2e
+.next-offline
+.next-loop
+.siwe-verify-*
+test-results
+playwright-report
+e2e
+scripts/verify-*.mjs

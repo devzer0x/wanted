@@ -79,7 +79,7 @@ export default async function OgImage() {
                 textShadow: `10px 8px 0 ${BLOOD}`,
               }}
             >
-              WASTED
+              WANTED
             </div>
             <div
               style={{
@@ -90,20 +90,20 @@ export default async function OgImage() {
                 color: SMOKE,
               }}
             >
-              AN AI PLAYS. FOREVER. NO CHEATS.
+              AN AI PLAYS GTA. PREDICT WHAT HAPPENS NEXT.
             </div>
           </div>
 
           <div style={{ display: "flex", alignItems: "flex-end", justifyContent: "space-between" }}>
             {row ? (
               <div style={{ display: "flex" }}>
-                <Counter value={formatInt(row.deaths)} label="WASTED" loud />
+                <Counter value={formatInt(row.deaths)} label="DEATHS" loud />
                 <Counter value={formatInt(row.busted)} label="BUSTED" loud />
                 <Counter value={formatInt(row.missions_passed)} label="MISSIONS" />
               </div>
             ) : (
               <div style={{ display: "flex", fontSize: 26, color: SMOKE, maxWidth: 620 }}>
-                the agent is an AI. He drives, he crashes, he explains himself.
+                The agent is an AI. It drives, it crashes, it explains itself.
               </div>
             )}
             <div

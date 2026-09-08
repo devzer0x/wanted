@@ -50,6 +50,15 @@ const DIST_DIR = offlineMode ? ".next-offline" : ".next-e2e";
 const serverEnv: Record<string, string> = {
   NEXT_PUBLIC_SITE_URL: baseURL,
   NEXT_DIST_DIR: DIST_DIR,
+  // The SIWE origin is pinned server-side and a production build refuses to sign a loopback
+  // domain (src/app/api/_lib/siweDomain.ts). Both suites serve a production build on 127.0.0.1,
+  // so without this every /api/auth/nonce here answers 503 "sign-in is not configured" and the
+  // wallet suite could never reach the signature path at all — it would be skipping for a reason
+  // that has nothing to do with what it is testing. `.env.example` documents this variable as
+  // exactly that: "Set this ONLY to run a production build locally for verification." It applies
+  // to this spawned local server only; a PLAYWRIGHT_BASE_URL run starts no server and is
+  // unaffected, and no deployment sets it.
+  ALLOW_LOOPBACK_SIWE: "1",
   ...(offlineMode
     ? {
         NEXT_PUBLIC_SUPABASE_URL: UNREACHABLE_SUPABASE_URL,
@@ -66,7 +75,12 @@ const serverEnv: Record<string, string> = {
     : {}),
 };
 
-const testMatch = offlineMode ? /offline\.spec\.ts/ : /site\.spec\.ts/;
+// The default suite is site.spec.ts (pages against a reachable Supabase) plus wallet.spec.ts
+// (the connect/switch-network/sign-in flow, driven by the injected EIP-1193 provider in
+// e2e/walletHarness.ts). wallet.spec.ts stays out of the offline run on purpose: it asserts what
+// the REAL auth routes answer, and with Supabase unroutable every one of them would report the
+// same 503/500 regardless of what the wallet did, so it would prove nothing there.
+const testMatch = offlineMode ? /offline\.spec\.ts/ : /(site|wallet)\.spec\.ts/;
 
 export default defineConfig({
   testDir: "./e2e",

@@ -16,8 +16,11 @@ export function describeEvent(e: EventRow): string {
   const p = e.payload;
   switch (e.type) {
     case "death": {
+      // "KILLED", not the game's own death-screen word: that word is also the old product name, so
+      // on a page branded WANTED it reads as a brand collision rather than as flavour. It still
+      // pairs tonally with BUSTED below, which is the point of the pair.
       const street = str(p, "street");
-      return `WASTED${street ? ` on ${street}` : ""}`;
+      return `KILLED${street ? ` on ${street}` : ""}`;
     }
     case "busted": {
       const stars = num(p, "wanted_at_arrest");

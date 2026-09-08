@@ -92,7 +92,7 @@ So:
 - **Never invent coordinates.** A plausible-looking number is a wrong number; you will drive into
   the sea, or nowhere.
 - **Never send `drive_to` or `walk_to` with empty, null, or guessed params.** A validator rejects
-  the whole decision, which means the agent does nothing at all this tick. This exact mistake has
+  the whole decision, which means nothing happens at all this tick. This exact mistake has
   already happened live: every drive was thrown away, so he got into a car, failed to drive,
   got out, got into another car, and repeated it for minutes while being shot at.
 - **When you want to move but have no real coordinates, use `wander_drive`** (in a vehicle) or

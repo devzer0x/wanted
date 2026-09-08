@@ -27,6 +27,8 @@ import sys
 import threading
 import time
 import uuid
+from collections import deque
+from collections.abc import Callable
 from datetime import UTC, datetime
 from typing import Any
 
@@ -149,6 +151,15 @@ from .perception import (
     encode_jpeg,
     objective_region_hash,
 )
+from .predictions import (
+    CATALOG as PREDICTION_CATALOG,
+)
+from .predictions import (
+    PredictionGenerator,
+    PredictionTicker,
+    PredictionWriter,
+    RecentEvent,
+)
 from .primitives import gamepad_status, session_diagnostics
 from .settings import ConfigError, Settings
 from .totals import LifetimeTotals
@@ -246,6 +257,26 @@ FIGHT_ACTION_TYPES: frozenset[str] = frozenset({"fight_ped", "combat_hated_targe
 #: UI"). Overridden to 0 s effectively by the fight/chase check in
 #: `_phone_reflex`, which hangs up immediately regardless of this budget.
 PHONE_HANGUP_AFTER_S = 25.0
+
+#: How far back the window of recent events handed to the prediction generator
+#: reaches. `predictions/catalog.py` states the contract for it — "the caller
+#: owns deciding what recent means", with "the last minute" as its own worked
+#: example — and its three CALIBRATED wanted-star templates are anchored on a
+#: real `wanted_change` gain event appearing inside it, so this number is what
+#: decides whether they are ever offerable at all.
+PREDICTION_RECENT_WINDOW_S = 60.0
+
+#: Hard ceiling on that window, so a burst cannot grow it without bound between
+#: prunes. Measured, not picked: across `tests/fixtures/real_session_2026-09-04.json`
+#: (5,649 real §4 events, 86.9 h, 65.0 an hour) the BUSIEST real 60 s window
+#: holds 46 events, so this is a backstop rather than a working limit — but it
+#: is a real ceiling, and a genuinely wilder minute loses its oldest events
+#: rather than the loop's memory.
+PREDICTION_RECENT_MAX = 64
+#: Consecutive failed prediction writes after which generation stops for the run.
+#: Low on purpose: the cost of stopping is "no predictions until restart", and the cost of
+#: continuing is an offline queue that grows on the game-loop thread until the agent stops playing.
+PREDICTION_FAILURE_LIMIT = 5
 
 #: T4 (findings.md R4): the catalogued mission-name vocabulary MINUS anything
 #: that collides with a character name (`CHECKED_NAMES`) — computed once, not
@@ -828,7 +859,137 @@ def _phone_line(state: GameState, missions_enabled: bool) -> str:
     )
 
 
+class _RecentEvents:
+    """A time-bounded window of the §4 events this process has just emitted —
+    the prediction generator's `recent_events` input (predictions/catalog.py:
+    "the caller owns deciding what recent means").
+
+    LOCKED, not merely a `deque`. Appending to a deque is atomic under the GIL,
+    but ITERATING one while another thread appends raises `RuntimeError: deque
+    mutated during iteration` — and events really are emitted off the loop
+    thread: the clip worker records a `clip` event from its own thread
+    (`obs.py`), as does anything else that writes while the loop is reading.
+    A dropped prediction is survivable; a window that intermittently explodes
+    on the caller is not the kind of thing to leave to luck.
+
+    `clock` is injected in the same style as `PredictionTicker` and
+    `PredictionGenerator`, so the expiry can be tested by advancing a clock
+    rather than by sleeping a real minute.
+    """
+
+    def __init__(
+        self,
+        maxlen: int,
+        window_s: float,
+        clock: Callable[[], float] = time.monotonic,
+    ) -> None:
+        self._events: deque[tuple[float, RecentEvent]] = deque(maxlen=maxlen)
+        self._window_s = window_s
+        self._clock = clock
+        self._lock = threading.Lock()
+
+    @property
+    def maxlen(self) -> int | None:
+        return self._events.maxlen
+
+    def note(self, type_: str, payload: dict[str, Any]) -> None:
+        """Record one §4 event, in the exact shape `RecentEvent` describes and
+        `SupabaseWriter.record_event` builds. The monotonic stamp beside it is
+        what `window()` prunes on, so a wall-clock correction on the box can
+        neither widen the window nor empty it."""
+        entry = (
+            self._clock(),
+            {"type": type_, "payload": payload, "ts": datetime.now(UTC).isoformat()},
+        )
+        with self._lock:
+            self._events.append(entry)
+
+    def window(self) -> list[RecentEvent]:
+        """The last `window_s` of events, oldest first."""
+        cutoff = self._clock() - self._window_s
+        with self._lock:
+            return [event for at, event in self._events if at >= cutoff]
+
+
+class _ObservedWriter(SupabaseWriter):
+    """The process's one `SupabaseWriter`, with a callback on the §4 events it
+    is handed. It writes exactly what its base class writes; it only also says
+    what went past.
+
+    The prediction generator's `recent_events` input (predictions/catalog.py)
+    needs about a minute of the events this process has just emitted. That
+    cannot be read back out of the writer's own buffer — `flush()` drains it
+    every FLUSH_INTERVAL_S (2 s), and on the offline path it drains to disk —
+    so the events have to be observed on the way past.
+
+    A subclass rather than a second helper the ~17 emit sites in this file are
+    expected to remember to call: this is the one place every §4 event already
+    goes through, so an emit added later cannot silently miss the window. And a
+    subclass rather than a hook added to `events.py`: that file belongs to
+    another owner, and `predictions/writer.py` / `predictions/ticker.py` already
+    document the same "SupabaseWriter has no public seam for this" position for
+    their own reach into it.
+
+    Both emit methods are overridden because both are real paths: `record_event`
+    buffers, and `insert_event_now` is the unbatched insert `_record_big_event`
+    takes for `death`/`busted` when the clip pipeline is up — which are exactly
+    the two events the prediction templates read out of the window.
+    """
+
+    def __init__(
+        self,
+        settings: Settings,
+        session_id: str | None,
+        on_event: Callable[[str, dict[str, Any]], None],
+    ) -> None:
+        super().__init__(settings, session_id=session_id)
+        self._on_event = on_event
+
+    def record_event(
+        self,
+        type_: str,
+        payload: dict[str, Any],
+        screenshot_url: str | None = None,
+        session_id: str | None = None,
+    ) -> None:
+        # Base first: it validates the closed §4 enum and raises on an unknown
+        # type, and an event that was refused never happened.
+        super().record_event(type_, payload, screenshot_url=screenshot_url, session_id=session_id)
+        self._on_event(type_, payload)
+
+    def insert_event_now(
+        self,
+        type_: str,
+        payload: dict[str, Any],
+        screenshot_url: str | None = None,
+    ) -> int | None:
+        row_id = super().insert_event_now(type_, payload, screenshot_url)
+        # Noted whatever the return: `None` means the row was queued, not that
+        # the event did not happen (events.py's own offline path).
+        self._on_event(type_, payload)
+        return row_id
+
+
 class Harness:
+    #: The prediction layer (docs/CONTRACTS-PREDICTIONS.md), wired in
+    #: `__init__` only when `WASTED_PREDICTIONS_ENABLED` is on — `None` here
+    #: means "switched off", and every prediction path checks for exactly that
+    #: before doing anything at all.
+    #:
+    #: These are CLASS-level defaults on purpose, not just instance ones: the
+    #: loop tests build a `Harness` with `object.__new__` and hand it only the
+    #: collaborators the tick actually touches, and a file they do not own must
+    #: not start raising `AttributeError` at them from inside `run()`. Off is
+    #: also the honest answer for such a harness: it has no Supabase project,
+    #: so there is nothing for the layer to write to.
+    predictions: PredictionGenerator | None = None
+    prediction_writer: PredictionWriter | None = None
+    prediction_ticker: PredictionTicker | None = None
+    #: The events this process has emitted recently — the generator's
+    #: `recent_events` input. `None` when the layer is off, so nothing is
+    #: retained for a feature that is not running.
+    _recent_events: _RecentEvents | None = None
+
     def __init__(self, settings: Settings) -> None:
         self.settings = settings
         self.rng = random.Random()
@@ -836,7 +997,14 @@ class Harness:
         state_dir = settings.ensure_state_dir()
 
         self.session_id = str(uuid.uuid4())
-        self.writer = SupabaseWriter(settings, session_id=self.session_id)
+        # ONE writer for this process, whatever else is switched on: the
+        # observer below is a no-op while the prediction layer is off, so there
+        # is no second class, no second buffer and no second Supabase client to
+        # choose between at startup.
+        self.writer = _ObservedWriter(
+            settings, session_id=self.session_id, on_event=self._note_recent_event
+        )
+        self._wire_predictions(settings)
         self.memory = Memory(state_dir)
         self.commentary = Commentary(state_dir, self.rng)
         self.bus = OverlayBus()
@@ -1244,6 +1412,48 @@ class Harness:
             return self.writer.insert_event_now(type_, payload, screenshot_url)
         self.writer.record_event(type_, payload, screenshot_url=screenshot_url)
         return None
+
+    # -- the prediction layer's view of what just happened ----------------------
+
+    def _wire_predictions(self, settings: Settings) -> None:
+        """Stand the prediction layer up, or leave it switched off.
+
+        Everything it needs rides on the objects this process already has: the
+        one `SupabaseWriter` built above (so predictions share the same batched
+        buffer, the same on-disk offline queue and the same service-role
+        client as every other row — no second Supabase connection anywhere),
+        and this run's `session_id`, which is the writer's own.
+
+        Split out of `__init__` so the branch is reachable without an Anthropic
+        key, a pricing file and a bridge: "does the flag actually switch it
+        off" deserves an answer that was run, not read.
+        """
+        if not settings.predictions_enabled:
+            # The class defaults already say "off"; say it out loud anyway, so
+            # an operator reading the run log can tell a switched-off layer
+            # from a broken one.
+            log.info("predictions are switched off (WASTED_PREDICTIONS_ENABLED)")
+            return
+        self.predictions = PredictionGenerator(PREDICTION_CATALOG)
+        self.prediction_writer = PredictionWriter(self.writer)
+        self.prediction_ticker = PredictionTicker(self.writer)
+        self._prediction_write_failures = 0
+        self._recent_events = _RecentEvents(PREDICTION_RECENT_MAX, PREDICTION_RECENT_WINDOW_S)
+
+    def _note_recent_event(self, type_: str, payload: dict[str, Any]) -> None:
+        """`_ObservedWriter`'s callback: every §4 event this process emits,
+        however it was emitted. A no-op while the layer is switched off."""
+        recent = self._recent_events
+        if recent is None:
+            return
+        recent.note(type_, payload)
+
+    def _recent_event_window(self) -> list[RecentEvent]:
+        """The last `PREDICTION_RECENT_WINDOW_S` of §4 events, oldest first."""
+        recent = self._recent_events
+        if recent is None:
+            return []
+        return recent.window()
 
     def _slow_the_death(self) -> None:
         """Dip the world to slow motion for the couple of seconds before a clip
@@ -2281,9 +2491,9 @@ class Harness:
         * **Getting nowhere** — `going_nowhere_s`. `still_for_s` resets on any
           six-metre hop, so a man pacing between two points eight metres apart
           reads as "moving" forever and never trips the first rule. That is the
-          case this rule exists for: repeated narration about one subject while
-          nothing is happening — a line every poll about the same car, while he
-          covered no ground at all.
+          case the operator caught on 2026-09-04: "he talks about random buffalo
+          buffalo loop ... when he is doing nothing" — a line every poll about
+          the same car, while he covered no ground at all.
 
         A FIGHT IS NOT NOTHING. Trading punches, being shot at or running from
         the police all happen inside a few metres and are the best television he
@@ -4358,6 +4568,138 @@ class Harness:
             self._last_flush = now
             self.writer.flush()
 
+    # -- predictions -----------------------------------------------------------
+    #
+    # Both methods below hold the same posture as every other I/O boundary in
+    # this file (and the one `events.py` documents for its own): log it, let the
+    # writer queue it, carry on. A prediction is a thing the AUDIENCE plays
+    # with; the show is the game being played. Nothing here may ever be the
+    # reason the loop stops — hence the broad `except Exception` on both, which
+    # is the same deliberate choice `pyproject.toml` ignores BLE001 for.
+
+    def _tick_prediction_lifecycle(self) -> None:
+        """Drive `lock_due_predictions()` / `settle_due_predictions()`.
+
+        docs/CONTRACTS-PREDICTIONS.md §4 names the harness the PRIMARY driver of
+        both RPCs — windows here run as short as 30 s, shorter than a Vercel
+        cron can track — with the cron left as the backstop for the one case
+        this cannot cover, the harness itself dying.
+
+        Called at the TOP of every loop iteration, ahead of `/state`, so it
+        keeps its own ~5 s cadence (`PredictionTicker` self-paces; calling it at
+        the 2-4 Hz poll rate costs nothing) even on the iterations that
+        `continue` early because the bridge is down, the game has no snapshot
+        yet, or he is on a break. Predictions this session already opened still
+        have to reach a terminal state while the game is loading or wedged, and
+        the RPCs are idempotent by construction.
+        """
+        ticker = self.prediction_ticker
+        if ticker is None:
+            return
+        try:
+            ticker.maybe_tick(self.writer.session_id)
+        except Exception as exc:
+            log.warning(
+                "prediction lifecycle tick failed; the Vercel cron backstop still has it",
+                extra={"kv": {"error": f"{type(exc).__name__}: {exc}"[:200]}},
+            )
+
+    #: Reset on every successful write; see PREDICTION_FAILURE_LIMIT.
+    _prediction_write_failures: int = 0
+
+    def _offer_prediction(self, state: GameState) -> None:
+        """Offer this tick's real `/state` and recent events to the generator,
+        and write whatever it hands back against the LIVE session.
+
+        Runs after `_reflex`, deliberately: the three calibrated wanted-star
+        templates trigger on a real `wanted_change` gain being IN the recency
+        window, and `_reflex` is what records that event from this same
+        snapshot. Offered before it, the best question in the catalogue would
+        always be one tick late.
+
+        The generator owns whether there is anything to offer at all (its own
+        cooldowns, its cap on concurrent open predictions, and its refusal to
+        generate anything without a live session); this method owns not letting
+        any of that reach the loop.
+        """
+        generator = self.predictions
+        writer = self.prediction_writer
+        if generator is None or writer is None:
+            return
+        # The same gate `_heartbeat` uses one line below the call site, and for
+        # the same reason. `_believe_state()` is false while the blocking-screen
+        # watchdog holds a frozen snapshot; `_heartbeat` refuses to publish the
+        # HUD then, because "republishing them under a fresh timestamp is
+        # publishing a number the game is not producing".
+        #
+        # A prediction is that, and worse. `state_context` carries those exact
+        # frozen HUD fields, and unlike a stale heartbeat it opens a real,
+        # publicly enterable window off them. Measured before this gate existed:
+        # over a 25-tick freeze, 24 offers were made while blocked and one row
+        # landed with a `state_context` read off a snapshot frozen ~700 ticks
+        # earlier. Worse still, a frozen game emits no events, so §3's
+        # completeness gate never opens for that window and the prediction
+        # voids — the audience is shown a question built from data this process
+        # has already decided is a lie, answers it, and gets nothing back.
+        if not self._believe_state(state):
+            return
+        # Circuit breaker. `reward_pool`/`reward_asset` are NOT NULL with no
+        # default, the table may not exist on the box at all, and a rejected
+        # insert is not dropped — `events.py` requeues it and re-POSTs the whole
+        # backlog on this thread every flush. Generating regardless turns "the
+        # prediction layer is misconfigured" into "the 2-4 Hz loop collapses and
+        # The agent stops playing", which is the one failure mode the show
+        # cannot absorb. So stop generating once writes have stopped landing,
+        # and say so once rather than every tick.
+        if self._prediction_write_failures >= PREDICTION_FAILURE_LIMIT:
+            return
+        # CONTRACTS-PREDICTIONS §2: "a prediction always belongs to a real
+        # session". That is the session every other row this process writes is
+        # stamped with — not a second notion of liveness invented here. The
+        # generator refuses a `None` on its own too; this is the caller saying
+        # so out loud rather than relying on it.
+        session_id = self.writer.session_id
+        if session_id is None:
+            return
+        try:
+            row = generator.generate(state, session_id, self._recent_event_window())
+            if row is None:
+                return
+            writer.write(row)
+        except Exception as exc:
+            self._prediction_write_failures += 1
+            if self._prediction_write_failures == PREDICTION_FAILURE_LIMIT:
+                log.warning(
+                    "prediction writes keep failing; generation is now OFF for this run "
+                    "so the backlog stops growing on the loop thread. Set "
+                    "WASTED_PREDICTIONS_ENABLED=false, or apply the prediction migrations, "
+                    "then restart.",
+                    extra={"kv": {"failures": self._prediction_write_failures}},
+                )
+            else:
+                log.warning(
+                    "prediction generation failed; the show carries on without it",
+                    extra={
+                        "kv": {
+                            "error": f"{type(exc).__name__}: {exc}"[:200],
+                            "consecutive_failures": self._prediction_write_failures,
+                        }
+                    },
+                )
+            return
+        else:
+            self._prediction_write_failures = 0
+        log.info(
+            "prediction opened",
+            extra={
+                "kv": {
+                    "prediction_type": row.get("prediction_type"),
+                    "locks_at": row.get("locks_at"),
+                    "resolves_at": row.get("resolves_at"),
+                }
+            },
+        )
+
     def _handle_breaks(self, state: GameState) -> bool:
         """Returns True while on a break (loop should idle)."""
         planned = self.breaks.finish_if_over()
@@ -4428,6 +4770,10 @@ class Harness:
         try:
             while not self._stop.is_set():
                 loop_started = time.monotonic()
+                # Ahead of perception, so the prediction lifecycle keeps its own
+                # cadence on EVERY iteration, including the ones below that
+                # `continue` before a tick ever happens. See the method.
+                self._tick_prediction_lifecycle()
                 try:
                     state = self.bridge.get_state()
                 except BridgeDownError as exc:
@@ -4633,6 +4979,10 @@ class Harness:
                 # leaving the previous owner apparently still driving.
                 self.wheel.end_tick()
 
+                # Last, on a fully-processed tick: this tick's own events are
+                # in the recency window by now, and the HUD snapshot the
+                # prediction carries is the one the heartbeat below publishes.
+                self._offer_prediction(state)
                 self._heartbeat(state)
                 self._maybe_flush()
                 elapsed = time.monotonic() - loop_started

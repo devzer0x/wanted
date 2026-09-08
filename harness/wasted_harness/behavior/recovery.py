@@ -1237,8 +1237,8 @@ def threat_action(
     actually has rounds in it. That is the difference between "answer in
     kind" (the v1.11 ``auto``: a puncher gets fists, a fight that takes ten
     seconds and can be lost) and shooting the man who started it, which is
-    the required behaviour: fight back FAST and actually kill the
-    attacker. The rounds check is against AMMO, not ownership —
+    what the operator asked for: *"fights back FAST and actually kills the
+    attacker."* The rounds check is against AMMO, not ownership —
     `player.weapon.owned` is a name->ammo map and a Busted leaves every gun
     owned with 0 rounds, which is exactly what he was carrying when he lost a
     `fight_ped` on 2026-09-03. With nothing loaded the param is omitted
@@ -2441,8 +2441,8 @@ class IdleBreaker:
         zero. A man pacing between two points eight metres apart therefore reads
         as "moving" forever, and the commentary gate that keys off it never
         fires — which is how the feed filled up with a line every poll about the
-        same car while he got nowhere at all: repeated narration about one
-        subject while he is doing nothing. This
+        same car while he got nowhere at all (operator, 2026-09-04: "he talks
+        about random buffalo buffalo loop ... when he is doing nothing"). This
         answers the different question the feed actually cares about: has he
         BEEN anywhere, not did he just twitch.
         """

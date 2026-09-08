@@ -1,30 +1,40 @@
-# wasted
+# WANTED
 
-**the agent is an AI agent playing GTA V.**
+**An autonomous AI playing GTA live.**
 
-He sees the game, decides what to do, performs the action, observes what happened, and continues —
-without a human controlling the gameplay.
+Watch what it does.
+Predict what happens next.
+Correct predictions can earn TTWO rewards.
 
-- **Website:** the production domain
-- **Contact:** agent@wanted.run
+**$WANTED / TTWO — Robinhood Chain**
 
-The agent is an AI. Everything he says on stream is AI-generated. He is not good at the game, and this
-repository does not claim he is. He gets stuck, he crashes cars, he dies, he misreads situations and
-occasionally stands still while the game waits for him. That is the experiment: not a bot that wins,
+The agent sees the game, decides what to do, performs the action, observes what happened, and
+continues — with no human controlling the gameplay. Viewers predict what it will do next. Those
+predictions settle against the same telemetry the agent itself runs on, so an outcome is decided by
+the game state, never by an opinion.
+
+WANTED is an AI. Everything it says on stream is AI-generated. It is not good at the game, and this
+repository does not claim it is. It gets stuck, it crashes cars, it dies, it misreads situations and
+occasionally stands still while the game waits for it. That is the experiment: not a bot that wins,
 but an agent that has to cope with a world it only partly understands, live, with no one to bail it
-out.
+out. That unreliability is also what makes it worth predicting against.
+
+Predictions are free. There is no wager, no deposit, and nothing to lose by being wrong — rewards
+are paid from a treasury we fund, subject to the eligibility rules and limits in
+`docs/CONTRACTS-PREDICTIONS.md`.
 
 ---
 
 ## Contents
 
 - [The loop](#the-loop)
-- [What the agent actually perceives](#what-the agent-actually-perceives)
+- [What WANTED actually perceives](#what-wanted-actually-perceives)
 - [The three layers](#the-three-layers)
-- [What the agent can do](#what-the agent-can-do)
-- [What the agent cannot do](#what-the agent-cannot-do)
+- [What WANTED can do](#what-wanted-can-do)
+- [What WANTED cannot do](#what-wanted-cannot-do)
 - [The rules](#the-rules)
 - [Architecture](#architecture)
+- [The prediction layer](#the-prediction-layer)
 - [Running it](#running-it)
 - [Operating cost](#operating-cost)
 - [What is verified, and what isn't](#what-is-verified-and-what-isnt)
@@ -74,7 +84,7 @@ out.
                    │
                    ▼
    ┌──────────────────────────┐        ┌──────────────────────────┐
-   │  Supabase (Postgres +    │───────▶│  production (Next.js on  │
+   │  Supabase (Postgres +    │───────▶│  WANTED web (Next.js on  │
    │  Realtime)               │        │  Vercel) + OBS overlay   │
    └──────────────────────────┘        └──────────────────────────┘
 ```
@@ -83,11 +93,11 @@ Then it repeats. New state, new decision, forever.
 
 ---
 
-## What the agent actually perceives
+## What WANTED actually perceives
 
 This is the part most "AI plays a game" projects describe loosely, so here it is precisely.
 
-**the agent's primary sense is structured game state, not pixels.** A C# script running inside the game
+**WANTED's primary sense is structured game state, not pixels.** A C# script running inside the game
 (ScriptHookVDotNet) reads the engine directly and serves a JSON snapshot over a loopback HTTP API,
 polled at 2–4 Hz (default 3 Hz). That snapshot carries, among other fields:
 
@@ -106,7 +116,7 @@ the game's own reason line, e.g. *"Franklin lost Lamar"*) when one ends. Neither
 in the state API, so the screen the game itself draws is the only honest source. Screenshots are
 downscaled to a 768-px long edge before being sent; raw 1080p frames are never sent to a model.
 
-So: the agent is not staring at the screen and interpreting it frame by frame. He reads instruments. Some
+So: WANTED is not staring at the screen and interpreting it frame by frame. He reads instruments. Some
 of his worst failures come exactly from that — the state API tells him a blip exists but not what the
 mission wants from him, and he has to infer the rest.
 
@@ -131,7 +141,7 @@ down (see [Operating cost](#operating-cost)).
 Decisions come back as **structured output** against a JSON schema, not free text that gets parsed
 hopefully. A decision that does not validate is a logged failure, not a guess.
 
-The agent also has a **retrieval-backed knowledge base** — 632 curated items across 13 domain files
+WANTED also has a **retrieval-backed knowledge base** — 632 curated items across 13 domain files
 (driving, combat, police, vehicles, aircraft, HUD icons, map markers, random events, NPCs, failure
 recovery, world common sense, and more), plus mission data: 72 mission state machines in
 `mission_states.json`. Every count here is reproducible from the files in
@@ -142,7 +152,7 @@ is effectively free.
 
 ---
 
-## What the agent can do
+## What WANTED can do
 
 The vocabulary is **20 actions and nothing else**. Twelve are tasks handed to the game engine, which
 may take seconds to minutes; eight are direct key presses that are near-instant.
@@ -154,12 +164,12 @@ may take seconds to minutes; eight are direct key presses that are near-instant.
 **Manual primitives:** `look_around` · `brake_tap` · `swerve` · `reverse_out` · `press_prompt_key` ·
 `wait` · `radio` · `horn`
 
-If it is not on that list, the agent cannot do it, and the prompt tells him in those words — because on a
+If it is not on that list, WANTED cannot do it, and the prompt tells him in those words — because on a
 live stream, claiming to have done something the viewer can see did not happen is worse than failing.
 
 ---
 
-## What the agent cannot do
+## What WANTED cannot do
 
 Stated plainly, because it shapes everything about how he plays:
 
@@ -187,7 +197,7 @@ These are enforced in code, not just promised:
   `NETWORK_IS_GAME_IN_PROGRESS`, it latches disabled and every endpoint returns
   `503 online_session_active` until the game is restarted. It cannot un-latch itself mid-session.
 - **No cheats.** No god mode. No teleporting across the map. No cheat money. No invincible cars. A
-  human player cannot do those things, so neither can the agent.
+  human player cannot do those things, so neither can WANTED.
 - **The one exception**, stated so it is not a secret: when he is physically wedged in world
   geometry, an "unstick" nudge of **≤ 3 m** is allowed. The bridge enforces the preconditions
   itself — speed ≈ 0 for more than 20 s *and* a drive task already running, otherwise it returns
@@ -207,7 +217,7 @@ bridge/      C# ScriptHookVDotNet script that runs inside the game.
              Serves GET /state and accepts POST /task on 127.0.0.1:7777.
 harness/     Python 3.12 service: perception loop, the three brain tiers,
              knowledge retrieval, commentary, budget governor, OBS overlay.
-web/         Next.js site (production), deployed on Vercel.
+web/         Next.js site + prediction API, deployed on Vercel.
 infra/       Supabase schema, RLS policies, storage buckets.
 scripts/     PowerShell ops suite for the Windows game machine.
 docs/        PLAN · STATUS · CONTRACTS · RUNBOOK · RESEARCH.
@@ -226,6 +236,54 @@ overlay page that OBS embeds as a browser source.
 **Where it runs:** the game, bridge, harness, OBS and watchdog all run on one Windows GPU machine.
 The web layer runs on Vercel and the database on Supabase. Nothing game-related can be *verified*
 anywhere except that machine with the game actually running.
+
+---
+
+## The prediction layer
+
+The agent's telemetry is already the most trustworthy thing in the system: it is what the agent
+itself acts on, it is written by the harness with a service-role key, and it is append-only. The
+prediction layer is built on the principle that **an outcome is decided by that telemetry and by
+nothing else** — not by a model, not by an operator, and never by the client.
+
+```
+game state (bridge /state, 2-4 Hz)
+   │
+   ├─▶ harness perception ─▶ the agent decides and acts        (unchanged)
+   │
+   └─▶ harness prediction generator
+          │   scores the moment for uncertainty, watchability,
+          │   resolution speed and novelty; only emits questions
+          │   whose settlement rule is in the frozen registry
+          ▼
+       predictions row  ──▶  OPEN ──▶ LOCKED ──▶ RESOLVING ──▶ SETTLED
+                                │                                │
+                        entries close at             settle_due_predictions()
+                        locks_at, enforced           reads events in the window
+                        in SQL with now()            and writes the evidence
+                                                              │
+                                                     reward_ledger credit
+                                                     UNIQUE(prediction, wallet)
+                                                              │
+                                                     claim ──▶ ERC-20 transfer
+```
+
+**Settlement is a Postgres function, not application code.** It reads only `events` and `stats`
+rows inside `[locks_at, resolves_at]`, records the event ids that decided the result in
+`resolution_evidence`, and is safe to run repeatedly — a `UNIQUE (prediction_id, wallet)` constraint
+on the ledger means a second run cannot credit anyone twice. That constraint is what lets settlement
+be retried without a reconciliation process.
+
+**Voiding is the safe branch, and it is mandatory.** If the session ended, the bridge went down, the
+heartbeat gapped, or the rule kind is unrecognised, the prediction voids and credits nobody. An
+outcome is never inferred from missing data.
+
+**Rewards are off-chain until claimed.** Crediting a ledger row costs nothing; paying out every
+correct answer on-chain would cost more in gas than the reward is worth. Balances accumulate and the
+viewer claims once, which is the only step that touches the chain.
+
+The full interface — data model, settlement rule registry, eligibility hooks, treasury limits and
+the verified chain configuration — is frozen in `docs/CONTRACTS-PREDICTIONS.md`.
 
 ---
 
@@ -283,7 +341,7 @@ dependency is up.
 ## Operating cost
 
 Running an agent 24/7 is not free, and the number is not hidden. Costs split into a **fixed**
-infrastructure floor and a **variable** inference cost that scales with how often the agent thinks —
+infrastructure floor and a **variable** inference cost that scales with how often WANTED thinks —
 and, more than anything else, with *what he is doing at the time*.
 
 ### What drives it
@@ -323,7 +381,7 @@ is re-verified at harness startup with a 1-token call per model. USD per million
 | Cold tactical call (cache write) | $0.0113 | measured |
 | Knowledge-retrieval block | ~450 uncached input tokens/call | measured |
 
-The prompt has grown substantially as the agent was taught the game: the tactical prefix went from
+The prompt has grown substantially as WANTED was taught the game: the tactical prefix went from
 7,617 to **14,484 tokens** (1.9×), and a warm tactical call from $0.001714 to **$0.0026** (+52%).
 
 ### Derived per-call and per-hour cost
@@ -354,7 +412,7 @@ calls/hour:
 
 A governor tracks spend against an hourly cap (`WASTED_HOURLY_CAP_USD`, default **$1.50**) and sheds
 capability from the top down. Every level change is announced on stream as an event and a feed line,
-so the audience is told when the agent is being throttled:
+so the audience is told when WANTED is being throttled:
 
 | Level | Engages at | Behaviour |
 |---|---|---|
@@ -431,7 +489,23 @@ follow-the-objective fix that resolved a real mission failure within 20 seconds 
 **Verified against the real Claude API:** both model IDs, prompt caching (proven via
 `cache_read_input_tokens`), structured-output decision parsing, and the per-call costs quoted above.
 
-**Not yet verified:** long unattended behavioural samples, and — stated plainly — whether the agent plays
+**Verified for the prediction layer, against real recorded gameplay.** `npm run verify:loop` (in
+`web/`) drives the whole loop against a full local stack — real Postgres with the real migrations,
+real PostgREST enforcing real RLS over HTTP, the real production build, real secp256k1 signatures —
+and replays 5,649 events captured from an actual session. 48 assertions: a wallet signs in, two
+wallets take opposite sides, the lock refuses a late entry, settlement lands on the outcome that
+genuinely happened and cites the real event that decided it, the correct wallet is credited exactly
+once no matter how often settlement re-runs, the incorrect wallet is not, the claim reaches a real
+broadcast attempt on Robinhood Chain and — failing for want of gas — returns the credit to
+claimable rather than burning it, and the leaderboard and streaks follow.
+
+That run is also how three bugs were found that no unit test could reach, because each lived in a
+seam between two individually-correct halves: a timestamp that changed shape on its way through the
+database and so broke every signature; a database grant that covered the browser's role but not the
+server's; and a wallet address stored in one case and looked up in another, which made every
+credited reward permanently unclaimable. All three are fixed, with regression tests.
+
+**Not yet verified:** long unattended behavioural samples, and — stated plainly — whether WANTED plays
 *well* as opposed to merely playing *at all*. Do not read "he is running" as "he is good."
 
 A worked example of the difference: the director tier was silently dead for a period because Sonnet's
@@ -454,7 +528,7 @@ Issues and pull requests are welcome. Two things are worth knowing before you op
 
 `CLAUDE.md` documents the full working rules for the repository.
 
-Questions: agent@wanted.run
+Questions: open an issue on this repository.
 
 ---
 
@@ -465,4 +539,11 @@ Licensed under the [MIT License](LICENSE).
 This project is **not affiliated with, endorsed by, or associated with Rockstar Games or Take-Two
 Interactive**. All trademarks are the property of their respective owners. This repository contains no
 game assets and no means of obtaining the game; running it requires your own legitimately purchased
-copy. The agent is an AI agent, and all commentary he produces is AI-generated.
+copy.
+
+The TTWO stock token used for rewards is a third-party instrument issued by Robinhood Assets (Jersey)
+Limited. It is a tokenized debt security that tracks the price of the underlying share; it is not
+issued by Take-Two Interactive, carries no shareholder rights, and its use here implies no
+relationship with either company. Stock tokens are restricted or prohibited in a number of
+jurisdictions, and reward eligibility is enforced server-side accordingly. Nothing here is financial
+advice or an offer of securities. WANTED is an AI agent, and all commentary he produces is AI-generated.

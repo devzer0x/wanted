@@ -1,9 +1,9 @@
 @import "tailwindcss";
 
-/* WASTED design system — "street signal" brutalism.
+/* WANTED design system — "street signal" brutalism.
    Asphalt black, blood red, bone white. Sharp corners, hazard stripes, film grain.
    The wordmark styling is original: heavy grotesque + red misprint offset. It deliberately
-   avoids any resemblance to the game's death-screen typography. */
+   avoids any resemblance to the game's own logo, art or death-screen typography. */
 
 :root {
   --void: #070606;
@@ -154,8 +154,53 @@ body {
 }
 .skeleton-pulse { animation: skeleton-pulse 1.4s ease-in-out infinite; }
 
+/* Countdown running low on a live prediction — urgency without a new color. */
+@keyframes urgent-pulse {
+  0%, 100% { color: var(--ember); }
+  50% { color: var(--blood); }
+}
+.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+
 @media (prefers-reduced-motion: reduce) {
-  .led-live, .banner-throb, .feed-in, .skeleton-pulse { animation: none; }
+  .led-live, .banner-throb, .feed-in, .skeleton-pulse, .urgent { animation: none; }
+}
+
+/* Sticky mobile prediction action bar: pinned to the viewport foot, clear of the home
+   indicator, always above the page content so a reader scrolled into THOUGHTS or RESULTS can
+   still answer without losing the stream. */
+.predict-bar {
+  position: fixed;
+  left: 0;
+  right: 0;
+  bottom: 0;
+  z-index: 55;
+  padding-bottom: env(safe-area-inset-bottom, 0px);
+}
+
+/* Live page layout: five named areas, ONE DOM node per area (each child sets `grid-area` via a
+   `[grid-area:*]` utility). Below `lg` it is a single stacked column in brief-mandated order
+   (stream, predict, state, thoughts, results); at `lg` the same five nodes reflow into two
+   columns without remounting anything — no panel, landmark, or its internal state/subscriptions
+   ever exists twice. `state` spans both right-column rows so a shorter left column does not
+   force a gap the way two independently-placed row tracks would. */
+.live-grid {
+  display: grid;
+  grid-template-areas:
+    "stream"
+    "predict"
+    "state"
+    "thoughts"
+    "results";
+  grid-template-columns: minmax(0, 1fr);
+}
+@media (min-width: 64rem) {
+  .live-grid {
+    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-areas:
+      "stream  predict"
+      "state   thoughts"
+      "state   results";
+  }
 }
 
 /* Wanted stars */

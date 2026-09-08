@@ -182,7 +182,7 @@ def test_the_anti_loop_discipline_is_in_both_prefixes() -> None:
 
 def test_the_catalog_states_what_he_cannot_do() -> None:
     """Three adversarial critics found five knowledge domains building policy on abilities
-    the agent does not have (Caps Lock specials, aimed fire, weapon select). Knowledge was fixed;
+    he does not have (Caps Lock specials, aimed fire, weapon select). Knowledge was fixed;
     the prompt has to say it too, or he narrates actions the viewer can see did not happen."""
     from wasted_harness.brain.prompts import director_static_prefix, tactical_static_prefix
 
@@ -201,7 +201,7 @@ def test_the_police_rule_is_scoped_to_free_roam_not_absolute() -> None:
     Paleto Score, The Bureau Raid, ...) whose objective IS surviving a police assault. Stated
     with no rule at all, he farms stars in free roam and the stream dies. It has to be scoped.
 
-    Since 2026-09-04 the scope has a second, named
+    Since 2026-09-04 (operator: "so he can shoot cops as well") the scope has a second, named
     exception: the roam engine's `shoot_a_cop` goal. The prompt must name it, keep the
     free-roam default intact, and keep the two exceptions to exactly two — a prompt that
     contradicts `roam.py` is worse than either."""
@@ -223,3 +223,108 @@ def test_area_combat_warns_about_who_is_inside_the_radius() -> None:
     assert "You cannot choose who this hits" in p
     assert "this is the wrong action, and there is no right one" in p
 
+
+
+# --- the character's own name ---------------------------------------------------
+
+#: The one string the feed may never carry: a name for the character that is not
+#: his. It is curated in `commentary_style.md`'s "## Banned phrases" section, so
+#: the text the model is shown and the list the validator enforces are the same
+#: list — see `brain.prompts.banned_phrases`.
+FOREIGN_NAME = "the agent"
+
+
+def test_the_persona_names_the_character() -> None:
+    """The opening line of the persona is where the name is established; every
+    other tier inherits it from there."""
+    assert "You are WANTED." in _prompt_text("persona.md")
+    assert "You are still WANTED" in _prompt_text("director.md")
+
+
+def test_a_foreign_name_is_on_the_hard_filter_the_validator_actually_reads() -> None:
+    """Not a second copy of the list: `banned_phrases()` parses the same section
+    of `commentary_style.md` that the model is shown, and `main._think` hands
+    exactly that tuple to the validator."""
+    from wasted_harness.brain.prompts import banned_phrases
+
+    assert FOREIGN_NAME in banned_phrases()
+
+
+def test_the_validator_rejects_a_line_that_calls_him_by_a_foreign_name() -> None:
+    """End to end through the real loader and the real validator.
+
+    This is the shape that reached the public feed: a perfectly ordinary line
+    with the wrong name tacked on the end. The validator has to catch it on the
+    `say` field, which is what buys the caller its one regenerate; if that also
+    fails, `sanitize_decision` drops the LINE and keeps the action.
+    """
+    from wasted_harness.brain.prompts import banned_phrases
+    from wasted_harness.brain.schemas import (
+        ActionModel,
+        DecisionModel,
+        DecisionValidationContext,
+        sanitize_decision,
+        validate_decision_content,
+    )
+
+    decision = DecisionModel(
+        thought="Car on the marker, engine running, nobody in it. Take it and go.",
+        say="There's a Buffalo S sitting right on the marker. Focus, the agent.",
+        mood="chill",
+        action=ActionModel(type="flee_police", params={}),
+        goal="take the car on the marker",
+        confidence=0.6,
+    )
+    violation = validate_decision_content(
+        decision, DecisionValidationContext(banned_phrases=banned_phrases())
+    )
+    assert violation
+    assert violation.say_reason is not None
+    assert "banned phrase" in violation.say_reason
+    assert sanitize_decision(decision, violation).say == ""
+    # The action survives the drop — a silent tick is recoverable, a wrong one is not.
+    assert sanitize_decision(decision, violation).action.type == "flee_police"
+
+
+def test_it_is_caught_in_thought_too_not_only_out_loud() -> None:
+    from wasted_harness.brain.prompts import banned_phrases
+    from wasted_harness.brain.schemas import (
+        ActionModel,
+        DecisionModel,
+        DecisionValidationContext,
+        validate_decision_content,
+    )
+
+    decision = DecisionModel(
+        thought="the agent needs a faster car before the freeway, this one will not hold up.",
+        say="This thing tops out at disappointing.",
+        mood="bored",
+        action=ActionModel(type="flee_police", params={}),
+        goal="find something quicker",
+        confidence=0.5,
+    )
+    violation = validate_decision_content(
+        decision, DecisionValidationContext(banned_phrases=banned_phrases())
+    )
+    assert violation.say_reason is not None
+    assert "banned phrase" in violation.say_reason
+
+
+def test_no_prompt_file_puts_that_name_in_front_of_the_model_as_his() -> None:
+    """The hygiene invariant: the string exists in the corpus in exactly one
+    place — the hard-filter list, where its whole job is to be rejected."""
+    root = resources.files("wasted_harness.brain.prompts")
+    checked = 0
+    for entry in root.iterdir():
+        if not entry.name.endswith(".md"):
+            continue
+        checked += 1
+        text = entry.read_text(encoding="utf-8").lower()
+        if entry.name == "commentary_style.md":
+            before, marker, after = text.partition("## banned phrases")
+            assert marker, "the hard-filter section has been renamed or removed"
+            assert FOREIGN_NAME not in before
+            assert f'- "{FOREIGN_NAME}"' in after
+        else:
+            assert FOREIGN_NAME not in text, f"{entry.name} names him wrong"
+    assert checked >= 10, f"only {checked} prompt files scanned; the corpus is bigger"

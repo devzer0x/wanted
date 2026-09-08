@@ -48,3 +48,9 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# transient output of scripts/verify-siwe.mjs
+.siwe-verify-*
+
+# local full-loop verification build
+.next-loop/

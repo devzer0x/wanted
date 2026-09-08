@@ -1,7 +1,219 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-03.
+run log, or URL) noted next to it. Last updated: 2026-09-08.
+
+## 2026-09-08 — WANTED prediction layer (public product name: WANTED; $WANTED / TTWO)
+
+A prediction layer was built on top of the existing agent, which is unchanged: `bridge/` and the
+harness's perception/brain/behaviour stack were not modified. Viewers predict what the agent will
+do next; predictions settle from the same telemetry the agent already writes.
+
+**Verified — real Postgres 16, real recorded gameplay.** `infra/verify-predictions.sh` boots a
+throwaway `postgres:16-alpine`, applies all five migrations, replays **5,649 events captured from
+the real session `2c135a5f`** (`harness/tests/fixtures/real_session_2026-09-04.json`, pulled from
+the production project, provenance stamped) and asserts settlement against outcomes that actually
+happened:
+
+- `survives_window` over `06:20:00Z–06:23:00Z` (a genuinely death-free stretch) → `yes`.
+- `survives_window` over `08:41:00Z–08:45:00Z` → `no`, citing the **real death at
+  `2026-09-04T08:42:33.680272Z`**; the assertion checks that timestamp is one of the two deaths the
+  recording actually contains.
+- `wanted_clears` over `01:03:00Z–01:06:00Z` → `yes`, citing the real `wanted_change {from:2,to:0}`
+  at `01:04:37.719774Z` (event id 23).
+- Rewards: pool 10 ÷ 2 correct = `5.000000000000000000` each; a lone correct wallet takes `10`.
+- **Idempotency:** `settle_due_predictions()` run three times → 5 ledger rows, unchanged, and
+  `max(rows per (prediction, wallet)) = 1`.
+- **Lock:** `enter_prediction` returns false after `locks_at`, decided by Postgres `now()`. Proven
+  on a live-window prediction: first entry `t`, duplicate `f`, unknown outcome key `f`, and `f`
+  again once the lock is moved into the past.
+- **Voids:** `no_entries` and `unknown_rule_kind` (the latter with a real entry present, so the
+  rule dispatch is genuinely reached rather than short-circuited).
+- **Claims:** atomic via `create_reward_claim`; a second in-flight claim hits
+  `reward_claims_one_inflight_per_wallet` (**23505**) — the actual double-spend guard; below-minimum
+  → `P0003`; a failed claim returns its credits to the claimable pool; a confirmed claim cannot be
+  reopened.
+- **RLS as `anon`:** `predictions` and `prediction_distribution` readable; `permission denied` on
+  `reward_ledger`, `reward_claims`, `wallet_sessions`, and on `enter_prediction`,
+  `create_reward_claim`, `settle_due_predictions`.
+
+**Verified — the whole loop, end to end, over real HTTP.** `web/scripts/verify-full-loop.mjs`
+(`npm run verify:loop`) drives the operator's §37 acceptance list, steps 3-18, against a full local
+stack: real Postgres 16 with the real migrations, real PostgREST enforcing real RLS over HTTP, the
+real Next.js production build, the real route handlers, real secp256k1 keypairs, and the real
+recorded gameplay. **50 assertions, 0 failures.** It proves, in one run:
+
+- a prediction is created from a live session and served by `/api/predictions/live`;
+- a wallet signs in with a real signature over the server's own message, and a replayed nonce is
+  refused;
+- two wallets enter opposite outcomes; a duplicate entry is a 409; an unauthenticated entry is a
+  401; `entry_count` reflects only the real entries;
+- once `locks_at` passes, no entry is possible;
+- the cron tick refuses an unauthenticated caller, then locks and settles;
+- settlement lands on `no` and cites the **real recorded death at 2026-09-04T08:42:33.680272Z**;
+- the correct wallet gets exactly one ledger credit of the whole 10 TTWO pool, the incorrect wallet
+  gets none, and re-running settlement does not double-credit;
+- claimable balance reads `10000000000000000000` base units as TTWO, and requires authentication;
+- **the claim runs all the way to a real broadcast attempt against Robinhood Chain**, fails on gas
+  with the chain's own error, is recorded `failed`, and **returns the credit to claimable** — a
+  failed transfer never burns a reward;
+- the leaderboard shows 1/1 and 0/1 with correct streaks;
+- a new prediction appears, and the recent-results window behaves correctly at both ends.
+
+**Six bugs were found by that run and fixed.** Every one was invisible to unit tests, because every
+one lived in a seam between two individually-correct halves:
+
+1. **Nobody could have signed in.** `/nonce` signed `Issued At: …595Z`; `/verify` rebuilt the message
+   from what Postgres returned, `…595+00:00`. Same instant, different bytes, so every signature
+   recovered a different address. `buildSiweMessage()` now canonicalises its inputs, which is the one
+   place both halves share.
+2. **`/api/predictions/live` was dead.** `prediction_distribution` was granted to `anon` and
+   `authenticated` but not to `service_role` — the role the server actually uses. An `anon` smoke
+   test passed while the real route returned "permission denied for view". A full grant audit across
+   every new object confirmed this was the only omission.
+3. **Rewards were permanently unclaimable.** Wallets were stored EIP-55 checksummed but
+   `create_reward_claim` looked up `lower(wallet)`, so it matched nothing and raised "nothing to
+   claim" for every wallet forever. Storage is now lower-cased and enforced by CHECK constraints on
+   every wallet column, so it cannot drift back.
+
+4. **The reward pool rendered as zero.** `/api/predictions/live` passed `reward_pool` straight
+   through from the database's whole-unit `numeric`, while the contract and the UI treat it as base
+   units — so a real 12 TTWO pool displayed as "Pool: 0 TTWO" on the live card, in front of viewers
+   deciding whether an answer was worth giving.
+5. **The leaderboard's `earned` was a lossy number.** It came back as a JSON number in whole units
+   rather than a base-unit string. A JS number cannot hold 1e18, so a large earner would have been
+   shown a rounded total on a public ranking.
+6. **The site would have claimed OFF AIR while the agent was playing.** `session_live` required
+   `age >= 0` against `stats.heartbeat_at`, so a heartbeat stamped even milliseconds in the reader's
+   future read as offline. The harness writes that timestamp on the game server and the check runs
+   elsewhere, so a second of NTP drift is routine — reproduced here with a container clock only
+   0.14 s ahead of the host. It now tolerates two minutes of forward skew and still refuses a
+   heartbeat far enough ahead to mean a broken clock.
+
+**A config audit found three more traps, all now closed.** Comparing every `process.env` read in
+the code against `.env.example`:
+
+- **A treasury cap that silently did nothing.** `REWARDS_DAILY_CAP`, `REWARDS_MAX_PER_PREDICTION`
+  and `REWARDS_MAX_PER_WALLET_DAY` were parsed from the environment into `REWARD_LIMITS`, and
+  nothing read them — settlement enforces those caps from `site_config`, because it is a Postgres
+  function and cannot see the deployment's environment. An operator who set a daily spending cap
+  would have been told nothing and capped nothing. The dead half is deleted; there is now exactly
+  one place to set each rail, and CONTRACTS-PREDICTIONS §6 says which and why.
+- **RPC and explorer overrides that could not take effect.** The code read
+  `NEXT_PUBLIC_CHAIN_RPC_URL` / `NEXT_PUBLIC_CHAIN_EXPLORER_URL` while the brief and
+  `.env.example` documented `NEXT_PUBLIC_RPC_URL` / `NEXT_PUBLIC_EXPLORER_URL`. Pointing a deploy at
+  a paid RPC or at testnet would have quietly kept using the default mainnet endpoint. Both
+  spellings are now accepted.
+- **A latent client/server split.** `NEXT_PUBLIC_TTWO_TOKEN` and `NEXT_PUBLIC_WANTED_TOKEN` were
+  read through a dynamic `process.env[name]` lookup, which Next.js does not inline into the browser
+  bundle. Nothing calls those from a client component today, so nothing was broken — but the first
+  one that did would have found a reward asset that exists on the server and vanishes in the
+  browser. Now read by static member access.
+- `SUPABASE_URL` — required by every API route that touches the prediction schema — was missing
+  from `.env.example` entirely.
+
+**Two consistency bugs in what the page shows.** `/api/predictions/live` used a 90 s heartbeat
+window while the page banner used the contract's 60 s, so between those two figures a viewer would
+have seen "the agent is not on the air" directly above a live prediction card; both now share one
+exported constant. And the leaderboard rendered `0.0%` beside `100%` in the same column.
+
+Also hardened: `siweOrigin()` now refuses to sign a loopback domain in a production build, because
+the domain in that message is what a user reads in their wallet before approving.
+
+**Verified — live chain.** Robinhood Chain mainnet is real and reachable: `eth_chainId` → `0x1237`
+(4663). TTWO at `0x5e81213613b6B86EaB4c6c50d718d34359459786` reads back `symbol()` = `TTWO`,
+`decimals()` = 18; a real holder balance reads 2591.75 TTWO; `paused()` = false; and a `transfer()`
+to a never-funded address simulates `true`, so arbitrary recipient wallets are permitted at the
+contract level. SIWE round-trip verified, including three negative cases (tampered nonce, wrong
+expected address, signature from the wrong key).
+
+**Two integration bugs were found and fixed during assembly, both silent-money-loss class:**
+1. The API read the ledger's `numeric(38,18)` amounts as base units while settlement writes whole
+   token units — a 10^18 undercount on every payout, and an outright throw on any fractional
+   reward. The unit convention is now stated in CONTRACTS-PREDICTIONS §1 and the conversion is a
+   decimal shift by the asset's `decimals`.
+2. Claim creation was two PostgREST statements, which cannot be one transaction; a crash between
+   them stranded a `pending` claim owning no ledger rows. It is now a single SQL function that
+   also sums the amount itself under a row lock.
+
+**The harness prediction wiring was reviewed adversarially, and four defects were found by
+RUNNING it — one of which would have stopped the show.** All four are fixed, each with a
+regression test that was checked for vacuity by reverting the fix and confirming the test fails:
+
+1. **BLOCKER — every prediction the harness opened would have been rejected forever.**
+   `predictions.reward_pool` is `numeric(38,18) NOT NULL CHECK (> 0)` and `reward_asset` is
+   `NOT NULL`, both with no default and nothing backfilling them; the generator emitted neither.
+   A rejected insert is not dropped — `events.py` requeues it and re-POSTs the whole growing
+   backlog on the game-loop thread every 2 s, so the 2–4 Hz loop degrades until the agent stops
+   playing, and the queue eventually evicts real event history. The layer's own integration test
+   passed because it read the row back out of the in-process buffer, which does not know what the
+   schema requires. Now the generator funds the pool (exact `Decimal`, whole token units, with the
+   §13 event multiplier applied where the pool is funded), and the row is proven to INSERT against
+   the real schema.
+2. **The layer shipped ON by default**, against a project whose prediction tables do not exist.
+   Now opt-in per deployment (`WASTED_PREDICTIONS_ENABLED`, default false).
+3. **Predictions were opened from a frozen screen snapshot.** `_offer_prediction` had no
+   `_believe_state()` gate, though `_heartbeat` on the very next line does — measured at 24 of 25
+   offers during a blocking-screen freeze, one of which wrote a `state_context` read off a snapshot
+   frozen hundreds of ticks earlier. Because a frozen game emits no events, §3's completeness gate
+   never opens for that window, so the question voids: the audience is shown a question built from
+   data this process has already decided is a lie, answers it, and gets nothing back.
+4. **No back-off on persistent write failure.** A circuit breaker now stops generation after five
+   consecutive failures and says so once, rather than every tick.
+
+**One more brand leak, caught by that same insert.** The catalogue's seven question strings still
+named the agent by its old character name — text that renders on the live prediction card. Renamed.
+The knowledge base still refers to the character that way in ~800 places, but that is model INPUT
+and it is contained by a gate on model OUTPUT: the old name is in the validator's hard-banned list,
+and a line containing it is rejected in `say` or `thought`, in any casing. Proven, and covered by a
+regression test — it is not hypothetical, because the production `decisions` table already contains
+two lines where the agent addressed itself by that name, and those render on the public site.
+
+**NOT verified, and cannot be from here:**
+- **The agent was not playing.** Last heartbeat `2026-09-07T15:54:57Z`, ~25 h stale at time of
+  writing; the session had ended. Steps 1–2 of the end-to-end flow (agent live → telemetry
+  produces an eligible event) are unproven, and prediction *generation* has therefore only been
+  exercised against the recording, never against live state.
+- **No on-chain claim has ever been executed.** There is no treasury wallet, no funding and no
+  signing key. `sendReward` is gated behind `isTreasuryConfigured()` and returns an honest
+  "not configured" error today.
+- **`$WANTED` does not exist.** No contract, no address. Every surface depending on it is hidden
+  rather than zero-filled.
+- **Migrations are not applied to the cloud Supabase project.** Confirmed against the live project:
+  `GET /rest/v1/predictions` → `PGRST205`. Every route touching new schema fails honestly with the
+  real PostgREST error rather than a fabricated 200.
+
+**Base rates measured from the recording, which changed the product.** The recording covers
+**86.93 h of continuous play** — the largest gap between consecutive events anywhere in it is 7.8
+minutes, so there is no dead air to correct for. Sampling every 30 s across it (n = 10,426
+windows), unconditional questions are nearly all giveaways:
+
+| question (asked ambiently) | YES |
+|---|---|
+| survives 3 min (no death, no arrest) | **99.1%** |
+| dies or is arrested in 3 min | 0.9% |
+| gains a wanted star in 2 min | 1.1% |
+| reaches 3+ stars in 3 min | **0.0%** — it never happened once in 86.93 h |
+
+Triggering the same questions on a real wanted-star gain is what makes them worth asking (n = 39
+real gains):
+
+| question (triggered on a wanted-star gain) | YES |
+|---|---|
+| clears the cops within 90 s | **53.8%** |
+| survives the chase, 150 s | **48.7%** |
+| dies within 240 s | **43.6%** |
+
+So the trigger and the window are both load-bearing, and neither could be guessed. The catalogue
+ships 7 templates calibrated against these numbers and rejects `wanted_reaches_3` and `wanted_gain`
+outright, recording the measured reason in `REJECTED_TEMPLATES` — the same pattern
+`events.py::UNPRODUCED_EVENT_REASONS` uses for telemetry that does not exist. The calibration test
+re-derives every number from the fixture on each run rather than trusting a comment.
+
+*(An earlier draft of this entry said "~6.5 h of true playing time" and quoted 97.9% / 2.1%. That
+was wrong: the 6.5 h came from a block analysis of mine that discarded blocks under 50 events and
+then misread the surviving boundaries as dead air. The figures above are the correct ones, computed
+twice by different methods that now agree.)*
 
 ## 2026-09-03 — "make the agent fun to watch" program (stream PAUSED, brain key DISABLED)
 

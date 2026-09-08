@@ -377,11 +377,36 @@ def test_a_stalled_bridge_does_not_stop_the_client_from_recovering(replay_server
         client.close()
 
 
-def test_samples_directory_is_not_copied_into_the_harness() -> None:
-    """CLAUDE.md rule 1: harness/tests/fixtures/ is for real session recordings."""
+def test_every_fixture_is_a_real_recording() -> None:
+    """CLAUDE.md rule 1: harness/tests/fixtures/ is for real session recordings.
+
+    This used to assert the directory was EMPTY, which was a proxy for the real rule at a time
+    when no recording existed yet. Emptiness is the wrong thing to enforce now that real
+    recordings live here: it would fail on exactly the fixtures rule 1 permits, while still
+    passing the moment someone dropped in a hand-written file under a different extension.
+
+    So it checks the rule itself. Every fixture must carry provenance saying which real session
+    it came from and how it was captured, and no bridge contract-sample may be copied in under
+    any name — those describe a shape, not a session, and a shape sample masquerading as a
+    recording is precisely the invented data rule 1 exists to keep out.
+    """
     fixtures = Path(__file__).resolve().parent / "fixtures"
-    strays = sorted(p.name for p in fixtures.glob("*.json"))
-    assert not strays, f"bridge shape samples must not be copied here: {strays}"
+
+    sample_dir = Path(__file__).resolve().parents[2] / "bridge" / "contract-samples"
+    sample_names = {p.name for p in sample_dir.glob("*.json")} if sample_dir.is_dir() else set()
+
+    for path in sorted(fixtures.glob("*.json")):
+        assert path.name not in sample_names, (
+            f"{path.name} is a bridge contract sample copied into the harness fixtures"
+        )
+        payload = json.loads(path.read_text())
+        provenance = payload.get("_provenance") if isinstance(payload, dict) else None
+        assert isinstance(provenance, dict), (
+            f"{path.name} has no _provenance block — a fixture must say which real session it "
+            f"is a recording of (CLAUDE.md rule 1)"
+        )
+        for field in ("session_id", "source", "captured_at"):
+            assert provenance.get(field), f"{path.name}: _provenance.{field} is missing or empty"
 
 
 def test_the_contract_port_is_the_one_the_client_defaults_to() -> None:

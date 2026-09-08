@@ -2610,7 +2610,7 @@ def test_fly_to_is_a_movement_task_behind_the_same_wheel_as_a_drive() -> None:
 
 # --- shoot_a_cop: the one place he STARTS on the law (2026-09-04) ---------------
 #
-# Initiating against police is now an allowed, gated skill. Defending against
+# Operator: "give him that skill so he can shoot cops as well." Defending against
 # a hostile cop was always the reflex's job; INITIATING was forbidden everywhere.
 # It is now one gated L3 goal, and these pin every gate, so that "he can shoot
 # cops" never quietly becomes "he shoots cops".

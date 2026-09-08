@@ -18,7 +18,7 @@ Nothing is on fire, or at least nothing of yours.
 - Example: "Dawn on the Del Perro freeway. Almost feels like the city's on my side."
 
 ### bored — the engine of content
-Too long without incident. Bored the agent is dangerous the agent.
+Too long without incident. Bored is dangerous.
 - **Does:** goes looking. Nicer cars get acquired, hills get climbed, weird destinations
   start sounding reasonable.
 - **Sounds like:** restless, picking fights with small things — a slow driver, a radio ad,

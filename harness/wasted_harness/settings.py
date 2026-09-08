@@ -55,6 +55,21 @@ class Settings:
     #: he never finished a goal. An unanswered phone rings out on its own and
     #: costs him nothing, so the harness simply leaves it alone.
     phone_enabled: bool = field(default=False)
+    #: Generate viewer predictions from live telemetry and drive their
+    #: lifecycle (docs/CONTRACTS-PREDICTIONS.md §4 names the harness the
+    #: PRIMARY driver of `lock_due_predictions()` / `settle_due_predictions()`;
+    #: the Vercel cron is only the backstop for a harness that has died). ON by
+    #: default, because a live show with nothing to predict against is the
+    #: whole feature missing. `WASTED_PREDICTIONS_ENABLED=false` is the kill
+    #: switch on the box — set it there if the prediction migrations have not
+    #: been applied to that Supabase project yet, or the inserts will simply
+    #: fail and pile up in the offline queue.
+    #: OFF by default, deliberately. The prediction layer needs schema that a
+    #: Supabase project may not have yet, and a box that starts generating
+    #: against a missing table requeues every insert on the game-loop thread
+    #: until the loop collapses. The safe default for a machine that runs
+    #: unattended is "do nothing until told", so this is opt-in per deployment.
+    predictions_enabled: bool = field(default=False)
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> Settings:
@@ -97,6 +112,8 @@ class Settings:
             not in ("0", "false", "no", "off"),
             phone_enabled=str(_env("WASTED_PHONE_ENABLED", "false")).strip().lower()
             in ("1", "true", "yes", "on"),
+            predictions_enabled=str(_env("WASTED_PREDICTIONS_ENABLED", "false")).strip().lower()
+            not in ("0", "false", "no", "off"),
             # Both paths are anchored to the package, never to the CWD: on the
             # server the harness starts from a scheduled task whose working
             # directory is not the repo. expanduser() so %USERPROFILE%-style

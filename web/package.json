@@ -9,14 +9,18 @@
     "lint": "eslint",
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
-    "test:e2e:offline": "PLAYWRIGHT_OFFLINE=1 playwright test"
+    "test:e2e:offline": "PLAYWRIGHT_OFFLINE=1 playwright test",
+    "verify:siwe": "node scripts/verify-siwe.mjs",
+    "verify:treasury": "node scripts/verify-treasury.mjs",
+    "verify:loop": "node scripts/verify-full-loop.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.0",
     "@supabase/supabase-js": "^2.109.0",
     "next": "15.5.23",
     "react": "19.1.0",
-    "react-dom": "19.1.0"
+    "react-dom": "19.1.0",
+    "viem": "^2.56.3"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3",

@@ -2,11 +2,15 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { StreamEmbed } from "@/components/StreamEmbed";
-import { Born } from "@/components/live/Born";
+import { GameState } from "@/components/live/GameState";
 import { Feed } from "@/components/live/Feed";
-import { GoalCard } from "@/components/live/GoalCard";
-import { Hud } from "@/components/live/Hud";
 import { OfflineBanner } from "@/components/live/OfflineBanner";
+import { LivePredictionCard } from "@/components/predict/LivePredictionCard";
+import { MobilePredictBar } from "@/components/predict/MobilePredictBar";
+import { NoLivePrediction } from "@/components/predict/NoLivePrediction";
+import { pickPrimary } from "@/components/predict/primary";
+import { RecentResults } from "@/components/predict/RecentResults";
+import { usePredictions } from "@/components/predict/usePredictions";
 import { DECISION_COLUMNS, EVENT_COLUMNS, STATS_COLUMNS } from "@/lib/columns";
 import { buildFeed, mergeRows } from "@/lib/feed";
 import { isAgentOffline } from "@/lib/offline";
@@ -184,7 +188,7 @@ export function LiveDashboard({
     const supabase = getBrowserSupabase();
     if (!supabase) return;
     const channel = supabase
-      .channel("wasted-live")
+      .channel("wanted-live")
       .on(
         "postgres_changes",
         { event: "INSERT", schema: "public", table: "decisions" },
@@ -264,28 +268,83 @@ export function LiveDashboard({
   const hud = useMemo(() => parseHud(stats?.hud ?? null), [stats]);
   const offline = isAgentOffline(stats, nowMs);
 
-  // Layout: the feed is the star. On mobile it sits directly under the stream and counters and
-  // above the secondary panels; on lg it becomes a sticky right-hand column that stays in view
-  // while the rest scrolls. The lg placement is explicit (col-start/row-start), so the `order-*`
-  // classes only take effect in the single-column stack.
+  const { fetched: predictionsFetched, refresh: refreshPredictions } = usePredictions();
+  const primary =
+    predictionsFetched.state === "ready" ? pickPrimary(predictionsFetched.data.live) : undefined;
+  const resolvedList = predictionsFetched.state === "ready" ? predictionsFetched.data.resolved : [];
+  const distributions = predictionsFetched.state === "ready" ? predictionsFetched.data.distributions : {};
+  const mine = predictionsFetched.state === "ready" ? predictionsFetched.data.mine : {};
+  const sessionLive = predictionsFetched.state === "ready" ? predictionsFetched.data.session_live : !offline;
+
+  // Layout order matches the product brief exactly on mobile: STREAM → LIVE PREDICTION →
+  // GAME STATE → THOUGHTS → RECENT RESULTS. `.live-grid` (globals.css) names five grid areas and
+  // reassigns them to a 2-column layout at `lg`; every panel below is mounted in exactly ONE
+  // place in the tree — none is duplicated behind a `hidden`/`lg:hidden` pair. That matters
+  // beyond markup size: `Feed` and `GameState` hold their own state (scroll-pause, the born-age
+  // clock) and — for `Feed`, once realtime lands here — would open a second Supabase
+  // subscription per viewer if mounted twice, and a duplicated `aria-label` leaves a screen
+  // reader announcing two identical regions with no way to tell which is real.
   return (
-    <div className="flex flex-col gap-3 pt-3">
+    <div className="flex flex-col gap-3 pb-20 lg:pb-3">
       <OfflineBanner stats={stats} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />
-      <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
-        <div className="order-1 min-w-0 lg:col-start-1 lg:row-start-1">
+
+      <div className="live-grid gap-3">
+        <div className="[grid-area:stream] min-w-0">
           <StreamEmbed config={stream} offline={offline} />
         </div>
-        <div className="order-2 min-w-0 lg:col-start-1 lg:row-start-2">
-          <Born bornAt={bornAt} />
+
+        <div className="[grid-area:predict] min-w-0 lg:h-full" data-testid="live-prediction-slot">
+          {predictionsFetched.state === "loading" ? (
+            <div className="panel skeleton-pulse h-40 lg:h-full" aria-hidden="true" />
+          ) : predictionsFetched.state === "error" ? (
+            <section
+              className="panel flex flex-col items-center justify-center px-4 py-8 text-center lg:h-full"
+              aria-label="Live prediction"
+            >
+              <p className="wordmark text-xl text-ember" data-text="DATA LINK DOWN">
+                DATA LINK DOWN
+              </p>
+              <p className="mt-2 text-xs text-smoke">{predictionsFetched.message}</p>
+            </section>
+          ) : primary ? (
+            <LivePredictionCard
+              prediction={primary}
+              distribution={distributions[primary.id]}
+              mine={mine[primary.id]}
+              onEntered={refreshPredictions}
+            />
+          ) : (
+            <NoLivePrediction sessionLive={sessionLive} />
+          )}
         </div>
-        <div className="order-3 min-w-0 lg:sticky lg:top-16 lg:col-start-2 lg:row-start-1 lg:row-span-3 lg:self-start">
+
+        <div className="[grid-area:state] min-w-0">
+          <GameState stats={stats} hud={hud} offline={offline} bornAt={bornAt} />
+        </div>
+
+        <div className="[grid-area:thoughts] min-w-0">
           <Feed items={feedItems} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />
         </div>
-        <div className="order-4 grid min-w-0 items-start gap-3 sm:grid-cols-2 lg:col-start-1 lg:row-start-3">
-          <Hud hud={hud} />
-          <GoalCard stats={stats} />
-        </div>
+
+        {resolvedList.length > 0 && (
+          <div className="[grid-area:results] min-w-0">
+            <RecentResults
+              predictions={resolvedList}
+              distributions={distributions}
+              mine={mine}
+              nowMs={nowMs}
+              mounted={mounted}
+            />
+          </div>
+        )}
       </div>
+
+      <MobilePredictBar
+        prediction={primary}
+        distribution={primary ? distributions[primary.id] : undefined}
+        mine={primary ? mine[primary.id] : undefined}
+        onEntered={refreshPredictions}
+      />
     </div>
   );
 }

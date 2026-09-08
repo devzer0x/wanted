@@ -176,13 +176,13 @@ export function Feed({
   // should not paint a screen of empty panel, and a busy feed should not push the page down.
   return (
     <section className="panel flex flex-col" aria-label="Live commentary feed">
-      <div className="flex flex-none items-center justify-between gap-2 border-b border-ash px-3 py-2">
-        <h2 className="panel-title">Transmissions</h2>
+      <div className="flex flex-none flex-wrap items-center justify-between gap-x-2 gap-y-0.5 border-b border-ash px-3 py-2">
+        <h2 className="panel-title shrink-0 whitespace-nowrap">Agent thoughts</h2>
         {/* "AI-generated" is a standing disclosure (CLAUDE.md §7), not a slot to reuse for
             transient status — least of all while a reader has scrolled back to dwell on the
             commentary. The pause note is appended to it, never swapped in for it. */}
         <span
-          className="ticker shrink-0 text-[0.55rem] text-smoke"
+          className="ticker text-right text-[0.55rem] text-smoke"
           data-testid="feed-status"
           data-paused={paused ? "true" : "false"}
         >
@@ -203,7 +203,7 @@ export function Feed({
           ref={scrollRef}
           onScroll={onScroll}
           data-testid="feed-scroll"
-          className="max-h-[60svh] overflow-y-auto overscroll-contain lg:max-h-[calc(100svh-8rem)]"
+          className="max-h-[60svh] overflow-y-auto overscroll-contain lg:max-h-[24rem]"
         >
           {shown.length === 0 ? (
             <div

@@ -84,3 +84,42 @@ export function formatBornAge(iso: string, nowMs: number): string {
   return `${d}, ${h}`;
 }
 
+/**
+ * Renders a base-unit integer string (CONTRACTS-PREDICTIONS §1: amounts are always
+ * `numeric(38,18)` in the database and `bigint` base units in code) as a display amount.
+ *
+ * String math only — a reward routed through `Number` loses precision above 2^53 and a reward
+ * that rounds is a reward that lies. `decimals` defaults to 18, the DB-wide convention (not an
+ * asset-specific constant: every `numeric(38,18)` column uses it, whatever `reward_asset` says).
+ */
+export function formatBaseUnits(
+  value: string | null | undefined,
+  decimals = 18,
+  maxFractionDigits = 4
+): string {
+  if (value === null || value === undefined || !/^-?\d+$/.test(value)) return "—";
+  const negative = value.startsWith("-");
+  const digits = negative ? value.slice(1) : value;
+  const padded = digits.padStart(decimals + 1, "0");
+  const whole = padded.slice(0, padded.length - decimals).replace(/^0+(?=\d)/, "");
+  const fracFull = padded.slice(padded.length - decimals);
+  const frac = fracFull.slice(0, maxFractionDigits).replace(/0+$/, "");
+  const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
+  return `${negative ? "-" : ""}${groupedWhole}${frac ? `.${frac}` : ""}`;
+}
+
+/** True when a base-unit string is present and non-zero — the "is there really a pool/balance
+ *  here" check used to decide whether to show an amount or an honest "not funded" state. */
+export function hasBaseUnits(value: string | null | undefined): boolean {
+  return typeof value === "string" && /^-?\d+$/.test(value) && BigInt(value) !== BigInt(0);
+}
+
+/** "4:32" under an hour, "1:04:32" at or past one hour. Counts down to zero, never negative. */
+export function formatCountdown(msRemaining: number): string {
+  const s = Math.max(0, Math.round(msRemaining / 1000));
+  const hh = Math.floor(s / 3600);
+  const mm = Math.floor((s % 3600) / 60);
+  const ss = s % 60;
+  return hh > 0 ? `${hh}:${pad(mm)}:${pad(ss)}` : `${mm}:${pad(ss)}`;
+}
+

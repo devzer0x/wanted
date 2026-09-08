@@ -1,6 +1,6 @@
 """Who is actually on screen — the story characters, keyed by the game's own ped models.
 
-WHY THIS FILE EXISTS — observed live 2026-09-02, with screenshots. The agent spent a
+WHY THIS FILE EXISTS — observed live 2026-09-02, with screenshots. WANTED spent a
 whole mission talking about people who were not there:
 
     "survive the ambush, keep Dave alive"
@@ -15,7 +15,7 @@ walkthrough card (fixed in `mission_knowledge.identify_mission_with_source`).
 That root cause is fixed, but the failure mode it exposed is worth closing for
 good: nothing checked whether a name the model used corresponded to anybody in
 the world. On a live stream, confidently naming an absent character is the most
-damaging thing the agent can do - it reads as the show being fake.
+damaging thing WANTED can do - it reads as the show being fake.
 
 WHAT THIS IS, AND WHAT IT IS DELIBERATELY NOT:
 
@@ -107,7 +107,7 @@ def name_for_model(model: str | None) -> str | None:
 
 
 def present_names(state: Any) -> set[str]:
-    """Every story character the agent can legitimately talk about right now:
+    """Every story character WANTED can legitimately talk about right now:
     whoever is in `nearby.peds` this tick, whoever `mission.entity_blips[]`
     names (v1.11), plus whoever he currently IS.
 

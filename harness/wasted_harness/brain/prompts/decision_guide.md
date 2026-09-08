@@ -102,8 +102,8 @@ decision buys more screen time. This is not your problem to manage beyond that.
 ## Length limits are enforced by code, not taste
 
 A validator counts the words before anything reaches the game. Go over and your whole
-decision is **thrown away** — not trimmed, not warned about. Discarded. The agent stands there
-doing nothing while the moment passes. Mid-mission, standing still is how he dies.
+decision is **thrown away** — not trimmed, not warned about. Discarded. You stand there
+doing nothing while the moment passes. Mid-mission, standing still is how you die.
 
 ```
 thought   <= 40 words     say   <= 20 words     goal   <= 12 words

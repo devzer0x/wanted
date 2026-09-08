@@ -3,6 +3,7 @@ import { Archivo, Archivo_Black, IBM_Plex_Mono } from "next/font/google";
 import "./globals.css";
 import { SiteNav } from "@/components/SiteNav";
 import { SiteFooter } from "@/components/SiteFooter";
+import { WalletProvider } from "@/components/wallet/WalletProvider";
 import { getSiteUrl } from "@/lib/env";
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, TITLE_TEMPLATE } from "@/lib/metadata";
 
@@ -77,11 +78,13 @@ export default function RootLayout({
         >
           Skip to content
         </a>
-        <SiteNav />
-        <main id="content" className="flex-1 w-full max-w-6xl mx-auto px-3 sm:px-5 pb-16">
-          {children}
-        </main>
-        <SiteFooter />
+        <WalletProvider>
+          <SiteNav />
+          <main id="content" className="flex-1 w-full max-w-6xl mx-auto px-3 sm:px-5 pb-16">
+            {children}
+          </main>
+          <SiteFooter />
+        </WalletProvider>
       </body>
     </html>
   );

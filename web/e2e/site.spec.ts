@@ -11,16 +11,18 @@ import { expect, test, type Page } from "@playwright/test";
 // design, which is the signal that a redeploy is due. To health-check a deployment on its own
 // terms, run with --grep-invert @current-build.
 
-const ROUTES = ["/", "/missions", "/clips", "/agent"];
+const ROUTES = ["/", "/predict", "/leaderboard", "/agent", "/missions", "/clips"];
 const CONTRACT_MOODS = ["chill", "bored", "hyped", "scared", "smug"];
 
 // Expected <title> === expected og:title for every route: they are produced from one string in
 // src/lib/metadata.ts, and asserting them separately is what catches the two drifting apart.
 const SHARE_ROUTES = [
-  { path: "/", title: "WANTED — the agent plays. Forever." },
-  { path: "/missions", title: "Missions · WASTED" },
-  { path: "/clips", title: "Clips · WASTED" },
-  { path: "/agent", title: "Who is the agent? · WASTED" },
+  { path: "/", title: "WANTED — an AI plays GTA. Predict what happens next." },
+  { path: "/predict", title: "Predict · WANTED" },
+  { path: "/leaderboard", title: "Leaderboard · WANTED" },
+  { path: "/agent", title: "Who's playing? · WANTED" },
+  { path: "/missions", title: "Missions · WANTED" },
+  { path: "/clips", title: "Clips · WANTED" },
 ];
 
 test.describe.configure({ mode: "parallel" });
@@ -78,7 +80,13 @@ test("/api/health is honest about serving and configuration", async ({ request }
 
 test("live page renders its shell with real rows or an honest empty state @current-build", async ({ page }) => {
   await page.goto("/");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText(/WASTED/i);
+  // The h1 is the proposition, not the wordmark: a screen-reader user and a search engine both
+  // want to know what this page IS before they learn what it is called. The brand lives in the
+  // nav landmark, so assert both in their own places rather than expecting one to carry the other.
+  await expect(page.getByRole("heading", { level: 1 })).toContainText(/AI plays GTA/i);
+  await expect(
+    page.locator("header").getByRole("link", { name: "WANTED home" })
+  ).toBeVisible();
 
   const feed = page.getByRole("region", { name: "Live commentary feed" });
   await expect(feed).toBeVisible();
@@ -159,14 +167,10 @@ test("the live page publishes no running-cost figures @current-build", async ({ 
   await expect(page.getByText(/brain bill/i)).toHaveCount(0);
   await expect(page.getByText(/per hour/i)).toHaveCount(0);
 
-  // The counters row was replaced by a single born-ago line: the operator's verdict on the
-  // per-session counters was "statistics are not accurate", and a number nobody trusts is worse
-  // than no number. This is one timestamp the harness wrote exactly once.
-  const labels = await page
-    .locator('section[aria-label="Born"] span.ticker')
-    .allTextContents();
-  expect(labels.length).toBe(1);
-  expect(labels[0]).toMatch(/since the agent was born|not born yet/);
+  // The game-state panel replaced the old counters row. It must exist and must be built from
+  // real telemetry, so assert the landmark rather than any particular number — the values change
+  // with whatever the last real session wrote, and pinning one would make this test a fiction.
+  await expect(page.getByRole("region", { name: "Agent game state" })).toBeVisible();
 
   const html = await (await request.get("/")).text();
   for (const column of ["cost_per_hour_usd", "cost_today_usd", "cost_usd", "cached_tokens"]) {
@@ -174,7 +178,7 @@ test("the live page publishes no running-cost figures @current-build", async ({ 
   }
 });
 
-test("the the agent page does not advertise running costs @current-build", async ({ request }) => {
+test("the agent page does not advertise running costs @current-build", async ({ request }) => {
   const html = await (await request.get("/agent")).text();
   expect(html).not.toMatch(/cost/i);
   expect(html).not.toMatch(/the meter is running/i);
@@ -266,10 +270,10 @@ test("clips page renders rows or an honest empty state", async ({ page }) => {
   }
 });
 
-test("the agent page carries the AI disclosure and non-affiliation", async ({ page }) => {
+test("agent page carries the AI disclosure and non-affiliation", async ({ page }) => {
   await page.goto("/agent");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("WANTED");
-  await expect(page.getByText("the agent is an AI.", { exact: false }).first()).toBeVisible();
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("THE AGENT");
+  await expect(page.getByText("It's an AI", { exact: false }).first()).toBeVisible();
   await expect(
     page.getByText(/not affiliated with, endorsed by, or connected to/i).first()
   ).toBeVisible();
@@ -283,44 +287,30 @@ test("footer disclosure is on every page", async ({ page }) => {
         .locator("footer")
         .getByText(/not affiliated with, endorsed by, or connected to Rockstar Games/i)
     ).toBeVisible();
-    await expect(page.locator("footer").getByText(/the agent is an AI; all commentary/i)).toBeVisible();
+    await expect(page.locator("footer").getByText(/The agent is an AI; all commentary/i)).toBeVisible();
   }
 });
 
-const CONTRACT = "7Sj87Hw7Xb3hPfDWyRfThL2iEE8Bu7pcpJbbSYh4pump";
-
-test("the navbar carries the X link and the contract address on every page", async ({ page }) => {
+test("the navbar carries the wordmark and the primary routes on every page", async ({ page }) => {
   for (const path of ROUTES) {
     await page.goto(path);
     const nav = page.locator("header");
-
-    const x = nav.locator('a[href="https://x.com/wantedagent"]');
-    await expect(x).toBeVisible();
-    // A new tab without `noopener` hands the opened page a handle back to ours.
-    await expect(x).toHaveAttribute("rel", /noopener/);
-    await expect(x).toHaveAttribute("target", "_blank");
-
-    const ca = nav.locator('button[aria-label^="Copy contract address"]');
-    await expect(ca).toBeVisible();
-    await expect(ca).toHaveAttribute("aria-label", `Copy contract address ${CONTRACT}`);
-    // The full address must be readable off the page, not only via the clipboard.
-    await expect(ca).toContainText(CONTRACT);
+    await expect(nav.getByRole("link", { name: "WANTED home" })).toBeVisible();
+    for (const label of ["Live", "Predict", "Leaderboard"]) {
+      await expect(nav.getByRole("link", { name: label, exact: true })).toBeVisible();
+    }
   }
 });
 
-test("the displayed contract address keeps its case", async ({ page }) => {
-  // Caught live: the navbar's `.ticker` class sets `text-transform: uppercase`,
-  // which rendered `7SJ87HW7...SYH4PUMP`. base58 is case-sensitive, so anyone
-  // reading that off the screen instead of clicking copy gets a DIFFERENT
-  // address. The visible label must match the real string exactly.
-  await page.goto("/");
-  const shown = page.locator('button[aria-label^="Copy contract address"] span.font-mono');
-  const text = (await shown.innerText()).trim();
-  expect(text).not.toBe(text.toUpperCase());
-  const [lead, tail] = text.split("\u2026");
-  expect(CONTRACT.startsWith(lead)).toBe(true);
-  expect(CONTRACT.endsWith(tail)).toBe(true);
-});
+// REMOVED: "the displayed contract address keeps its case".
+//
+// The navbar no longer displays a token contract address, so the test had nothing left to assert
+// against. Keeping the finding, because it will apply again the moment $WANTED ships an address
+// onto the page: the navbar's `.ticker` class sets `text-transform: uppercase`, which silently
+// rendered a base58 address in caps. base58 is case-sensitive, so anyone reading it off the screen
+// rather than clicking copy got a DIFFERENT address. Any future address display needs both a
+// case-preserving style and a test that the visible text is not its own uppercase form.
+
 
 for (const path of ROUTES) {
   test(`${path} renders without horizontal scroll`, async ({ page }) => {

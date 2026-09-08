@@ -24,7 +24,14 @@ export default async function LivePage() {
 
   return (
     <>
-      <h1 className="sr-only">WANTED — the agent plays live</h1>
+      <header className="flex flex-col gap-1 pt-3">
+        <h1 className="font-display text-2xl leading-tight text-bone sm:text-3xl">
+          An AI plays GTA, live.
+        </h1>
+        <p className="max-w-lg text-sm text-smoke">
+          Predict what it does next — correct calls earn TTWO.
+        </p>
+      </header>
       <LiveDashboard
         initialDecisions={decisions.ok ? decisions.rows : []}
         initialEvents={events.ok ? events.rows : []}

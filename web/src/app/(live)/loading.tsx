@@ -24,14 +24,12 @@ export default function Loading() {
       <div className="grid gap-3 lg:grid-cols-[minmax(0,1fr)_380px]">
         <div className="flex min-w-0 flex-col gap-3">
           <SkeletonPanel className="aspect-video w-full" />
-          <div className="grid grid-cols-4 gap-2">
-            <SkeletonPanel className="h-20" />
-            <SkeletonPanel className="h-20" />
-            <SkeletonPanel className="h-20" />
-            <SkeletonPanel className="h-20" />
-          </div>
+          <SkeletonPanel className="h-56" />
         </div>
-        <SkeletonPanel className="h-[26rem] lg:h-[32rem]" />
+        <div className="flex min-w-0 flex-col gap-3">
+          <SkeletonPanel className="h-40" />
+          <SkeletonPanel className="h-72" />
+        </div>
       </div>
     </div>
   );

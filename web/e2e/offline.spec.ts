@@ -4,7 +4,7 @@ import { expect, test } from "@playwright/test";
 // Every request to the database fails for real — this is the honest-degradation contract:
 // the site must still serve, must say what it does not know, and must never invent a feed.
 
-const ROUTES = ["/", "/missions", "/clips", "/agent"];
+const ROUTES = ["/", "/predict", "/leaderboard", "/agent", "/missions", "/clips"];
 
 test.setTimeout(90_000);
 
@@ -44,13 +44,10 @@ test("counters and panels show em dashes rather than zeros they cannot verify", 
   page,
 }) => {
   await page.goto("/");
-  const counters = page.getByRole("region", { name: "Session counters" });
-  await expect(counters).toContainText("—");
-  await expect(page.getByRole("region", { name: "the agent's in-game status" })).toContainText(
+  // With the data link down there is nothing truthful to put in the state panel, so it must say
+  // so rather than render zeroes — a zero is a claim about the game, and we do not have one.
+  await expect(page.getByRole("region", { name: "Agent game state" })).toContainText(
     /no telemetry on record/i
-  );
-  await expect(page.getByRole("region", { name: "Current goal" })).toContainText(
-    /no goal on record/i
   );
 });
 
@@ -97,8 +94,8 @@ test("a clip permalink advertises itself, not the homepage", async ({ page }) =>
   });
 
   const want = `${origin}/clips/1`;
-  expect(meta.title).toBe("Clip #1 · WASTED");
-  expect(meta.ogTitle).toBe("Clip #1 · WASTED");
+  expect(meta.title).toBe("Clip #1 · WANTED");
+  expect(meta.ogTitle).toBe("Clip #1 · WANTED");
   expect((meta.ogUrl ?? "").replace(/\/+$/, "")).toBe(want);
   expect((meta.canonical ?? "").replace(/\/+$/, "")).toBe(want);
   expect(new URL(meta.ogImage as string).pathname).toBe("/clips/1/opengraph-image");
