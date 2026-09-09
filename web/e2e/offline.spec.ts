@@ -53,13 +53,16 @@ test("counters and panels show em dashes rather than zeros they cannot verify", 
 
 test("missions page renders with an honest data-link-down state", async ({ page }) => {
   await page.goto("/missions");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("MISSIONS");
+  // The h1 text is what the DOM holds, not what CSS renders: these titles are set in the design
+  // with `text-transform: uppercase`, so the visible sticker reads MISSIONS while the accessible
+  // name — which is what assistive tech announces and what this asserts on — is "Story mode".
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Story mode");
   await expect(page.getByTestId("missions-empty")).toContainText(/data link down/i);
 });
 
 test("clips page renders with an honest data-link-down state", async ({ page }) => {
   await page.goto("/clips");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("CLIPS");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Clips");
   await expect(page.getByTestId("clips-empty")).toContainText(/data link down/i);
 });
 

@@ -250,7 +250,10 @@ test("the offline banner and the stream status agree @current-build", async ({ p
 
 test("missions page renders rows or an honest empty state", async ({ page }) => {
   await page.goto("/missions");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("MISSIONS");
+  // The h1 text is what the DOM holds, not what CSS renders: these titles are set in the design
+  // with `text-transform: uppercase`, so the visible sticker reads MISSIONS while the accessible
+  // name — which is what assistive tech announces and what this asserts on — is "Story mode".
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Story mode");
   const empty = page.getByTestId("missions-empty");
   if (await empty.count()) {
     await expect(empty).toContainText(/nothing yet|data link down/i);
@@ -261,7 +264,7 @@ test("missions page renders rows or an honest empty state", async ({ page }) => 
 
 test("clips page renders rows or an honest empty state", async ({ page }) => {
   await page.goto("/clips");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("CLIPS");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Clips");
   const empty = page.getByTestId("clips-empty");
   if (await empty.count()) {
     await expect(empty).toContainText(/no footage|data link down/i);
@@ -272,7 +275,7 @@ test("clips page renders rows or an honest empty state", async ({ page }) => {
 
 test("agent page carries the AI disclosure and non-affiliation", async ({ page }) => {
   await page.goto("/agent");
-  await expect(page.getByRole("heading", { level: 1 })).toContainText("THE AGENT");
+  await expect(page.getByRole("heading", { level: 1 })).toContainText("Who's playing?");
   await expect(page.getByText("It's an AI", { exact: false }).first()).toBeVisible();
   await expect(
     page.getByText(/not affiliated with, endorsed by, or connected to/i).first()
