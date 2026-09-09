@@ -1,5 +1,5 @@
 import type { Metadata, Viewport } from "next";
-import { Archivo, Archivo_Black, IBM_Plex_Mono } from "next/font/google";
+import { Lilita_One, Nunito } from "next/font/google";
 import "./globals.css";
 import { SiteNav } from "@/components/SiteNav";
 import { SiteFooter } from "@/components/SiteFooter";
@@ -7,22 +7,19 @@ import { WalletProvider } from "@/components/wallet/WalletProvider";
 import { getSiteUrl } from "@/lib/env";
 import { SITE_DESCRIPTION, SITE_NAME, SITE_TITLE, TITLE_TEMPLATE } from "@/lib/metadata";
 
-const archivo = Archivo({
-  variable: "--font-archivo",
-  subsets: ["latin"],
-  display: "swap",
-});
-
-const archivoBlack = Archivo_Black({
-  variable: "--font-archivo-black",
+// Display type. One weight only — Lilita One ships a single face, which is why the design leans
+// on size and colour for hierarchy rather than weight.
+const lilita = Lilita_One({
+  variable: "--font-lilita",
   weight: "400",
   subsets: ["latin"],
   display: "swap",
 });
 
-const plexMono = IBM_Plex_Mono({
-  variable: "--font-plex-mono",
-  weight: ["400", "600"],
+// Body. The design sets almost everything at 700+, so the light weights are not loaded.
+const nunito = Nunito({
+  variable: "--font-nunito",
+  weight: ["600", "700", "800", "900"],
   subsets: ["latin"],
   display: "swap",
 });
@@ -70,7 +67,7 @@ export default function RootLayout({
   return (
     <html lang="en">
       <body
-        className={`${archivo.variable} ${archivoBlack.variable} ${plexMono.variable} grain min-h-dvh antialiased flex flex-col`}
+        className={`${lilita.variable} ${nunito.variable}`}
       >
         <a
           href="#content"

@@ -5,6 +5,7 @@ import { StreamEmbed } from "@/components/StreamEmbed";
 import { GameState } from "@/components/live/GameState";
 import { Feed } from "@/components/live/Feed";
 import { OfflineBanner } from "@/components/live/OfflineBanner";
+import { StreamStrip } from "@/components/live/StreamStrip";
 import { LivePredictionCard } from "@/components/predict/LivePredictionCard";
 import { MobilePredictBar } from "@/components/predict/MobilePredictBar";
 import { NoLivePrediction } from "@/components/predict/NoLivePrediction";
@@ -284,13 +285,22 @@ export function LiveDashboard({
   // clock) and — for `Feed`, once realtime lands here — would open a second Supabase
   // subscription per viewer if mounted twice, and a duplicated `aria-label` leaves a screen
   // reader announcing two identical regions with no way to tell which is real.
+  // The sticky mobile bar renders only for an OPEN prediction, so the room it needs is reserved
+  // only then — an off-air page ends at the feed instead of a strip of empty cream.
+  const mobileBar = primary?.status === "open";
+
   return (
-    <div className="flex flex-col gap-3 pb-20 lg:pb-3">
+    <div className={`flex flex-col gap-3 ${mobileBar ? "pb-20 lg:pb-3" : "pb-3"}`}>
       <OfflineBanner stats={stats} nowMs={nowMs} mounted={mounted} linkDown={linkDown} />
 
       <div className="live-grid gap-3">
-        <div className="[grid-area:stream] min-w-0">
+        {/* The player and the telemetry that describes the picture read as one unit: the
+            stream panel, then the HP/armor/wanted/cash band and the goal row directly under it.
+            `StreamEmbed` owns the badge and the sound control; everything below it comes from
+            the last `stats` row. */}
+        <div className="[grid-area:stream] flex min-w-0 flex-col gap-3">
           <StreamEmbed config={stream} offline={offline} />
+          <StreamStrip hud={hud} goal={stats?.current_goal ?? null} offline={offline} />
         </div>
 
         <div className="[grid-area:predict] min-w-0 lg:h-full" data-testid="live-prediction-slot">
@@ -301,10 +311,8 @@ export function LiveDashboard({
               className="panel flex flex-col items-center justify-center px-4 py-8 text-center lg:h-full"
               aria-label="Live prediction"
             >
-              <p className="wordmark text-xl text-ember" data-text="DATA LINK DOWN">
-                DATA LINK DOWN
-              </p>
-              <p className="mt-2 text-xs text-smoke">{predictionsFetched.message}</p>
+              <p className="wordmark text-xl">DATA LINK DOWN</p>
+              <p className="mt-2 text-xs text-dim">{predictionsFetched.message}</p>
             </section>
           ) : primary ? (
             <LivePredictionCard

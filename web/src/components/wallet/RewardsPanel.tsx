@@ -1,6 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+
 import { apiErrorMessage } from "@/components/apiError";
 import { formatBaseUnits, hasBaseUnits } from "@/lib/format";
 import type { Claim, RewardBalance } from "@/lib/prediction/types";
@@ -24,6 +25,21 @@ const REASON_TEXT: Record<string, string> = {
 
 function reasonText(reason: string): string {
   return REASON_TEXT[reason] ?? reason;
+}
+
+/** A small sticker that carries a sentence the server said — never a sentence we made up. */
+function Note({ tone, children }: { tone: "quiet" | "warn" | "bad"; children: React.ReactNode }) {
+  const skin =
+    tone === "bad"
+      ? "border-ink bg-coral text-white"
+      : tone === "warn"
+        ? "border-ink bg-yellow-pale text-ink"
+        : "border-ink bg-sand text-ink";
+  return (
+    <p className={`rounded-[14px] border-[3px] px-3 py-2.5 text-[11.5px] leading-[1.45] font-bold ${skin}`}>
+      {children}
+    </p>
+  );
 }
 
 /**
@@ -86,22 +102,35 @@ export function RewardsPanel({ signedIn }: { signedIn: boolean }) {
 
   if (!signedIn) {
     return (
-      <p className="text-[0.68rem] leading-relaxed text-smoke">
+      <p className="mt-3.5 text-[11.5px] leading-[1.45] font-bold text-muted">
         Sign in with this wallet to see your prediction balance.
       </p>
     );
   }
 
   if (fetched.state === "loading") {
-    return <p className="skeleton-pulse text-[0.68rem] text-smoke">Checking your balance…</p>;
+    return (
+      <p className="skeleton-pulse mt-3.5 rounded-[14px] px-3 py-2.5 text-[11.5px] font-bold text-muted">
+        Checking your balance…
+      </p>
+    );
   }
 
+  // A 503 is "we cannot tell you", not "you have nothing". It never becomes a zero.
   if (fetched.state === "unavailable") {
-    return <p className="text-[0.68rem] leading-relaxed text-smoke">{fetched.message}</p>;
+    return (
+      <div className="mt-3.5">
+        <Note tone="quiet">{fetched.message}</Note>
+      </div>
+    );
   }
 
   if (fetched.state === "error") {
-    return <p className="text-[0.68rem] leading-relaxed text-ember">{fetched.message}</p>;
+    return (
+      <div className="mt-3.5">
+        <Note tone="bad">{fetched.message}</Note>
+      </div>
+    );
   }
 
   const { balance } = fetched;
@@ -111,50 +140,58 @@ export function RewardsPanel({ signedIn }: { signedIn: boolean }) {
   const belowMin = claimableFunded && claimableAmount < minAmount;
 
   return (
-    <div className="flex flex-col gap-2">
+    <div className="mt-3.5 flex flex-col gap-2.5">
       <div className="flex items-baseline justify-between gap-2">
-        <span className="ticker text-[0.58rem] text-smoke">Claimable</span>
-        <span className="font-mono text-sm text-bone">
-          {claimableFunded ? `${formatBaseUnits(balance.claimable)} ${balance.asset}` : "nothing yet"}
-        </span>
+        <span className="ticker text-[10px] text-muted">Claimable</span>
+        {claimableFunded ? (
+          <span className="font-display text-[26px] leading-none">
+            {formatBaseUnits(balance.claimable)}{" "}
+            <span className="text-[14px] text-muted">{balance.asset}</span>
+          </span>
+        ) : (
+          <span className="font-display text-[16px] leading-none text-muted">nothing yet</span>
+        )}
       </div>
+
       <div className="flex items-baseline justify-between gap-2">
-        <span className="ticker text-[0.58rem] text-smoke">Lifetime earned</span>
-        <span className="font-mono text-xs text-smoke">
+        <span className="ticker text-[10px] text-muted">Lifetime earned</span>
+        <span className="text-[13px] font-black">
           {hasBaseUnits(balance.lifetime) ? `${formatBaseUnits(balance.lifetime)} ${balance.asset}` : "—"}
         </span>
       </div>
 
       {!balance.eligible && balance.reasons.length > 0 && (
-        <p className="border-l-2 border-hazard pl-2 text-[0.62rem] leading-relaxed text-hazard">
+        <Note tone="warn">
           Rewards are not available to this wallet: {balance.reasons.map(reasonText).join("; ")}.
-        </p>
+        </Note>
       )}
 
       {balance.eligible && !claimableFunded && (
-        <p className="text-[0.62rem] leading-relaxed text-smoke">
+        <p className="text-[11.5px] leading-[1.45] font-bold text-muted">
           Nothing to claim yet — correct predictions credit this balance when they settle.
         </p>
       )}
 
       {balance.eligible && belowMin && (
-        <p className="text-[0.62rem] leading-relaxed text-smoke">
+        <p className="text-[11.5px] leading-[1.45] font-bold text-muted">
           Below the minimum claim of {formatBaseUnits(balance.min_claim)} {balance.asset}.
         </p>
       )}
 
-      {claim.state === "failed" && <p className="text-[0.62rem] text-ember">{claim.message}</p>}
+      {claim.state === "failed" && <Note tone="bad">{claim.message}</Note>}
       {claim.state === "done" && (
-        <p className="text-[0.62rem] text-bone">Claim submitted — status: {claim.claim.status}.</p>
+        <p className="text-[11.5px] leading-[1.45] font-bold text-ink">
+          Claim submitted — status: {claim.claim.status}.
+        </p>
       )}
 
       <button
         type="button"
         onClick={() => void submitClaim()}
         disabled={!balance.eligible || !claimableFunded || belowMin || claim.state === "submitting"}
-        className="ticker border border-ash px-2 py-1.5 text-[0.62rem] text-bone transition-colors enabled:hover:border-blood enabled:hover:text-ember disabled:cursor-not-allowed disabled:text-ash"
+        className="btn btn-teal mt-1 w-full"
       >
-        {claim.state === "submitting" ? "Submitting…" : "Claim"}
+        {claim.state === "submitting" ? "Submitting…" : "Claim rewards"}
       </button>
     </div>
   );

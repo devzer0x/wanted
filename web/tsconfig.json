@@ -31,11 +31,15 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-check/types/**/*.ts",
+    ".next-check/wallet/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
+    ".next-loop/types/**/*.ts",
     ".next-offline/types/**/*.ts",
+    ".next-preview/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-loop/types/**/*.ts"
+    ".next-shellrev/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

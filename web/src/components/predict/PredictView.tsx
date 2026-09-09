@@ -1,11 +1,22 @@
 "use client";
 
-import { useEffect, useState } from "react";
+import { useEffect, useState, type ReactNode } from "react";
 import { LivePredictionCard } from "@/components/predict/LivePredictionCard";
 import { ResolvedPredictionCard } from "@/components/predict/ResolvedPredictionCard";
 import { usePredictions } from "@/components/predict/usePredictions";
+import { viewerRecord } from "@/components/predict/summary";
+import { formatBaseUnits, hasBaseUnits } from "@/lib/format";
 
-export function PredictView() {
+function Header({ header, pills }: { header?: ReactNode; pills?: ReactNode }) {
+  return (
+    <header className="flex flex-wrap items-end justify-between gap-x-4 gap-y-3">
+      {header}
+      {pills}
+    </header>
+  );
+}
+
+export function PredictView({ header }: { header?: ReactNode }) {
   const { fetched, refresh } = usePredictions();
   const [nowMs, setNowMs] = useState(() => Date.now());
   const [mounted, setMounted] = useState(false);
@@ -19,20 +30,35 @@ export function PredictView() {
 
   if (fetched.state === "loading") {
     return (
-      <div className="flex flex-col gap-3">
-        <div className="panel skeleton-pulse h-48" aria-hidden="true" />
-        <div className="panel skeleton-pulse h-48" aria-hidden="true" />
+      <div className="flex flex-col gap-5">
+        <Header header={header} />
+        <div className="skeleton-pulse h-64" aria-hidden="true" />
+        <div className="grid gap-3.5 sm:grid-cols-2">
+          <div className="skeleton-pulse h-40" aria-hidden="true" />
+          <div className="skeleton-pulse h-40" aria-hidden="true" />
+        </div>
+        <p className="sr-only">Loading predictions.</p>
       </div>
     );
   }
 
   if (fetched.state === "error") {
     return (
-      <div className="panel px-4 py-12 text-center" data-testid="predict-error">
-        <p className="wordmark text-2xl text-ember" data-text="DATA LINK DOWN">
-          DATA LINK DOWN
-        </p>
-        <p className="mt-2 text-xs text-smoke">{fetched.message}</p>
+      <div className="flex flex-col gap-5">
+        <Header header={header} />
+        <div className="panel px-5 py-12 text-center" data-testid="predict-error">
+          <span
+            className="panel-title inline-block rounded-xl border-[3px] border-ink px-4 py-2 text-xl leading-none text-white"
+            style={{
+              background: "var(--coral)",
+              boxShadow: "0 4px 0 var(--ink)",
+              transform: "rotate(-2deg)",
+            }}
+          >
+            Data link down
+          </span>
+          <p className="mt-3 text-[13px] font-bold text-muted">{fetched.message}</p>
+        </div>
       </div>
     );
   }
@@ -44,22 +70,61 @@ export function PredictView() {
     return tb - ta;
   });
 
+  const record = viewerRecord(resolvedSorted, mine);
+  const pills = record ? (
+    <div className="flex flex-wrap gap-2">
+      <span
+        className="pill"
+        style={{ boxShadow: "0 3px 0 var(--ink)", padding: "6px 14px", fontSize: "13px" }}
+        title="Across the settled predictions shown on this page."
+      >
+        Recent: {record.correct} for {record.total}
+      </span>
+      {hasBaseUnits(record.earned) && record.asset && (
+        <span
+          className="pill"
+          style={{
+            background: "var(--teal)",
+            boxShadow: "0 3px 0 var(--ink)",
+            padding: "6px 14px",
+            fontSize: "13px",
+          }}
+          title="Credited by the results shown on this page."
+        >
+          +{formatBaseUnits(record.earned)} {record.asset}
+        </span>
+      )}
+    </div>
+  ) : null;
+
   return (
-    <div className="flex flex-col gap-6">
+    <div className="flex flex-col gap-5">
+      <Header header={header} pills={pills} />
+
       {!session_live && (
-        <div className="panel border-blood px-4 py-3 text-xs leading-relaxed text-smoke">
+        <p
+          className="rounded-2xl border-[3px] border-ink px-4 py-3 text-[13px] font-bold leading-relaxed text-ink"
+          style={{ background: "var(--yellow-pale)" }}
+        >
           The agent is off the air right now, so no new prediction window is running. What&apos;s
           below is whatever was already open or has already settled.
-        </div>
+        </p>
       )}
 
-      <section className="flex flex-col gap-3" aria-label="Live predictions">
+      <section className="flex flex-col gap-3.5" aria-label="Live predictions">
         {live.length === 0 ? (
-          <div className="panel px-4 py-10 text-center" data-testid="predict-live-empty">
-            <p className="wordmark text-xl" data-text="NOTHING OPEN">
-              NOTHING OPEN
-            </p>
-            <p className="mt-2 text-xs text-smoke">
+          <div className="panel px-5 py-12 text-center" data-testid="predict-live-empty">
+            <span
+              className="panel-title inline-block rounded-xl border-[3px] border-ink px-4 py-2 text-xl leading-none"
+              style={{
+                background: "var(--sand)",
+                boxShadow: "0 4px 0 var(--ink)",
+                transform: "rotate(-2deg)",
+              }}
+            >
+              Nothing open
+            </span>
+            <p className="mx-auto mt-3 max-w-sm text-[13px] font-bold leading-relaxed text-muted">
               No live prediction right now. The next one opens from something that happens on
               stream.
             </p>
@@ -72,15 +137,16 @@ export function PredictView() {
               distribution={distributions[prediction.id]}
               mine={mine[prediction.id]}
               onEntered={refresh}
+              layout="page"
             />
           ))
         )}
       </section>
 
       {resolvedSorted.length > 0 && (
-        <section className="flex flex-col gap-3" aria-label="Recent results">
-          <h2 className="panel-title">Recent results</h2>
-          <div className="grid gap-3 sm:grid-cols-2">
+        <section className="flex flex-col gap-3.5" aria-label="Recent results">
+          <h2 className="panel-title text-xl">Settled</h2>
+          <div className="grid gap-3.5 sm:grid-cols-2">
             {resolvedSorted.map((prediction) => (
               <ResolvedPredictionCard
                 key={prediction.id}

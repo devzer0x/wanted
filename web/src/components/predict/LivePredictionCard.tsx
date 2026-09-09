@@ -5,28 +5,47 @@ import { apiErrorMessage } from "@/components/apiError";
 import { OutcomeBar } from "@/components/predict/OutcomeBar";
 import { PredictionCountdown } from "@/components/predict/PredictionCountdown";
 import { pctOf } from "@/components/predict/distribution";
+import { settlementRule } from "@/components/predict/rule";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { formatBaseUnits, hasBaseUnits } from "@/lib/format";
 import type { MyEntry, Prediction, PredictionDistribution } from "@/lib/prediction/types";
 
-const STATUS_LABEL: Record<Prediction["status"], string> = {
-  open: "open",
-  locked: "locked",
-  resolving: "resolving",
-  settled: "settled",
-  void: "void",
-};
+/** The header strip: colour and words both come from the real status, nothing else. */
+function headerFor(prediction: Prediction): { tone: string; label: string } {
+  switch (prediction.status) {
+    case "open":
+      return {
+        tone: "bg-yellow text-ink",
+        label: prediction.is_event ? "Wanted event" : "Live prediction",
+      };
+    case "locked":
+      return { tone: "bg-ink text-cream", label: "Locked · resolving" };
+    case "resolving":
+      return { tone: "bg-ink text-cream", label: "Resolving" };
+    case "settled":
+      return { tone: "bg-teal text-ink", label: "Settled" };
+    case "void":
+      return { tone: "bg-yellow text-ink", label: "Void" };
+  }
+}
+
+const PILL_BG = { background: "var(--yellow-pale)" } as const;
+// `.btn` sets its own padding/size outside any cascade layer, so a Tailwind utility cannot trim it.
+const SMALL_BTN = { padding: "8px 16px", fontSize: "13px" } as const;
 
 export function LivePredictionCard({
   prediction,
   distribution,
   mine,
   onEntered,
+  layout = "sidebar",
 }: {
   prediction: Prediction;
   distribution: PredictionDistribution | undefined;
   mine: MyEntry | undefined;
   onEntered: () => void;
+  /** "page" spreads the outcome rows across two columns on the wide /predict layout. */
+  layout?: "sidebar" | "page";
 }) {
   const wallet = useWallet();
   const [voting, setVoting] = useState<string | null>(null);
@@ -64,125 +83,157 @@ export function LivePredictionCard({
   const settled = prediction.status === "settled";
   const void_ = prediction.status === "void";
   const poolFunded = hasBaseUnits(prediction.reward_pool) && Boolean(prediction.reward_asset);
+  const { tone, label: headLabel } = headerFor(prediction);
+  const rule = settlementRule(prediction);
 
   return (
-    <section className="panel flex flex-col p-3 sm:p-4" aria-label="Live prediction" data-testid="live-prediction">
-      <div className="mb-2 flex items-center justify-between gap-2">
-        <h2 className="panel-title">
-          {prediction.is_event ? "Wanted event" : "Live prediction"}
+    <section
+      className="panel flex flex-col overflow-hidden lg:h-full"
+      style={{ boxShadow: "0 7px 0 var(--ink)" }}
+      aria-label="Live prediction"
+      data-testid="live-prediction"
+    >
+      <div
+        className={`flex items-center justify-between gap-2.5 border-b-[3px] border-ink px-4 py-3 ${tone}`}
+        data-testid="prediction-status"
+        data-status={prediction.status}
+      >
+        <h2 className="panel-title min-w-0 truncate text-[15px] tracking-[0.06em] sm:text-base">
+          {headLabel}
         </h2>
-        <span
-          className={`ticker border px-1.5 py-0.5 text-[0.55rem] ${
-            prediction.status === "open"
-              ? "border-blood text-ember"
-              : settled
-                ? "border-bone text-bone"
-                : void_
-                  ? "border-hazard text-hazard"
-                  : "border-ash text-smoke"
-          }`}
-          data-testid="prediction-status"
-        >
-          {STATUS_LABEL[prediction.status]}
-        </span>
-      </div>
-
-      <p className="mb-3 font-display text-lg leading-tight text-bone [overflow-wrap:anywhere]">
-        {prediction.question}
-      </p>
-
-      <div className="flex flex-col gap-1.5">
-        {prediction.outcomes.map((outcome) => (
-          <OutcomeBar
-            key={outcome.key}
-            label={outcome.label}
-            pct={pctOf(distribution, outcome.key)}
-            active={mine?.outcome === outcome.key}
-            won={settled ? outcome.key === prediction.result : undefined}
-            busy={voting === outcome.key}
-            onClick={readyToVote ? () => void vote(outcome.key) : undefined}
-          />
-        ))}
-      </div>
-
-      <div className="mt-2 flex flex-wrap items-center justify-between gap-x-3 gap-y-1 text-[0.62rem] text-smoke">
-        <span>
-          {distribution && distribution.total > 0
-            ? `${distribution.total} predicting`
-            : "no predictions yet"}
-        </span>
         {prediction.status === "open" && (
-          <PredictionCountdown target={prediction.locks_at} label="to lock" />
+          <PredictionCountdown
+            target={prediction.locks_at}
+            from={prediction.opened_at}
+            label="to lock"
+          />
         )}
         {(prediction.status === "locked" || prediction.status === "resolving") && (
-          <PredictionCountdown target={prediction.resolves_at} label="to resolve" />
+          <PredictionCountdown
+            target={prediction.resolves_at}
+            from={prediction.locks_at}
+            label="to resolve"
+          />
         )}
       </div>
 
-      <p className="mt-1 text-[0.6rem] text-smoke">
-        {poolFunded
-          ? `Pool: ${formatBaseUnits(prediction.reward_pool)} ${prediction.reward_asset}, split evenly among correct picks.`
-          : "No reward pool funded for this one yet."}
-      </p>
-
-      {void_ && (
-        <p className="mt-2 border-l-2 border-hazard pl-2 text-[0.62rem] leading-relaxed text-hazard">
-          Voided — the window didn&apos;t produce a clean signal, so nothing settles and nobody is
-          charged or paid.
+      <div className="flex flex-1 flex-col gap-3 p-4">
+        <p className="font-display text-[22px] leading-[1.1] text-ink [overflow-wrap:anywhere] sm:text-[26px]">
+          {prediction.question}
         </p>
-      )}
 
-      {mine && (
-        <p className="mt-2 border-l-2 border-ash pl-2 text-[0.62rem] leading-relaxed text-smoke">
-          Your pick: {prediction.outcomes.find((o) => o.key === mine.outcome)?.label ?? mine.outcome}.
-          {settled &&
-            (mine.correct
-              ? ` Correct — ${hasBaseUnits(mine.reward) ? `${formatBaseUnits(mine.reward)} ${prediction.reward_asset} credited.` : "no reward was credited."}`
-              : " Not this time.")}
-        </p>
-      )}
+        <div
+          className={
+            layout === "page" ? "grid gap-3 sm:grid-cols-2" : "flex flex-col gap-2.5"
+          }
+        >
+          {prediction.outcomes.map((outcome, index) => (
+            <OutcomeBar
+              key={outcome.key}
+              index={index}
+              label={outcome.label}
+              pct={pctOf(distribution, outcome.key)}
+              active={mine?.outcome === outcome.key}
+              won={settled ? outcome.key === prediction.result : undefined}
+              busy={voting === outcome.key}
+              onClick={readyToVote ? () => void vote(outcome.key) : undefined}
+            />
+          ))}
+        </div>
 
-      {canVote && !readyToVote && (
-        <div className="mt-2 flex items-center gap-2 text-[0.62rem] text-smoke">
-          {!wallet.address ? (
-            <>
-              <span>Connect a wallet to predict.</span>
-              <button
-                type="button"
-                onClick={() => void wallet.connect()}
-                className="ticker border border-ash px-2 py-1 text-[0.58rem] text-bone hover:border-blood hover:text-ember"
-              >
-                Connect
-              </button>
-            </>
-          ) : wallet.status === "wrong-network" ? (
-            <>
-              <span>Wrong network.</span>
-              <button
-                type="button"
-                onClick={() => void wallet.switchNetwork()}
-                className="ticker border border-hazard px-2 py-1 text-[0.58rem] text-hazard hover:bg-hazard hover:text-void"
-              >
-                Switch to Robinhood Chain
-              </button>
-            </>
-          ) : (
-            <>
-              <span>Sign in to predict.</span>
-              <button
-                type="button"
-                onClick={() => void wallet.requestSignIn()}
-                disabled={wallet.signIn === "signing-in"}
-                className="ticker border border-blood px-2 py-1 text-[0.58rem] text-ember hover:bg-blood hover:text-bone disabled:opacity-60"
-              >
-                {wallet.signIn === "signing-in" ? "Check your wallet…" : "Sign in"}
-              </button>
-            </>
+        <div className="mt-auto flex flex-wrap items-center gap-2">
+          <span className="pill" style={PILL_BG}>
+            {distribution && distribution.total > 0
+              ? `${distribution.total} predicting`
+              : "No predictions yet"}
+          </span>
+          <span className="pill" style={PILL_BG}>
+            {poolFunded
+              ? `Pot ${formatBaseUnits(prediction.reward_pool)} ${prediction.reward_asset}`
+              : "No pot funded yet"}
+          </span>
+          {rule && (
+            <span className="pill" style={PILL_BG} title={rule.title}>
+              {rule.text}
+            </span>
           )}
         </div>
-      )}
 
-      {voteError && <p className="mt-2 text-[0.62rem] text-ember">{voteError}</p>}
+        <p className="text-[11px] font-bold leading-snug text-muted">
+          Free to play. Settles from game telemetry
+          {poolFunded ? ", split evenly among correct picks." : "."}
+        </p>
+
+        {void_ && (
+          <p
+            className="rounded-xl border-2 border-ink px-3 py-2 text-xs font-bold leading-relaxed text-ink"
+            style={PILL_BG}
+          >
+            Voided — the window didn&apos;t produce a clean signal, so nothing settles and nobody is
+            charged or paid.
+          </p>
+        )}
+
+        {mine && (
+          <p className="panel-sand rounded-xl border-2 border-ink px-3 py-2 text-xs font-bold leading-relaxed text-ink">
+            Your pick:{" "}
+            {prediction.outcomes.find((o) => o.key === mine.outcome)?.label ?? mine.outcome}.
+            {settled &&
+              (mine.correct
+                ? ` Correct — ${hasBaseUnits(mine.reward) ? `${formatBaseUnits(mine.reward)} ${prediction.reward_asset} credited.` : "no reward was credited."}`
+                : " Not this time.")}
+          </p>
+        )}
+
+        {canVote && !readyToVote && (
+          <div className="flex flex-wrap items-center gap-2 text-xs font-bold text-muted">
+            {!wallet.address ? (
+              <>
+                <span>Connect a wallet to predict.</span>
+                <button
+                  type="button"
+                  onClick={() => void wallet.connect()}
+                  className="btn btn-coral"
+                  style={SMALL_BTN}
+                >
+                  Connect
+                </button>
+              </>
+            ) : wallet.status === "wrong-network" ? (
+              <>
+                <span>Wrong network.</span>
+                <button
+                  type="button"
+                  onClick={() => void wallet.switchNetwork()}
+                  className="btn btn-yellow"
+                  style={SMALL_BTN}
+                >
+                  Switch to Robinhood Chain
+                </button>
+              </>
+            ) : (
+              <>
+                <span>Sign in to predict.</span>
+                <button
+                  type="button"
+                  onClick={() => void wallet.requestSignIn()}
+                  disabled={wallet.signIn === "signing-in"}
+                  className="btn btn-coral"
+                  style={SMALL_BTN}
+                >
+                  {wallet.signIn === "signing-in" ? "Check your wallet…" : "Sign in"}
+                </button>
+              </>
+            )}
+          </div>
+        )}
+
+        {voteError && (
+          <p className="text-xs font-bold text-coral" role="status">
+            {voteError}
+          </p>
+        )}
+      </div>
     </section>
   );
 }

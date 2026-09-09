@@ -54,3 +54,12 @@ next-env.d.ts
 
 # local full-loop verification build
 .next-loop/
+
+# transient build used for design-system checks
+.next-check/
+
+# transient build dirs and scratch scripts from verification runs
+.next-*/
+shot-tmp.mjs
+*.tmp.mjs
+.*.mjs

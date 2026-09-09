@@ -59,14 +59,12 @@ function Banner({
       role="status"
       data-testid="offline-banner"
       data-state={state}
-      className="banner-throb panel relative overflow-hidden border-blood"
+      className="banner-throb panel relative overflow-hidden"
     >
-      <div className="stripes h-1.5 w-full" aria-hidden="true" />
-      <div className="flex flex-col gap-1 px-4 py-3 sm:flex-row sm:items-baseline sm:gap-4">
-        <span className="wordmark shrink-0 text-2xl text-ember" data-text={headline}>
-          {headline}
-        </span>
-        <p className="text-xs leading-relaxed text-smoke">{children}</p>
+      <div className="stripes h-2 w-full" aria-hidden="true" />
+      <div className="flex flex-col gap-2 px-4 py-3.5 sm:flex-row sm:items-center sm:gap-4">
+        <span className="wordmark shrink-0 self-start text-2xl">{headline}</span>
+        <p className="text-[0.82rem] leading-relaxed text-dim">{children}</p>
       </div>
     </div>
   );

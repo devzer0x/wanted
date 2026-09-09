@@ -1,6 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
+
 import { RewardsPanel } from "@/components/wallet/RewardsPanel";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { shortAddress } from "@/lib/social";
@@ -9,7 +10,38 @@ import { shortAddress } from "@/lib/social";
  * One button, every real wallet state: no extension installed, connecting, wrong network,
  * connected-but-not-signed-in, signed-in, and a declined request. Nothing here is a placeholder
  * — nobody clicks past a state that cannot really occur.
+ *
+ * The arcade chip: a hard 3px ink border and an offset shadow with no blur, so it reads as a
+ * sticker pressed onto the header. Pressing it pushes the chip down onto its own shadow.
  */
+
+/** Chip skins. The shadow colour is the only thing that changes per tone, so each is spelled out
+ *  in full — Tailwind needs whole class names, not assembled ones. */
+const TONES = {
+  /** The default: the design's dark chip on a purple shadow. */
+  ink:
+    "border-ink bg-ink text-white shadow-[0_4px_0_var(--purple)] " +
+    "hover:-translate-y-px hover:shadow-[0_5px_0_var(--purple)] " +
+    "active:translate-y-[3px] active:shadow-[0_1px_0_var(--purple)]",
+  /** Something needs the viewer's attention before predictions can work. */
+  warn:
+    "border-ink bg-yellow text-ink shadow-[0_4px_0_var(--ink)] " +
+    "hover:-translate-y-px hover:shadow-[0_5px_0_var(--ink)] " +
+    "active:translate-y-[3px] active:shadow-[0_1px_0_var(--ink)]",
+  /** Nothing is wrong and nothing is possible — no extension to talk to. */
+  plain:
+    "border-ink bg-white text-ink shadow-[0_4px_0_var(--ink)] " +
+    "hover:-translate-y-px hover:shadow-[0_5px_0_var(--ink)] " +
+    "active:translate-y-[3px] active:shadow-[0_1px_0_var(--ink)]",
+} as const;
+
+// `.banner-throb` runs the pop with `animation-fill-mode: both`, whose backwards half paints the
+// 0% keyframe — `opacity: 0`, `scale(0.7)` — whenever the animation has not actually advanced.
+// Observed here: in a throttled tab the panel opened and stayed invisible at 70% size. Overriding
+// the fill mode inline keeps the pop and makes the un-animated state the panel's real one, while
+// the class's `prefers-reduced-motion` rule (`animation: none`) still wins outright.
+const POP: React.CSSProperties = { animationFillMode: "none" };
+
 export function WalletButton() {
   const wallet = useWallet();
   const [open, setOpen] = useState(false);
@@ -24,16 +56,32 @@ export function WalletButton() {
     return () => document.removeEventListener("mousedown", onClick);
   }, [open]);
 
-  const label = (() => {
-    if (wallet.status === "connecting") return "Connecting…";
-    if (wallet.status === "wrong-network") return "Wrong network";
-    if (wallet.address) return shortAddress(wallet.address);
-    if (wallet.status === "no-wallet") return "No wallet found";
-    if (wallet.status === "rejected") return "Connect wallet";
-    return "Connect wallet";
+  // `caps` is false for an address on purpose. EIP-55 carries the checksum in letter case, so
+  // running `text-transform: uppercase` over a hex address puts a DIFFERENT string on screen from
+  // the one the wallet holds — the exact bug e2e/site.spec.ts records against the old contract
+  // chip. Words take the design's caps; the address keeps its own case.
+  const chip = (() => {
+    if (wallet.status === "connecting") {
+      return { label: "Connecting…", caps: true, tone: TONES.ink, dot: "var(--yellow)", busy: true };
+    }
+    if (wallet.status === "wrong-network") {
+      return { label: "Wrong network", caps: true, tone: TONES.warn, dot: "var(--coral)", busy: false };
+    }
+    if (wallet.address) {
+      return {
+        label: shortAddress(wallet.address),
+        caps: false,
+        tone: TONES.ink,
+        // Connected proves an address; only a verified session can predict. The dot says which.
+        dot: wallet.signIn === "signed-in" ? "var(--teal)" : "var(--yellow)",
+        busy: wallet.signIn === "signing-in",
+      };
+    }
+    if (wallet.status === "no-wallet") {
+      return { label: "No wallet found", caps: true, tone: TONES.plain, dot: "var(--sand-deep)", busy: false };
+    }
+    return { label: "Connect wallet", caps: true, tone: TONES.ink, dot: "var(--sand-deep)", busy: false };
   })();
-
-  const live = wallet.status === "connected";
 
   const onClick = () => {
     if (!wallet.address) {
@@ -56,29 +104,32 @@ export function WalletButton() {
         aria-expanded={open}
         data-testid="wallet-button"
         data-wallet-status={wallet.status}
-        className={`ticker inline-flex h-10 items-center gap-2 border-2 px-3 text-[0.68rem] font-bold transition-colors sm:px-4 ${
-          wallet.status === "wrong-network"
-            ? "border-hazard text-hazard hover:bg-hazard hover:text-void"
-            : "border-ash bg-tar text-bone hover:border-ember hover:text-ember"
-        }`}
+        className={`font-display inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border-[3px] px-3 text-[13px] leading-none tracking-[0.04em] transition-[transform,box-shadow] duration-75 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral sm:px-3.5 sm:text-sm ${
+          chip.caps ? "uppercase" : ""
+        } ${chip.tone}`}
       >
-        <span className={`led ${live ? "led-live" : "led-dead"}`} aria-hidden="true" />
-        {label}
+        <span
+          aria-hidden="true"
+          className={`h-[9px] w-[9px] flex-none rounded-full ${chip.busy ? "urgent" : ""}`}
+          style={{ background: chip.dot, boxShadow: `0 0 0 2px var(--ink), 0 0 0 4px ${chip.dot}` }}
+        />
+        {chip.label}
       </button>
 
       {!open && wallet.status === "no-wallet" && (
-        <p className="absolute right-0 top-full z-70 mt-1 w-56 border border-ash bg-tar p-2 text-[0.62rem] leading-relaxed text-smoke">
+        <p
+          style={POP}
+          className="panel banner-throb absolute right-0 top-[calc(100%+12px)] z-70 w-60 p-3 text-[11.5px] leading-[1.45] font-bold text-muted"
+        >
           No EIP-6963 wallet was found in this browser. Install one (e.g. a browser extension
           wallet) and reload to predict.
         </p>
       )}
-      {!open && wallet.status === "rejected" && wallet.errorMessage && (
-        <p className="absolute right-0 top-full z-70 mt-1 w-56 border border-ash bg-tar p-2 text-[0.62rem] leading-relaxed text-ember">
-          {wallet.errorMessage}
-        </p>
-      )}
-      {!open && wallet.status === "error" && wallet.errorMessage && (
-        <p className="absolute right-0 top-full z-70 mt-1 w-56 border border-ash bg-tar p-2 text-[0.62rem] leading-relaxed text-ember">
+      {!open && (wallet.status === "rejected" || wallet.status === "error") && wallet.errorMessage && (
+        <p
+          style={POP}
+          className="banner-throb absolute right-0 top-[calc(100%+12px)] z-70 w-60 rounded-2xl border-[3px] border-ink bg-coral p-3 text-[11.5px] leading-[1.45] font-bold text-white shadow-[0_5px_0_var(--ink)]"
+        >
           {wallet.errorMessage}
         </p>
       )}
@@ -87,53 +138,60 @@ export function WalletButton() {
         <div
           role="dialog"
           aria-label="Wallet"
-          className="panel absolute right-0 top-full z-70 mt-1 w-72 p-3"
+          style={{ ...POP, transformOrigin: "top right" }}
+          className="banner-throb absolute right-0 top-[calc(100%+12px)] z-70 w-[300px] max-w-[calc(100vw-24px)] rounded-[20px] border-[3px] border-ink bg-white p-4 text-ink shadow-[0_8px_0_var(--ink)]"
         >
-          <div className="mb-2 flex items-center justify-between gap-2 border-b border-ash pb-2">
-            <span className="font-mono text-[0.68rem] text-bone" title={wallet.address}>
-              {shortAddress(wallet.address, 8, 6)}
-            </span>
-            <span className="ticker text-[0.55rem] text-smoke">Robinhood Chain</span>
+          <div className="border-b-[3px] border-dashed border-sand-deep pb-3">
+            <div className="flex items-center justify-between gap-2">
+              <span className="ticker text-[10px] text-muted">Address</span>
+              {/* Written out rather than built from `.pill`, whose white background is declared
+                  outside Tailwind's layers and would beat any utility set on it here. */}
+              <span className="inline-flex flex-none items-center rounded-full border-2 border-ink bg-purple px-2 py-[3px] text-[10px] leading-none font-extrabold tracking-[0.08em] text-white uppercase">
+                Robinhood Chain
+              </span>
+            </div>
+            {/* The whole address, in its own case — a truncated or re-cased one is a different
+                string from the one the wallet holds. */}
+            <p className="mt-1.5 break-all text-[12px] leading-[1.3] font-black">{wallet.address}</p>
           </div>
 
           {wallet.status === "wrong-network" ? (
-            <div className="flex flex-col gap-2">
-              <p className="text-[0.65rem] leading-relaxed text-hazard">
+            <div className="mt-3.5 flex flex-col gap-2.5">
+              <p className="rounded-[14px] border-[3px] border-ink bg-yellow-pale px-3 py-2.5 text-[11.5px] leading-[1.45] font-bold">
                 This wallet is on chain {wallet.chainId ?? "?"}, not Robinhood Chain (4663).
               </p>
-              <button
-                type="button"
-                onClick={() => void wallet.switchNetwork()}
-                className="ticker border border-hazard px-2 py-1.5 text-[0.62rem] text-hazard hover:bg-hazard hover:text-void"
-              >
+              <button type="button" onClick={() => void wallet.switchNetwork()} className="btn btn-yellow w-full">
                 Switch network
               </button>
-              {wallet.errorMessage && <p className="text-[0.6rem] text-ember">{wallet.errorMessage}</p>}
+              {wallet.errorMessage && (
+                <p className="text-[11.5px] leading-[1.45] font-bold text-coral">{wallet.errorMessage}</p>
+              )}
             </div>
           ) : wallet.signIn === "signed-in" ? (
             <RewardsPanel signedIn />
           ) : (
-            <div className="flex flex-col gap-2">
-              <p className="text-[0.65rem] leading-relaxed text-smoke">
+            <div className="mt-3.5 flex flex-col gap-2.5">
+              <p className="text-[11.5px] leading-[1.45] font-bold text-muted">
                 Sign the message in your wallet to predict and to see your balance.
               </p>
               <button
                 type="button"
                 onClick={() => void wallet.requestSignIn()}
                 disabled={wallet.signIn === "signing-in"}
-                className="ticker border border-blood px-2 py-1.5 text-[0.62rem] text-ember transition-colors hover:bg-blood hover:text-bone disabled:opacity-60"
+                className="btn btn-coral w-full"
               >
                 {wallet.signIn === "signing-in" ? "Check your wallet…" : "Sign in to predict"}
               </button>
-              {(wallet.signIn === "rejected" || wallet.signIn === "unavailable") &&
-                wallet.errorMessage && <p className="text-[0.6rem] text-ember">{wallet.errorMessage}</p>}
+              {(wallet.signIn === "rejected" || wallet.signIn === "unavailable") && wallet.errorMessage && (
+                <p className="text-[11.5px] leading-[1.45] font-bold text-coral">{wallet.errorMessage}</p>
+              )}
             </div>
           )}
 
           <button
             type="button"
             onClick={() => void wallet.disconnect()}
-            className="ticker mt-3 w-full border-t border-ash pt-2 text-left text-[0.6rem] text-smoke hover:text-ember"
+            className="mt-3.5 text-[12px] font-black text-coral underline underline-offset-2 hover:text-ink"
           >
             Disconnect
           </button>

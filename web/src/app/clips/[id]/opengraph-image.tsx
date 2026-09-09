@@ -15,6 +15,12 @@ const CARD_CACHE_CONTROL = "public, max-age=0, s-maxage=300, stale-while-revalid
 // rather than allowed to overflow the card.
 const CAPTION_MAX = 120;
 
+// The arcade palette, matching src/app/globals.css. Satori cannot read CSS custom properties.
+const INK = "#1B1B2F";
+const CREAM = "#FFF6E5";
+const CORAL = "#FF5E5B";
+const MUTED = "#6B6B85";
+
 function clamp(text: string): string {
   if (text.length <= CAPTION_MAX) return text;
   return `${text.slice(0, CAPTION_MAX - 1).trimEnd()}…`;
@@ -45,76 +51,84 @@ export default async function OgImage({ params }: { params: Promise<{ id: string
           height: "100%",
           display: "flex",
           flexDirection: "column",
-          backgroundColor: "#070606",
-          color: "#ece4d4",
+          backgroundColor: CREAM,
+          color: INK,
           fontFamily: "sans-serif",
         }}
       >
-        <div style={{ display: "flex", height: 18, width: "100%", backgroundColor: "#e02418" }} />
         <div
           style={{
             display: "flex",
             flexDirection: "column",
             flexGrow: 1,
             justifyContent: "space-between",
-            padding: "56px 64px",
+            padding: "54px 64px 40px",
           }}
         >
-          <div style={{ display: "flex", flexDirection: "column" }}>
+          <div style={{ display: "flex", alignItems: "flex-start" }}>
             <div
               style={{
                 display: "flex",
-                fontSize: 120,
-                fontWeight: 800,
+                backgroundColor: CORAL,
+                color: "#ffffff",
+                border: `5px solid ${INK}`,
+                borderRadius: 18,
+                padding: "10px 30px",
+                fontSize: 76,
+                fontWeight: 900,
                 letterSpacing: 2,
-                transform: "skewX(-6deg)",
-                textShadow: "8px 6px 0 #e02418",
+                lineHeight: 1.05,
+                boxShadow: `0 9px 0 ${INK}`,
               }}
             >
               WANTED
             </div>
-            <div
-              style={{
-                display: "flex",
-                marginTop: 12,
-                fontSize: 26,
-                letterSpacing: 8,
-                color: "#93897a",
-              }}
-            >
-              AN AI PLAYS. YOU PREDICT.
-            </div>
           </div>
-          <div style={{ display: "flex", flexDirection: "column" }}>
-            <div
-              style={{
-                display: "flex",
-                fontSize: 44,
-                lineHeight: 1.25,
-                maxWidth: 1000,
-                color: "#ece4d4",
-              }}
-            >
+
+          <div
+            style={{
+              display: "flex",
+              flexDirection: "column",
+              backgroundColor: "#ffffff",
+              border: `5px solid ${INK}`,
+              borderRadius: 22,
+              boxShadow: `0 10px 0 ${INK}`,
+              padding: "34px 38px",
+            }}
+          >
+            <div style={{ display: "flex", fontSize: 42, fontWeight: 800, lineHeight: 1.25, maxWidth: 1000 }}>
               {caption}
             </div>
             <div
               style={{
                 display: "flex",
                 justifyContent: "space-between",
-                marginTop: 28,
-                fontSize: 22,
-                letterSpacing: 4,
-                color: "#93897a",
+                alignItems: "center",
+                marginTop: 26,
+                fontSize: 21,
+                letterSpacing: 3,
+                color: MUTED,
               }}
             >
               <div style={{ display: "flex" }}>{meta}</div>
-              <div style={{ display: "flex", color: "#e02418" }}>
-                THE AGENT IS AN AI · COMMENTARY IS AI-GENERATED
-              </div>
+              <div style={{ display: "flex", color: CORAL }}>COMMENTARY IS AI-GENERATED</div>
             </div>
           </div>
         </div>
-        <div style={{ display: "flex", height: 18, width: "100%", backgroundColor: "#e02418" }} />
+
+        <div
+          style={{
+            display: "flex",
+            justifyContent: "center",
+            padding: "16px 64px",
+            backgroundColor: INK,
+            color: CREAM,
+            fontSize: 19,
+            letterSpacing: 3,
+          }}
+        >
+          AN AI PLAYS GTA · YOU CALL THE NEXT MOVE
+        </div>
       </div>
     ),
     { ...size, headers: { "cache-control": CARD_CACHE_CONTROL } }

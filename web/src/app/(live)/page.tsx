@@ -24,11 +24,14 @@ export default async function LivePage() {
 
   return (
     <>
-      <header className="flex flex-col gap-1 pt-3">
-        <h1 className="font-display text-2xl leading-tight text-bone sm:text-3xl">
+      {/* The proposition, not the wordmark: the brand lives in the nav, so this heading says
+          what the page IS. Deliberately not set as a sticker — CLAUDE.md §7 keeps the game's
+          name out of anything that reads as our logo. */}
+      <header className="flex flex-col gap-1 pt-4">
+        <h1 className="font-display text-[1.55rem] leading-none sm:text-[2rem]">
           An AI plays GTA, live.
         </h1>
-        <p className="max-w-lg text-sm text-smoke">
+        <p className="max-w-lg text-sm text-dim">
           Predict what it does next — correct calls earn TTWO.
         </p>
       </header>

@@ -1,215 +1,338 @@
 @import "tailwindcss";
 
-/* WANTED design system — "street signal" brutalism.
-   Asphalt black, blood red, bone white. Sharp corners, hazard stripes, film grain.
-   The wordmark styling is original: heavy grotesque + red misprint offset. It deliberately
-   avoids any resemblance to the game's own logo, art or death-screen typography. */
+/* WANTED — "arcade" design system.
+ *
+ * Extracted from the WANTED Arcade design (claude.ai/design project "GTA Vibes Kids Game UI"),
+ * which is built almost entirely from inline styles. The vocabulary underneath it is small and
+ * consistent, so it lives here as tokens and a handful of classes rather than being copied inline
+ * into every component:
+ *
+ *   ink        #1B1B2F   201 uses — borders, text, and every shadow
+ *   cream      #FFF6E5   the page
+ *   sand       #F1E9D8   muted fills inside cards
+ *   coral      #FF5E5B   the primary accent and the wordmark
+ *   yellow     #FFC93C   live/urgent headers
+ *   teal       #2ED3B7   correct, passed, positive
+ *   purple     #7B5CFF   the player card
+ *   blue       #5AB8FF   secondary
+ *
+ * The look is a hard-edged sticker style: a 3px ink border and a hard offset shadow with NO blur
+ * (`0 Npx 0 ink`), which is what makes a card read as a physical thing rather than a surface with
+ * a soft drop shadow. Blur is never used on these; adding it flattens the whole system.
+ *
+ * Display type is Lilita One (78 uses in the source), body is Nunito.
+ */
 
 :root {
-  --void: #070606;
-  --tar: #100e0d;
-  --ash: #262220;
-  --bone: #ece4d4;
-  --smoke: #93897a;
-  --blood: #e02418;
-  --ember: #ff4a35;
-  --hazard: #f2a007;
+  --ink: #1b1b2f;
+  --ink-deep: #12121c;
+  --cream: #fff6e5;
+  --sand: #f1e9d8;
+  --sand-deep: #eae0cc;
+  --coral: #ff5e5b;
+  --coral-soft: #ff8a87;
+  --yellow: #ffc93c;
+  --yellow-pale: #ffe9b0;
+  --teal: #2ed3b7;
+  --purple: #7b5cff;
+  --purple-pale: #d9d2ff;
+  --blue: #5ab8ff;
+  --blue-pale: #9ad3ff;
+  --muted: #6b6b85;
+  --dim: #4a4a63;
 }
 
 @theme inline {
-  --color-void: var(--void);
-  --color-tar: var(--tar);
-  --color-ash: var(--ash);
-  --color-bone: var(--bone);
-  --color-smoke: var(--smoke);
-  --color-blood: var(--blood);
-  --color-ember: var(--ember);
-  --color-hazard: var(--hazard);
-  --font-display: var(--font-archivo-black), "Arial Black", "Helvetica Neue", sans-serif;
-  --font-sans: var(--font-archivo), "Helvetica Neue", Arial, sans-serif;
-  --font-mono: var(--font-plex-mono), "Courier New", monospace;
+  --color-ink: var(--ink);
+  --color-ink-deep: var(--ink-deep);
+  --color-cream: var(--cream);
+  --color-sand: var(--sand);
+  --color-sand-deep: var(--sand-deep);
+  --color-coral: var(--coral);
+  --color-coral-soft: var(--coral-soft);
+  --color-yellow: var(--yellow);
+  --color-yellow-pale: var(--yellow-pale);
+  --color-teal: var(--teal);
+  --color-purple: var(--purple);
+  --color-purple-pale: var(--purple-pale);
+  --color-blue: var(--blue);
+  --color-blue-pale: var(--blue-pale);
+  --color-muted: var(--muted);
+  --color-dim: var(--dim);
+  --font-display: var(--font-lilita), "Arial Black", system-ui, sans-serif;
+  --font-sans: var(--font-nunito), system-ui, sans-serif;
+  --font-mono: var(--font-nunito), system-ui, sans-serif;
 }
 
 html {
-  background: var(--void);
-  scrollbar-color: var(--ash) var(--void);
+  background: var(--cream);
+  scrollbar-color: var(--ink) var(--sand);
 }
 
 body {
-  background: var(--void);
-  color: var(--bone);
+  background: var(--cream);
+  color: var(--ink);
   font-family: var(--font-sans);
+  font-weight: 700;
   overflow-x: hidden;
+  /* The faint dot grid the design sits on. */
+  background-image: radial-gradient(circle at 1px 1px, rgba(27, 27, 47, 0.07) 1px, transparent 0);
+  background-size: 22px 22px;
+}
+
+a {
+  color: var(--ink);
+  text-decoration: none;
+}
+a:hover {
+  color: var(--coral);
 }
 
 ::selection {
-  background: var(--blood);
-  color: var(--bone);
+  background: var(--coral);
+  color: #fff;
 }
 
-/* Film grain: inline SVG turbulence, fixed overlay, never intercepts input. */
-.grain::after {
-  content: "";
-  position: fixed;
-  inset: -50%;
-  z-index: 70;
-  pointer-events: none;
-  opacity: 0.055;
-  background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='240' height='240'%3E%3Cfilter id='n'%3E%3CfeTurbulence type='fractalNoise' baseFrequency='0.82' numOctaves='3' stitchTiles='stitch'/%3E%3C/filter%3E%3Crect width='100%25' height='100%25' filter='url(%23n)'/%3E%3C/svg%3E");
-}
-
-/* Hazard stripe divider */
-.stripes {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    var(--blood) 0 10px,
-    transparent 10px 22px
-  );
-}
-
-.stripes-dim {
-  background-image: repeating-linear-gradient(
-    -45deg,
-    color-mix(in srgb, var(--blood) 45%, transparent) 0 8px,
-    transparent 8px 18px
-  );
-}
-
-/* Original WANTED wordmark: skewed heavy grotesque with a red misprint ghost. */
-.wordmark {
-  position: relative;
-  display: inline-block;
-  font-family: var(--font-display);
-  letter-spacing: 0.02em;
-  transform: skewX(-6deg);
-  color: var(--bone);
-  text-transform: uppercase;
-  line-height: 0.9;
-  /* Ghost is a same-text pseudo-element; both layers must lay out identically, so never wrap. */
-  white-space: nowrap;
-}
-.wordmark::before {
-  content: attr(data-text);
-  position: absolute;
-  left: 0.06em;
-  top: 0.05em;
-  z-index: -1;
-  color: var(--blood);
-  -webkit-user-select: none;
-  user-select: none;
-}
-
+/* --- the sticker card -------------------------------------------------------------------------
+ * `.panel` keeps its name from the previous design system so that the twenty-odd components
+ * already using it inherit the new look without each one being rewritten. */
 .panel {
-  background: var(--tar);
-  border: 1px solid var(--ash);
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  box-shadow: 0 5px 0 var(--ink);
+}
+
+.panel-flat {
+  background: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 16px;
 }
 
 .panel-title {
-  font-family: var(--font-mono);
-  font-size: 0.68rem;
-  letter-spacing: 0.28em;
+  font-family: var(--font-display);
+  letter-spacing: 0.02em;
   text-transform: uppercase;
-  color: var(--smoke);
 }
 
-/* Red LED status dot */
-.led {
-  width: 9px;
-  height: 9px;
-  border-radius: 9999px;
-  flex: none;
+/* Tinted variants. The header strip of a card takes the colour; the body stays white. */
+.panel-yellow { background: var(--yellow); }
+.panel-teal { background: var(--teal); }
+.panel-coral { background: var(--coral); }
+.panel-purple { background: var(--purple); color: #fff; }
+.panel-blue { background: var(--blue); }
+.panel-sand { background: var(--sand); }
+
+/* --- pills ------------------------------------------------------------------------------------ */
+.pill {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  padding: 4px 12px;
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+  background: #fff;
+  white-space: nowrap;
 }
-.led-live {
-  background: var(--ember);
-  box-shadow: 0 0 6px 1px color-mix(in srgb, var(--ember) 80%, transparent);
-  animation: led-pulse 1.6s ease-in-out infinite;
+
+.pill-sm {
+  padding: 2px 9px;
+  font-size: 11px;
+  border-width: 2px;
 }
-.led-dead {
-  background: var(--ash);
-  border: 1px solid var(--smoke);
+
+.pill-solid {
+  box-shadow: 0 3px 0 var(--ink);
 }
-@keyframes led-pulse {
+
+/* --- buttons ---------------------------------------------------------------------------------- */
+.btn {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  border: 3px solid var(--ink);
+  border-radius: 999px;
+  padding: 10px 20px;
+  background: #fff;
+  font-family: var(--font-display);
+  font-size: 15px;
+  letter-spacing: 0.04em;
+  text-transform: uppercase;
+  box-shadow: 0 4px 0 var(--ink);
+  cursor: pointer;
+  transition: transform 0.06s ease, box-shadow 0.06s ease;
+}
+.btn:hover:not(:disabled) {
+  transform: translateY(-1px);
+  box-shadow: 0 5px 0 var(--ink);
+  color: var(--ink);
+}
+/* Pressing pushes the card down onto its shadow — the whole point of a hard offset. */
+.btn:active:not(:disabled) {
+  transform: translateY(4px);
+  box-shadow: 0 0 0 var(--ink);
+}
+.btn:disabled {
+  opacity: 0.55;
+  cursor: not-allowed;
+  box-shadow: 0 2px 0 var(--ink);
+}
+.btn-coral { background: var(--coral); color: #fff; }
+.btn-coral:hover:not(:disabled) { color: #fff; }
+.btn-teal { background: var(--teal); }
+.btn-yellow { background: var(--yellow); }
+.btn-ink { background: var(--ink); color: var(--cream); }
+.btn-ink:hover:not(:disabled) { color: var(--cream); }
+
+/* --- the wordmark ------------------------------------------------------------------------------
+ * Original: heavy display type in a coral sticker. Deliberately nothing like the game's own
+ * lettering — CLAUDE.md rule 8 keeps our identity clear of it. */
+.wordmark {
+  display: inline-block;
+  font-family: var(--font-display);
+  background: var(--coral);
+  color: #fff;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  padding: 6px 16px;
+  letter-spacing: 0.04em;
+  box-shadow: 0 4px 0 var(--ink);
+  transform: rotate(-2deg);
+}
+
+/* A page's big title, set as a sticker. */
+.page-title {
+  display: inline-block;
+  font-family: var(--font-display);
+  font-size: clamp(34px, 6vw, 52px);
+  line-height: 1;
+  letter-spacing: 0.01em;
+  text-transform: uppercase;
+  border: 3px solid var(--ink);
+  border-radius: 14px;
+  padding: 12px 22px;
+  box-shadow: 0 6px 0 var(--ink);
+  transform: rotate(-1.5deg);
+}
+
+/* --- small caps label, kept from the old system so existing markup still reads correctly ------- */
+.ticker {
+  font-family: var(--font-display);
+  letter-spacing: 0.08em;
+  text-transform: uppercase;
+}
+
+/* --- meters ----------------------------------------------------------------------------------- */
+.meter {
+  position: relative;
+  height: 14px;
+  border: 2px solid var(--ink);
+  border-radius: 999px;
+  background: var(--sand);
+  overflow: hidden;
+}
+.meter > span {
+  display: block;
+  height: 100%;
+  background: var(--coral);
+}
+
+/* An outcome bar: the fill IS the label's background, so the percentage reads as a share. */
+.predict-bar {
+  position: relative;
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  border: 3px solid var(--ink);
+  border-radius: 12px;
+  background: #fff;
+  overflow: hidden;
+  font-weight: 900;
+}
+.predict-bar > .fill {
+  position: absolute;
+  inset: 0 auto 0 0;
+  background: var(--teal);
+}
+.predict-bar > .label,
+.predict-bar > .pct {
+  position: relative;
+  padding: 12px 14px;
+}
+
+/* --- misc, carried over so existing components keep working ----------------------------------- */
+.star { color: var(--ink); opacity: 0.28; }
+.star-lit { color: var(--yellow); opacity: 1; }
+
+.led { width: 8px; height: 8px; border-radius: 999px; border: 2px solid var(--ink); }
+.led-live { background: var(--coral); animation: ledpulse 1.4s infinite; }
+.led-dead { background: var(--sand-deep); }
+
+.skeleton-pulse {
+  background: var(--sand);
+  border: 3px solid var(--ink);
+  border-radius: 16px;
+  animation: pulse 1.4s ease-in-out infinite;
+}
+
+/* The hazard stripe from the old system, recoloured. Used as a thin rule under the header. */
+.stripes {
+  background-image: repeating-linear-gradient(
+    -45deg,
+    var(--coral) 0 10px,
+    var(--ink) 10px 20px
+  );
+}
+.stripes-dim { opacity: 0.5; }
+
+/* --- animation -------------------------------------------------------------------------------- */
+@keyframes ledpulse {
+  0%, 100% { transform: scale(1); opacity: 1; }
+  50% { transform: scale(1.4); opacity: 0.45; }
+}
+@keyframes pulse {
   0%, 100% { opacity: 1; }
-  50% { opacity: 0.35; }
+  50% { opacity: 0.55; }
 }
-
-/* Offline banner pulse — loud but cheap (opacity only). */
-@keyframes banner-throb {
-  0%, 100% { opacity: 1; }
-  50% { opacity: 0.82; }
+@keyframes popin {
+  0% { transform: scale(0.7) rotate(-5deg); opacity: 0; }
+  60% { transform: scale(1.06) rotate(1deg); opacity: 1; }
+  100% { transform: scale(1) rotate(0); }
 }
-.banner-throb { animation: banner-throb 2.4s ease-in-out infinite; }
-
-/* Feed entries slide in */
-@keyframes feed-in {
-  from { opacity: 0; transform: translateY(-6px); }
+@keyframes slidein {
+  from { opacity: 0; transform: translateY(-8px); }
   to { opacity: 1; transform: none; }
 }
-.feed-in { animation: feed-in 240ms ease-out; }
-
-/* Route-level loading skeleton: shape only, never stand-in content. */
-@keyframes skeleton-pulse {
-  0%, 100% { opacity: 0.45; }
-  50% { opacity: 0.8; }
-}
-.skeleton-pulse { animation: skeleton-pulse 1.4s ease-in-out infinite; }
-
-/* Countdown running low on a live prediction — urgency without a new color. */
-@keyframes urgent-pulse {
-  0%, 100% { color: var(--ember); }
-  50% { color: var(--blood); }
-}
-.urgent { animation: urgent-pulse 1s ease-in-out infinite; }
+.feed-in { animation: slidein 0.28s ease both; }
+.banner-throb { animation: popin 0.4s ease both; }
+.urgent { animation: ledpulse 0.9s infinite; }
 
 @media (prefers-reduced-motion: reduce) {
-  .led-live, .banner-throb, .feed-in, .skeleton-pulse, .urgent { animation: none; }
+  .feed-in, .banner-throb, .urgent, .led-live, .skeleton-pulse { animation: none; }
+  .btn { transition: none; }
 }
 
-/* Sticky mobile prediction action bar: pinned to the viewport foot, clear of the home
-   indicator, always above the page content so a reader scrolled into THOUGHTS or RESULTS can
-   still answer without losing the stream. */
-.predict-bar {
-  position: fixed;
-  left: 0;
-  right: 0;
-  bottom: 0;
-  z-index: 55;
-  padding-bottom: env(safe-area-inset-bottom, 0px);
-}
-
-/* Live page layout: five named areas, ONE DOM node per area (each child sets `grid-area` via a
-   `[grid-area:*]` utility). Below `lg` it is a single stacked column in brief-mandated order
-   (stream, predict, state, thoughts, results); at `lg` the same five nodes reflow into two
-   columns without remounting anything — no panel, landmark, or its internal state/subscriptions
-   ever exists twice. `state` spans both right-column rows so a shorter left column does not
-   force a gap the way two independently-placed row tracks would. */
+/* --- the live grid ----------------------------------------------------------------------------
+ * One DOM order, reflowed by breakpoint. Mobile order is the brief's: stream, prediction, state,
+ * thoughts, results. Each panel is mounted exactly once — a CSS-hidden duplicate would double the
+ * ARIA landmarks and the component state. */
 .live-grid {
   display: grid;
-  grid-template-areas:
-    "stream"
-    "predict"
-    "state"
-    "thoughts"
-    "results";
+  gap: 14px;
+  align-items: start;
   grid-template-columns: minmax(0, 1fr);
+  grid-template-areas: "stream" "predict" "state" "thoughts" "results";
 }
-@media (min-width: 64rem) {
+@media (min-width: 1024px) {
   .live-grid {
-    grid-template-columns: minmax(0, 1fr) 380px;
+    grid-template-columns: minmax(0, 1.9fr) minmax(0, 1fr);
     grid-template-areas:
       "stream  predict"
-      "state   thoughts"
-      "state   results";
+      "state   player"
+      "thoughts results";
   }
-}
-
-/* Wanted stars */
-.star { color: var(--ash); }
-.star-lit { color: var(--hazard); }
-
-/* Marquee-less ticker strip: static, loud */
-.ticker {
-  font-family: var(--font-mono);
-  letter-spacing: 0.2em;
-  text-transform: uppercase;
 }

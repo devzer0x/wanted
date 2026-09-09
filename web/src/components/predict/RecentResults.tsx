@@ -24,14 +24,18 @@ export function RecentResults({
   if (shown.length === 0) return null;
 
   return (
-    <section className="flex flex-col gap-2" aria-label="Recent results">
-      <div className="flex items-center justify-between">
-        <h2 className="panel-title">Recent results</h2>
-        <Link href="/predict" className="ticker text-[0.58rem] text-smoke hover:text-ember">
-          all results →
+    <section className="flex flex-col gap-2.5" aria-label="Recent results">
+      <div className="flex items-center justify-between gap-2">
+        <h2 className="panel-title text-lg">Recent results</h2>
+        <Link
+          href="/predict"
+          className="pill pill-sm panel-title transition-transform hover:-translate-y-px"
+          style={{ background: "var(--yellow-pale)" }}
+        >
+          All results →
         </Link>
       </div>
-      <div className="flex flex-col gap-2">
+      <div className="flex flex-col gap-2.5">
         {shown.map((prediction) => (
           <ResolvedPredictionCard
             key={prediction.id}

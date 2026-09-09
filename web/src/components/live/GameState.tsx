@@ -1,60 +1,22 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { formatBornAge, formatHours, formatInt, formatMoney, formatUtcStamp } from "@/lib/format";
+import { formatBornAge, formatHours, formatInt, formatUtcStamp } from "@/lib/format";
 import type { HudState, StatsRow } from "@/lib/types";
 
-// Bridge reports player health on a 0–200 scale (CONTRACTS §1 `max_health: 200`, the bridge's
-// own `/state` payload — the same constant this bar's fill already assumes); armor is 0–100.
-// The raw value is shown as "value/max", never a bare number: 169 alone reads as an impossible
-// percentage, and computing an actual "84%" would need `max_health` in `stats.hud`, which the
-// frozen CONTRACTS §5 shape does not carry — that is a real gap, not a fact to paper over by
-// inventing a denominator no one gave the site.
-function Bar({
-  label,
-  value,
-  max,
-  tone,
-}: {
-  label: string;
-  value: number;
-  max: number;
-  tone: "blood" | "bone";
-}) {
-  const pct = Math.max(0, Math.min(100, (value / max) * 100));
+function Tile({ label, value, tone }: { label: string; value: string; tone?: "coral" }) {
   return (
-    <div className="flex items-center gap-2">
-      <span className="ticker w-8 text-[0.6rem] text-smoke">{label}</span>
-      <div className="h-2 flex-1 border border-ash bg-void">
-        <div
-          className={tone === "blood" ? "h-full bg-blood" : "h-full bg-bone"}
-          style={{ width: `${pct}%` }}
-        />
-      </div>
-      <span className="min-w-[3.5rem] text-right font-mono text-[0.65rem] tabular-nums text-bone">
-        {value}/{max}
+    <div
+      className="flex min-w-0 flex-col items-center justify-center gap-1 rounded-[14px] border-[3px] border-ink px-2 py-2.5 text-center"
+      style={{ background: "var(--cream)" }}
+    >
+      <span
+        className="font-display text-[1.35rem] leading-none tabular-nums"
+        style={tone === "coral" ? { color: "var(--coral)" } : undefined}
+      >
+        {value}
       </span>
-    </div>
-  );
-}
-
-function WantedStars({ level }: { level: number }) {
-  return (
-    <span className="font-mono text-sm tracking-widest" role="img" aria-label={`Wanted level ${level} of 5`}>
-      {[0, 1, 2, 3, 4].map((i) => (
-        <span key={i} className={i < level ? "star-lit" : "star"} aria-hidden="true">
-          ★
-        </span>
-      ))}
-    </span>
-  );
-}
-
-function Stat({ label, value, loud }: { label: string; value: string; loud?: boolean }) {
-  return (
-    <div className="flex min-w-0 flex-1 flex-col items-center gap-0.5 border border-ash px-1 py-1.5">
-      <span className={`font-mono text-sm tabular-nums ${loud ? "text-ember" : "text-bone"}`}>{value}</span>
-      <span className="ticker truncate text-[0.5rem] text-smoke">{label}</span>
+      <span className="ticker text-[0.55rem] text-muted">{label}</span>
     </div>
   );
 }
@@ -69,18 +31,21 @@ function OperatingSince({ bornAt }: { bornAt: string | null }) {
     const id = setInterval(() => setNow(Date.now()), 60_000);
     return () => clearInterval(id);
   }, []);
-  if (!bornAt) return <span className="ticker text-[0.55rem] text-smoke">not born yet</span>;
+  if (!bornAt) return <span className="ticker text-[0.55rem] text-muted">not born yet</span>;
   return (
-    <span className="ticker text-[0.55rem] text-smoke">
+    <span className="ticker text-[0.55rem] text-muted">
       operating {formatBornAge(bornAt, now)} · since {formatUtcStamp(bornAt)}
     </span>
   );
 }
 
-// STATUS, GOAL, HP, WANTED level, VEHICLE, DEATHS, TIME ALIVE — one panel, dense and legible at
-// a glance. SPEED is asked for by the product brief but is not part of the frozen stats.hud
-// shape (CONTRACTS §5: health/armor/wanted/cash/vehicle/street/zone/clock/weather only); rather
-// than invent a number the game never reports, this panel omits it.
+// The run so far: how often he has died, been arrested, passed a job, and how long he has been
+// awake. HP, armor, the wanted stars, the cash and the current goal live under the stream, where
+// the picture they describe is — this panel is the ledger, not the HUD.
+//
+// SPEED is asked for by the product brief but is not part of the frozen stats.hud shape
+// (CONTRACTS §5: health/armor/wanted/cash/vehicle/street/zone/clock/weather only); rather than
+// invent a number the game never reports, it is omitted.
 export function GameState({
   stats,
   hud,
@@ -92,61 +57,55 @@ export function GameState({
   offline: boolean;
   bornAt: string | null;
 }) {
+  const hours = formatHours(stats?.hours_alive ?? null);
   return (
-    <section className="panel p-3 sm:p-4" aria-label="Agent game state">
-      <div className="mb-2 flex flex-wrap items-center justify-between gap-2">
+    <section className="panel overflow-hidden" aria-label="Agent game state">
+      <div
+        className="flex flex-wrap items-center justify-between gap-2 border-b-[3px] border-ink px-4 py-2.5"
+        style={{ background: "var(--sand)" }}
+      >
+        <h2 className="panel-title text-[1.05rem]">The run so far</h2>
         <div className="flex items-center gap-2">
-          <span className={`led ${offline ? "led-dead" : "led-live"}`} aria-hidden="true" />
-          <span className={`ticker text-[0.62rem] ${offline ? "text-smoke" : "text-ember"}`}>
-            {offline ? "offline" : "live"}
+          {typeof stats?.governor_level === "number" && (
+            <span className="pill pill-sm" style={{ background: "var(--cream)" }}>
+              governor L{stats.governor_level}
+            </span>
+          )}
+          <span className="pill pill-sm">
+            <span className={`led ${offline ? "led-dead" : "led-live"}`} aria-hidden="true" />
+            {offline ? "off air" : "live"}
           </span>
         </div>
-        {typeof stats?.governor_level === "number" && (
-          <span className="ticker border border-ash px-1.5 py-0.5 text-[0.55rem] text-smoke">
-            L{stats.governor_level}
-          </span>
+      </div>
+
+      <div className="px-4 py-3.5">
+        {!hud && (
+          <p className="mb-3 text-[0.8rem] leading-relaxed text-dim">
+            No telemetry on record — nothing has been reported for the panels below.
+          </p>
         )}
-      </div>
-
-      <p className="mb-3 font-mono text-sm leading-snug text-bone [overflow-wrap:anywhere]">
-        {stats?.current_goal || "No goal on record."}
-      </p>
-
-      {!hud ? (
-        <p className="text-xs text-smoke">No telemetry on record.</p>
-      ) : (
-        <div className="flex flex-col gap-2.5">
-          <Bar label="HP" value={hud.health} max={200} tone="blood" />
-          <Bar label="ARM" value={hud.armor} max={100} tone="bone" />
-          <div className="flex flex-wrap items-center justify-between gap-2">
-            <WantedStars level={hud.wanted} />
-            <span className="font-mono text-sm text-bone">{formatMoney(hud.cash, 0)}</span>
-          </div>
-          <dl className="grid grid-cols-2 gap-x-3 gap-y-1 text-[0.7rem]">
-            <dt className="ticker text-[0.6rem] text-smoke">Vehicle</dt>
-            <dd className="text-right font-mono text-bone truncate">{hud.vehicle ?? "on foot"}</dd>
-            <dt className="ticker text-[0.6rem] text-smoke">Street</dt>
-            <dd className="text-right font-mono text-bone truncate">{hud.street || "—"}</dd>
-            <dt className="ticker text-[0.6rem] text-smoke">Zone</dt>
-            <dd className="text-right font-mono text-bone truncate">{hud.zone || "—"}</dd>
-            <dt className="ticker text-[0.6rem] text-smoke">Clock</dt>
-            <dd className="text-right font-mono text-bone">
-              {hud.clock || "—"}
-              {hud.weather ? ` · ${hud.weather.toLowerCase()}` : ""}
-            </dd>
-          </dl>
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-4">
+          {/* The coral is for a number he actually earned; an em dash is the absence of one and
+              must not be dressed up as a score. */}
+          <Tile
+            label="Deaths"
+            value={formatInt(stats?.deaths ?? null)}
+            tone={typeof stats?.deaths === "number" ? "coral" : undefined}
+          />
+          <Tile
+            label="Busted"
+            value={formatInt(stats?.busted ?? null)}
+            tone={typeof stats?.busted === "number" ? "coral" : undefined}
+          />
+          <Tile label="Missions" value={formatInt(stats?.missions_passed ?? null)} />
+          <Tile label="Hours alive" value={hours === "—" ? "—" : `${hours}h`} />
         </div>
-      )}
-
-      <div className="mt-3 flex gap-1.5">
-        <Stat label="Deaths" value={formatInt(stats?.deaths ?? null)} loud />
-        <Stat label="Busted" value={formatInt(stats?.busted ?? null)} loud />
-        <Stat label="Missions" value={formatInt(stats?.missions_passed ?? null)} />
-        <Stat label="Time alive" value={`${formatHours(stats?.hours_alive ?? null)}h`} />
-      </div>
-
-      <div className="mt-3 border-t border-ash pt-2">
-        <OperatingSince bornAt={bornAt} />
+        <div
+          className="mt-3 border-t-[3px] border-dashed pt-2.5"
+          style={{ borderColor: "var(--sand-deep)" }}
+        >
+          <OperatingSince bornAt={bornAt} />
+        </div>
       </div>
     </section>
   );

@@ -10,17 +10,20 @@ export const metadata: Metadata = routeMetadata({
 
 export default function PredictPage() {
   return (
-    <div className="flex flex-col gap-4 pb-20 pt-4 lg:pb-4">
-      <header className="flex flex-col gap-2">
-        <h1 className="wordmark text-4xl sm:text-5xl" data-text="PREDICT">
-          PREDICT
-        </h1>
-        <p className="max-w-2xl text-sm text-smoke">
-          Predictions settle from the same telemetry this site reads — never from a guess about
-          what probably happened. Free to enter; correct calls earn TTWO.
-        </p>
-      </header>
-      <PredictView />
+    <div className="pb-16 pt-6 lg:pb-10">
+      {/* The record pills belong beside this title, and they need the same fetch the cards use, so
+          the header is handed to the client view rather than duplicating a request for them. */}
+      <PredictView
+        header={
+          <div className="min-w-0">
+            <h1 className="page-title panel-yellow">Predict</h1>
+            <p className="mt-3 max-w-xl text-[15px] font-bold leading-relaxed text-dim">
+              Predictions settle from the same telemetry this site reads — never from a guess about
+              what probably happened. Free to enter; correct calls earn TTWO.
+            </p>
+          </div>
+        }
+      />
     </div>
   );
 }
