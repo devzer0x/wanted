@@ -202,14 +202,13 @@ def test_his_own_name_is_never_read_as_a_repeating_subject() -> None:
     assert c.gate_say("Cruiser behind me, so the WANTED level holds.") is True
     assert c.gate_say("Lost him at the underpass; the WANTED level drops.") is True
 
-def test_the_agents_old_character_name_can_never_reach_the_public_feed() -> None:
-    """The knowledge base still refers to the character by an internal name in
+def test_a_banned_brand_can_never_reach_the_public_feed() -> None:
+    """The knowledge base and the research briefs name the game's publisher in
     hundreds of places, and that text is model INPUT. This is the gate on model
     OUTPUT, and it is what makes those references safe to leave alone.
 
-    It is not hypothetical: before the gate existed, the production `decisions`
-    table already contained lines where the agent addressed itself by that name,
-    and those lines render on the public site.
+    It is not hypothetical: a decision row is rendered verbatim on the public
+    feed, so the brand rule has to hold on model output, not just on our prose.
     """
     from wasted_harness.brain.prompts import banned_phrases
     from wasted_harness.brain.schemas import (
@@ -232,12 +231,12 @@ def test_the_agents_old_character_name_can_never_reach_the_public_feed() -> None
         return validate_decision_content(decision, ctx).say_reason
 
     # Matched case-insensitively as a substring, so every casing is caught.
-    for line in ("Focus, the agent.", "focus, the agent.", "WANTED, go.", "that is the agent's car"):
-        assert verdict(line) is not None, f"the old name slipped through: {line!r}"
+    for line in ("Nice one, Rockstar.", "nice one, rockstar.", "ROCKSTAR built this.", "peak rockstars"):
+        assert verdict(line) is not None, f"the banned brand slipped through: {line!r}"
 
     # And it catches it in `thought` too, not only in the spoken line.
     thought_only = DecisionModel(
-        thought="the agent should take the alley",
+        thought="Rockstar should have paved this alley",
         say="Alley.",
         mood="bored",
         goal="roam_the_block",

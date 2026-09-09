@@ -1772,7 +1772,7 @@ namespace WastedBridge
             // task so the engine builds the right CTask for what is actually in his hands.
             //
             //   "unarmed"  fists, whatever he is carrying. This is what makes `pick_a_fight` a
-            //              BIT rather than a shooting: a the agent who happens to own a pistol must
+            //              BIT rather than a shooting: an agent who happens to own a pistol must
             //              not execute a pedestrian who annoyed him.
             //   "armed"    the loadout gun chosen by RANGE (pump shotgun inside 10 m, pistol
             //              beyond) — read here, at task start, rather than from the harness's

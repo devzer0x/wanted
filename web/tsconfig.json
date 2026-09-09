@@ -31,6 +31,8 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-advrevpredict/types/**/*.ts",
+    ".next-boardrev/types/**/*.ts",
     ".next-check/types/**/*.ts",
     ".next-check/wallet/types/**/*.ts",
     ".next-e2e/types/**/*.ts",
@@ -39,7 +41,7 @@
     ".next-preview/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
-    ".next-shellrev/types/**/*.ts"
+    ".next-review/types/**/*.ts"
   ],
   "exclude": [
     "node_modules",

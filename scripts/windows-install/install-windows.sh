@@ -117,8 +117,8 @@ PYEOF
     sed -e "s|@@SERVER_IPV4@@|$WASTED_SERVER_IPV4|g" \
         -e "s|@@SERVER_PREFIXLEN@@|${prefixlen:-26}|g" \
         -e "s|@@SERVER_GATEWAY@@|$WASTED_SERVER_GATEWAY|g" \
-        -e "s|@@SERVER_DNS1@@|${WASTED_SERVER_DNS1:-185.12.64.1}|g" \
-        -e "s|@@SERVER_DNS2@@|${WASTED_SERVER_DNS2:-185.12.64.2}|g" \
+        -e "s|@@SERVER_DNS1@@|${WASTED_SERVER_DNS1:-1.1.1.1}|g" \
+        -e "s|@@SERVER_DNS2@@|${WASTED_SERVER_DNS2:-8.8.8.8}|g" \
         -e "s|@@SERVER_MAC_DASHED@@|$mac_dashed|g" \
         "$stage/wasted/wasted-network.ps1.template" > "$stage/wasted/wasted-network.ps1"
     rm -f "$stage/wasted/wasted-network.ps1.template"

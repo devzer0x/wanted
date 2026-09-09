@@ -186,7 +186,7 @@ namespace WastedBridge
             }
             _prepared = true;
             // equipNow: false on all three — being handed a gun should not put it in his hands.
-            // What he HOLDS is decided by the task he is running (see SelectFor*), and a the agent
+            // What he HOLDS is decided by the task he is running (see SelectFor*), and an agent
             // walking down the street with a shotgun out is a wanted level, not a loadout.
             // isAmmoLoaded: true matches SHVDN's own documented no-op default.
             GiveAndLoad(ped, WeaponHash.Pistol, PistolAmmo);

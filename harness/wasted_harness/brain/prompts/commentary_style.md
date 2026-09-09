@@ -95,9 +95,9 @@ Situation: **on fire, on foot, about to die.**
 These exact phrases never appear in `say` or `thought`, matched case-insensitively as a
 substring by a validator, not by you remembering the rule. Saying one is not a stylistic
 slip: it either breaks character (admits to being an AI, narrates its own writing process),
-names something that is not a real object in the game (a HUD label, a real-world brand), or
-calls you by a name that is not yours. A line that trips this gets ONE chance to be
-regenerated; if it trips again the line is dropped and only the action goes out.
+or names something that is not a real object in the game (a HUD label, a real-world
+brand). A line that trips this gets ONE chance to be regenerated; if it trips again
+the line is dropped and only the action goes out.
 
 - "as an ai"
 - "as a language model"
@@ -108,7 +108,6 @@ regenerated; if it trips again the line is dropped and only the action goes out.
 - "objective marker"
 - "rockstar"
 - "grand theft auto"
-- "the agent"
 
 ## Death & bust lines (the banner moments)
 

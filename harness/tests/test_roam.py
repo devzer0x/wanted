@@ -1997,7 +1997,7 @@ def test_taxi_ride_is_graded_on_the_seat_not_on_being_in_the_car() -> None:
 
 
 def test_pick_a_fight_is_always_a_fist_fight() -> None:
-    """CLAUDE.md-adjacent: a the agent who owns a pistol must not execute a pedestrian."""
+    """CLAUDE.md-adjacent: an agent who owns a pistol must not execute a pedestrian."""
     clock = FakeClock()
     e = RoamEngine(random.Random(37), clock=clock, level=2)
     state = armed_state(

@@ -227,11 +227,10 @@ def test_area_combat_warns_about_who_is_inside_the_radius() -> None:
 
 # --- the character's own name ---------------------------------------------------
 
-#: The one string the feed may never carry: a name for the character that is not
-#: his. It is curated in `commentary_style.md`'s "## Banned phrases" section, so
-#: the text the model is shown and the list the validator enforces are the same
-#: list — see `brain.prompts.banned_phrases`.
-FOREIGN_NAME = "the agent"
+#: A phrase the feed may never carry. It is curated in `commentary_style.md`'s
+#: "## Banned phrases" section, so the text the model is shown and the list the
+#: validator enforces are the same list — see `brain.prompts.banned_phrases`.
+BANNED_BRAND = "rockstar"
 
 
 def test_the_persona_names_the_character() -> None:
@@ -241,13 +240,13 @@ def test_the_persona_names_the_character() -> None:
     assert "You are still WANTED" in _prompt_text("director.md")
 
 
-def test_a_foreign_name_is_on_the_hard_filter_the_validator_actually_reads() -> None:
+def test_the_brand_guard_is_on_the_hard_filter_the_validator_actually_reads() -> None:
     """Not a second copy of the list: `banned_phrases()` parses the same section
     of `commentary_style.md` that the model is shown, and `main._think` hands
     exactly that tuple to the validator."""
     from wasted_harness.brain.prompts import banned_phrases
 
-    assert FOREIGN_NAME in banned_phrases()
+    assert BANNED_BRAND in banned_phrases()
 
 
 def test_the_validator_rejects_a_line_that_calls_him_by_a_foreign_name() -> None:
@@ -269,7 +268,7 @@ def test_the_validator_rejects_a_line_that_calls_him_by_a_foreign_name() -> None
 
     decision = DecisionModel(
         thought="Car on the marker, engine running, nobody in it. Take it and go.",
-        say="There's a Buffalo S sitting right on the marker. Focus, the agent.",
+        say="There's a Buffalo S sitting right on the marker. Peak Rockstar.",
         mood="chill",
         action=ActionModel(type="flee_police", params={}),
         goal="take the car on the marker",
@@ -296,7 +295,7 @@ def test_it_is_caught_in_thought_too_not_only_out_loud() -> None:
     )
 
     decision = DecisionModel(
-        thought="the agent needs a faster car before the freeway, this one will not hold up.",
+        thought="Rockstar hid a faster car near this freeway, this one will not hold up.",
         say="This thing tops out at disappointing.",
         mood="bored",
         action=ActionModel(type="flee_police", params={}),
@@ -310,7 +309,7 @@ def test_it_is_caught_in_thought_too_not_only_out_loud() -> None:
     assert "banned phrase" in violation.say_reason
 
 
-def test_no_prompt_file_puts_that_name_in_front_of_the_model_as_his() -> None:
+def test_no_prompt_file_puts_the_banned_brand_in_front_of_the_model() -> None:
     """The hygiene invariant: the string exists in the corpus in exactly one
     place — the hard-filter list, where its whole job is to be rejected."""
     root = resources.files("wasted_harness.brain.prompts")
@@ -323,8 +322,8 @@ def test_no_prompt_file_puts_that_name_in_front_of_the_model_as_his() -> None:
         if entry.name == "commentary_style.md":
             before, marker, after = text.partition("## banned phrases")
             assert marker, "the hard-filter section has been renamed or removed"
-            assert FOREIGN_NAME not in before
-            assert f'- "{FOREIGN_NAME}"' in after
+            assert BANNED_BRAND not in before
+            assert f'- "{BANNED_BRAND}"' in after
         else:
-            assert FOREIGN_NAME not in text, f"{entry.name} names him wrong"
+            assert BANNED_BRAND not in text, f"{entry.name} shows the model the banned brand"
     assert checked >= 10, f"only {checked} prompt files scanned; the corpus is bigger"

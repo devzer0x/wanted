@@ -468,7 +468,7 @@ ACTION_PARAM_KEYS: dict[str, tuple[str, ...]] = {
     # v1.11: fight ONE named ped, no relationship setup needed (unlike
     # combat_hated_targets_around). Only `handle` — see CONTRACTS §1.
     # v1.11 gave it `handle`; bridge 1.7.0 adds `weapon`, which is what makes
-    # `pick_a_fight` a FIST fight on a the agent who is carrying a pistol.
+    # `pick_a_fight` a FIST fight on an agent who is carrying a pistol.
     "fight_ped": ("handle", "weapon"),
     "flee_ped": ("handle",),
     "set_waypoint": ("x", "y"),

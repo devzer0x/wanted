@@ -1,5 +1,5 @@
 #!/usr/bin/env bash
-# The agent — poke the agent from the operator's Mac while the stream is live.
+# wanted — poke the agent from the operator's Mac while the stream is live.
 #
 # WHY THIS EXISTS. Three automatic stall detectors failed him in three different
 # ways in one week, and a live stream cannot wait for the fourth to be written:
@@ -28,7 +28,7 @@ DRY_RUN="${WANTED_DRY_RUN:-0}"
 
 menu() {
   cat <<'EOF'
-The agent — operator commands (all human-legal GTA play; no cheats behind any of these)
+wanted — operator commands (all human-legal GTA play; no cheats behind any of these)
 
   he's stuck, just make him DO something
     nudge              drop the current goal, ban the stalled task; HE picks a new goal now

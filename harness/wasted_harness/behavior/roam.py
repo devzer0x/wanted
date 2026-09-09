@@ -1150,7 +1150,7 @@ def _plan_pick_a_fight(state, view):
         steps.append(_walk_to((mark.pos.x, mark.pos.y, mark.pos.z), run=True))
     # `weapon: "unarmed"` (bridge 1.7.0): SET_CURRENT_PED_WEAPON to
     # WeaponHash.Unarmed before the combat task, so this is a fist fight
-    # whatever he happens to be carrying. Without it, the same goal on a the agent
+    # whatever he happens to be carrying. Without it, the same goal on an agent
     # who picked up a pistol is an execution, and the show is not that.
     steps.append({"type": "fight_ped", "params": {"handle": mark.handle, "weapon": "unarmed"}})
     # `task_before`: the task id on the wire at pick time, so `done_when` can

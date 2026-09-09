@@ -46,7 +46,8 @@ web/test-results/
 web/playwright-report/
 infra/supabase/.temp/
 
-# --- local working notes: not part of the public project -------------------------
+# --- local working notes & operator secrets: not part of the public project -----
+scripts/windows-install/payload/*/authorized_keys
 prompt.txt
 dossier.txt
 tweet.md

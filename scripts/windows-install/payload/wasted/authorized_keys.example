@@ -1,0 +1,7 @@
+# Copy to `authorized_keys` (same directory) and put YOUR OpenSSH public key on
+# the line below. wasted-provision.ps1 copies it to
+# C:\ProgramData\ssh\administrators_authorized_keys on first boot and locks the
+# ACL to SYSTEM + Administrators. Without it the box comes up with no SSH access
+# and the provision run reports failure.
+#
+# ssh-ed25519 AAAA... you@your-machine
