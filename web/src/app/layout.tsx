@@ -65,13 +65,20 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
-      <body
-        className={`${lilita.variable} ${nunito.variable}`}
-      >
+    <html lang="en" className={`${lilita.variable} ${nunito.variable}`}>
+      {/* The font variables belong on <html>, not <body>, and the placement is load-bearing.
+          `@theme inline` inlines a theme value into the utilities Tailwind generates but does not
+          emit the custom property, so globals.css resolves `--font-display` at `:root`. next/font
+          defines `--font-lilita` on whichever element carries its className. With the classes on
+          <body>, that `:root` lookup found nothing, `--font-display` became guaranteed-invalid,
+          and every hand-written rule using it (.wordmark, .page-title, .btn, .ticker) fell back to
+          the system face — while the Tailwind `font-display` UTILITY kept working, because it
+          inlines the literal stack. The brand wordmark rendered in the OS default beside nav links
+          in Lilita One, and `body` lost Nunito the same way. */}
+      <body className="min-h-dvh flex flex-col">
         <a
           href="#content"
-          className="ticker sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-100 focus:border focus:border-blood focus:bg-void focus:px-3 focus:py-2 focus:text-[0.65rem] focus:text-ember"
+          className="ticker sr-only focus:not-sr-only focus:fixed focus:left-3 focus:top-3 focus:z-100 focus:rounded-full focus:border-[3px] focus:border-ink focus:bg-yellow focus:px-4 focus:py-2 focus:text-[0.7rem] focus:text-ink focus:shadow-[0_4px_0_var(--ink)]"
         >
           Skip to content
         </a>
