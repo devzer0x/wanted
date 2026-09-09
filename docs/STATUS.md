@@ -171,18 +171,38 @@ two lines where the agent addressed itself by that name, and those render on the
 
 **LIVE at wanted.money since 2026-09-09**, serving the deployment built from commit `8e6ea09`.
 Domain registered through Vercel, nameservers verified, 17 environment variables set in production
-and preview, rewards deliberately OFF (`REWARDS_ENABLED=false`).
+and preview, rewards deliberately OFF.
+
+"Rewards off" now means two independent switches, because it used to mean only one and the one it
+meant was the wrong half. `REWARDS_ENABLED=false` in the Vercel environment blocks CLAIMING: it is
+read by `assessEligibility()`, whose only callers are four API routes. Nothing read it at CREDIT
+time and nothing could — the credit is written by `settle_due_predictions()`, a Postgres function
+with no access to a Node process's environment — so with rewards "off", settlement would still have
+written `reward_ledger` rows as soon as the agent produced a resolvable prediction.
+`20260909010000_rewards_master_switch.sql` closes that with a `before insert` trigger on
+`reward_ledger` reading `site_config` key `rewards`, defaulting to OFF when the row is absent.
+Verified in `infra/verify-predictions.sql` §10: the same window, pool and correct wallet that pay
+5 TTWO in §3 produce zero ledger rows with the switch off, while the prediction still settles and
+the streak still advances. Nothing was ever paid out under the old behaviour — the live project has
+no predictions, no ledger rows, and its last heartbeat is `2026-09-07T15:54:57Z`.
 
 Deployments were BLOCKED three times first, with `TEAM_ACCESS_REQUIRED`: Vercel attributes a CLI
 deploy to the git commit author, and `agent@wanted.run` holds no seat on the team. Resolved by the
 operator's decision to author the commit as the Vercel account owner instead.
 
 **A production-only security bug was found immediately after going live, and is fixed in
-`20260909000000_fix_function_grants.sql` — but that migration is NOT YET APPLIED to the live
-project.** Confirmed by probing the real project with the browser's own publishable key:
-`enter_prediction` returned `false` and both tick functions returned `0` to an `anon` caller, where
-`42501` was expected. Anyone holding that key — which ships to every browser — could submit
-prediction entries for a wallet they did not own, bypassing sign-in and the API's rate limits.
+`20260909000000_fix_function_grants.sql`, which IS now applied to the live project.** Re-probed
+2026-09-09 with the browser's own publishable key: `enter_prediction` and `lock_due_predictions`
+both return `42501 permission denied`. Before the fix they returned `false` and `0` — anyone
+holding that key, which ships to every browser, could submit prediction entries for a wallet they
+did not own, bypassing sign-in and the API's rate limits.
+
+An earlier revision of this paragraph said the migration was not yet applied, and stayed that way
+after it had been. A later review read that sentence and reported the vulnerability as live; the
+single probe above settles it and is cheap enough to prefer over any prose, this paragraph
+included. The migration is also listed in `infra/apply-predictions-to-cloud.sh` now, so a project
+brought up by that script can no longer be left in the state the fix describes — it was missing
+from the array, which is how the doc and the database came apart in the first place.
 
 The cause is Supabase-specific and unreachable by local testing as it stood. Supabase ships
 `alter default privileges in schema public grant all on functions to anon, authenticated,

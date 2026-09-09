@@ -69,6 +69,15 @@ async function api(path, opts = {}) {
 
 console.log("\n=========== WANTED — full prediction loop ===========\n");
 
+// The rewards master switch (migration 20260909010000) defaults to OFF, so the settlement
+// assertions below would correctly find an empty ledger without this. It is turned on here rather
+// than defaulted on in the schema because an absent config must never mean "pay out" — the switch
+// exists precisely because REWARDS_ENABLED, a Vercel env var, could never reach the Postgres
+// function that writes the credit. infra/verify-predictions.sql §10 asserts the off case.
+sql(`insert into public.site_config (key, value) values ('rewards', '{"enabled": true}'::jsonb)
+     on conflict (key) do update set value = excluded.value;`);
+check("rewards master switch is on for this run", sql("select public.rewards_enabled();") === "t");
+
 // ---------------------------------------------------------------------------------------------
 console.log("--- 0. The agent's session, and its real telemetry ---");
 const sessionId = sql("select id from public.sessions order by started_at desc limit 1;");

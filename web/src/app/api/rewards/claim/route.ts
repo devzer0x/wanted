@@ -7,7 +7,7 @@
 //   3. assessEligibility() re-checked here (not just at credit time — CONTRACTS-PREDICTIONS §5:
 //      "Called before any ledger credit and again before any claim").
 //   4. claimable read fresh from `reward_ledger` server-side (never trusts a client-supplied
-//      amount), clamped to REWARD_LIMITS.maxClaim, rejected below REWARD_LIMITS.minClaim.
+//      amount), clamped to rewardLimits().maxClaim, rejected below rewardLimits().minClaim.
 //   5. INSERT the `reward_claims` row, THEN UPDATE the covered `reward_ledger` rows.
 //   6. Only after (5) succeeds: call `sendReward` (the on-chain call).
 //
@@ -35,7 +35,7 @@
 
 import { readSession } from "@/lib/auth/session";
 import { assessEligibility } from "@/lib/policy";
-import { REWARD_LIMITS } from "@/lib/rewards/strategies";
+import { rewardLimits } from "@/lib/rewards/strategies";
 import { isTreasuryConfigured, sendReward } from "@/lib/rewards/treasury";
 import { rewardAsset, isRewardAssetConfigured } from "@/lib/chain/assets";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../../_lib/supabaseAdmin";
@@ -72,6 +72,18 @@ export async function POST(request: Request): Promise<Response> {
   const admin = createSupabaseAdmin();
   if (!admin) return notConfigured("database");
 
+  // Throws on a present-but-unparseable CLAIM_MIN_AMOUNT / CLAIM_MAX_AMOUNT rather than treating
+  // the rail as absent. Refusing the claim is the correct response to a treasury ceiling nobody
+  // can read: the alternative is paying out with no ceiling at all.
+  let limits;
+  try {
+    limits = rewardLimits();
+  } catch (err) {
+    return jsonError(500, "reward limits are misconfigured", {
+      detail: err instanceof Error ? err.message : String(err),
+    });
+  }
+
   // The amount is NOT computed here. `create_reward_claim` locks this wallet's unclaimed ledger
   // rows, sums them, enforces the §6 min/max, inserts the claim and marks the rows — all in one
   // transaction. The limits travel as whole token units because that is what the numeric columns
@@ -79,11 +91,11 @@ export async function POST(request: Request): Promise<Response> {
   const { data: claimRow, error: claimErr } = await admin
     .rpc("create_reward_claim", {
       p_wallet: wallet,
-      p_min_amount: fromBaseUnits(REWARD_LIMITS.minClaim, asset.decimals),
+      p_min_amount: fromBaseUnits(limits.minClaim, asset.decimals),
       p_max_amount:
-        REWARD_LIMITS.maxClaim === null
+        limits.maxClaim === null
           ? null
-          : fromBaseUnits(REWARD_LIMITS.maxClaim, asset.decimals),
+          : fromBaseUnits(limits.maxClaim, asset.decimals),
     })
     .single<{ id: string; amount: string; asset: string; status: string }>();
 
@@ -94,7 +106,7 @@ export async function POST(request: Request): Promise<Response> {
     if (code === "P0002") return jsonError(400, "nothing to claim");
     if (code === "P0003") {
       return jsonError(400, "claimable balance is below the minimum claim amount", {
-        minClaim: REWARD_LIMITS.minClaim.toString(),
+        minClaim: limits.minClaim.toString(),
       });
     }
     if (code === "P0004") {

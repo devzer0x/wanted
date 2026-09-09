@@ -29,15 +29,34 @@ export function computeRewardPerWallet(p: {
   }
 }
 
+/**
+ * Parses a base-unit integer from the environment, or throws.
+ *
+ * It used to return `null` on a parse failure, which meant an operator who set
+ * `CLAIM_MAX_AMOUNT=0.002` — the plausible mistake, because the caps in `site_config` ARE whole
+ * token units — got a deployment with no maximum claim at all and no indication of it anywhere.
+ * A treasury ceiling that quietly becomes "unlimited" because of a decimal point is the worst
+ * failure mode available here, so a value that is present but unreadable is now an error. Absent
+ * still means absent: `unset` is a deliberate configuration and keeps its documented meaning.
+ */
 function parseOptionalBigintEnv(name: string): bigint | null {
   const raw = process.env[name]?.trim();
   if (!raw) return null;
+
+  let value: bigint;
   try {
-    const value = BigInt(raw);
-    return value >= BigInt(0) ? value : null;
+    value = BigInt(raw);
   } catch {
-    return null;
+    throw new Error(
+      `${name}="${raw}" is not an integer. This variable is in BASE UNITS (an 18-decimal asset ` +
+        `means 0.002 TTWO is "2000000000000000"), not whole tokens. Leave it unset to disable ` +
+        `the limit.`,
+    );
   }
+  if (value < BigInt(0)) {
+    throw new Error(`${name}="${raw}" is negative. Leave it unset to disable the limit.`);
+  }
+  return value;
 }
 
 /**
@@ -60,10 +79,18 @@ function parseOptionalBigintEnv(name: string): bigint | null {
  * Those numbers are WHOLE token units, matching the amount columns. The two below are BASE units,
  * matching the rest of the TypeScript; `/api/rewards/claim` converts them at the SQL boundary.
  */
-export const REWARD_LIMITS: {
-  minClaim: bigint;
-  maxClaim: bigint | null;
-} = {
-  minClaim: parseOptionalBigintEnv("CLAIM_MIN_AMOUNT") ?? BigInt(0),
-  maxClaim: parseOptionalBigintEnv("CLAIM_MAX_AMOUNT"),
-};
+export type RewardLimits = { minClaim: bigint; maxClaim: bigint | null };
+
+/**
+ * Read per call rather than once at module load, because `parseOptionalBigintEnv` now throws.
+ * Next.js evaluates module scope while collecting page data at build time, so a module-level parse
+ * would turn one malformed variable into a failed build for the whole site. Evaluating it inside
+ * the request keeps the failure loud and confines it to the route that depends on it — which is
+ * only `/api/rewards/claim`; no page renders this.
+ */
+export function rewardLimits(): RewardLimits {
+  return {
+    minClaim: parseOptionalBigintEnv("CLAIM_MIN_AMOUNT") ?? BigInt(0),
+    maxClaim: parseOptionalBigintEnv("CLAIM_MAX_AMOUNT"),
+  };
+}

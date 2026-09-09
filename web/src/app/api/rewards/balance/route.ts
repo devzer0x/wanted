@@ -10,7 +10,7 @@
 
 import { readSession } from "@/lib/auth/session";
 import { assessEligibility } from "@/lib/policy";
-import { REWARD_LIMITS } from "@/lib/rewards/strategies";
+import { rewardLimits } from "@/lib/rewards/strategies";
 import { rewardAsset } from "@/lib/chain/assets";
 import type { RewardBalance } from "@/lib/prediction/types";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../../_lib/supabaseAdmin";
@@ -58,13 +58,26 @@ export async function GET(): Promise<Response> {
 
   const policy = await assessEligibility({ address: wallet });
 
+  // `min_claim` is advisory display data, so a misconfigured limit must not blank the balance the
+  // viewer is entitled to see. It reports the failure as an ineligibility reason instead — which
+  // is honest, because a claim WOULD be refused in this state (the claim route 500s on the same
+  // parse), and §5 already routes "cannot confirm" to ineligible rather than to a silent success.
+  let minClaim: string;
+  let limitsError: string | null = null;
+  try {
+    minClaim = rewardLimits().minClaim.toString();
+  } catch (err) {
+    minClaim = "0";
+    limitsError = err instanceof Error ? err.message : String(err);
+  }
+
   const body: RewardBalance = {
     asset: asset.symbol,
     claimable,
     lifetime,
-    eligible: policy.eligible,
-    reasons: policy.reasons,
-    min_claim: REWARD_LIMITS.minClaim.toString(),
+    eligible: policy.eligible && limitsError === null,
+    reasons: limitsError ? [...policy.reasons, "reward_limits_misconfigured"] : policy.reasons,
+    min_claim: minClaim,
   };
   return jsonOk(body);
 }

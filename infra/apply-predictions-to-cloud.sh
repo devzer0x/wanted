@@ -10,18 +10,26 @@
 #   infra/.env.cloud.
 #
 # WHY IT IS SAFE TO RUN
-#   The three migrations are ADDITIVE ONLY. They create new tables, a new enum, new functions, new
-#   policies and one new view. They contain no ALTER, DROP or UPDATE against any pre-existing object,
-#   and they do not touch a single existing row. Verified by the grep in step 2 below, which runs
-#   every time and aborts if that ever stops being true.
+#   Every migration listed is ADDITIVE ONLY. They create new tables, a new enum, new functions, new
+#   policies, one new view and one trigger on a table they themselves created. They contain no
+#   ALTER, DROP or UPDATE against any pre-existing object, and they do not touch a single existing
+#   row. Verified by the grep in step 2 below, which runs every time and aborts if that ever stops
+#   being true.
 #
-#   The same three files have been applied cleanly to a throwaway Postgres 16 repeatedly by
+#   The same files have been applied cleanly to a throwaway Postgres 16 repeatedly by
 #   infra/verify-predictions.sh, which then replays 5,649 real recorded events through them and
 #   asserts settlement, idempotency, the claim path and RLS.
 #
+#   Running it twice is safe: step 3 asks the project whether the base set has already run and
+#   applies only the idempotent repairs if so. The base set is NOT re-runnable on its own — it
+#   creates tables with bare CREATE TABLE — which is why the choice is made from the database
+#   rather than from a comment claiming the whole list is idempotent. It is not.
+#
 # WHAT IT DOES NOT DO
-#   It does not seed data, does not create a treasury, does not enable rewards. REWARDS_ENABLED stays
-#   whatever the deployment env says (default false).
+#   It does not seed data, does not create a treasury, does not enable rewards. Rewards are off in
+#   two independent places and this script flips neither: `REWARDS_ENABLED` in the deployment env
+#   gates CLAIMING, and the `rewards` site_config row gates CREDITING (default closed, see
+#   20260909010000). Turning rewards on is a deliberate operator step, documented in that migration.
 #
 # HOW TO UNDO
 #   Every object it creates is new and namespaced, so a rollback is a drop of exactly those objects.
@@ -32,11 +40,31 @@
 set -euo pipefail
 cd "$(dirname "$0")"
 
-MIGRATIONS=(
+# The migrations split by whether they can be run against a project that already has them, and the
+# split is a property of the files, not a preference. BASE creates tables with bare `create table`,
+# so a second run aborts on the first one — it is a first-install set. REPAIR is `create or
+# replace` / `drop ... if exists` throughout and is safe to run any number of times.
+#
+# Step 6 picks between them by looking at the project, which is what makes this script the right
+# tool for BOTH "stand up a new project" and "bring the live one up to date". It only handled the
+# first case before, and the consequence was not theoretical: the two repairs below were missing
+# from the list entirely, so the only sanctioned way to update a project could not deliver them,
+# and docs/STATUS.md and the live database drifted apart over exactly that gap.
+BASE_MIGRATIONS=(
   supabase/migrations/20260908120000_predictions.sql
   supabase/migrations/20260908120001_predictions_policies.sql
   supabase/migrations/20260908120002_reward_claim_rpc.sql
 )
+REPAIR_MIGRATIONS=(
+  # Revokes the anon EXECUTE grant that Supabase's default privileges hand out and that 120001's
+  # `revoke ... from public` did not remove. 120001 carries the same fix for fresh installs; this
+  # exists for projects that had already run it.
+  supabase/migrations/20260909000000_fix_function_grants.sql
+  # The rewards master switch. Default CLOSED, so applying this to a project with no `rewards`
+  # site_config row stops reward credits being written until the operator opts in.
+  supabase/migrations/20260909010000_rewards_master_switch.sql
+)
+MIGRATIONS=("${BASE_MIGRATIONS[@]}" "${REPAIR_MIGRATIONS[@]}")
 
 # ---- 1. credentials, read from the gitignored file; never echoed --------------------------------
 if [[ ! -f .env.cloud ]]; then
@@ -71,6 +99,20 @@ echo "== current state of the target project =="
 "${PSQL[@]}" -tAc "select 'existing tables: ' || count(*) from information_schema.tables where table_schema='public';"
 "${PSQL[@]}" -tAc "select 'prediction tables already present: ' || coalesce(string_agg(table_name, ', '), 'none') from information_schema.tables where table_schema='public' and table_name in ('predictions','prediction_entries','reward_ledger','reward_claims','wallet_sessions','wallet_streaks','policy_flags');"
 
+# `predictions` existing is the marker for "the base set has already run". Asking the database
+# beats tracking it in a file: the file can be wrong, and here it was.
+ALREADY_INSTALLED=$("${PSQL[@]}" -tAc "select count(*) from information_schema.tables where table_schema='public' and table_name='predictions';" | tr -d '[:space:]')
+if [[ "$ALREADY_INSTALLED" == "1" ]]; then
+  MODE=repair
+  TO_APPLY=("${REPAIR_MIGRATIONS[@]}")
+  echo "   -> REPAIR mode: the base migrations have already run here. Applying only the"
+  echo "      idempotent repairs; the base set would abort on its first CREATE TABLE."
+else
+  MODE=install
+  TO_APPLY=("${MIGRATIONS[@]}")
+  echo "   -> INSTALL mode: applying the full set."
+fi
+
 # ---- 4. the rollback, printed before anything is applied -----------------------------------------
 cat <<'ROLLBACK'
 
@@ -91,13 +133,15 @@ ROLLBACK
 # ---- 5. confirm ----------------------------------------------------------------------------------
 if [[ "${1:-}" != "--yes" ]]; then
   echo
-  read -r -p "Apply the three prediction migrations to the CLOUD project? [y/N] " reply
+  echo "will apply (${MODE}):"
+  printf '  %s\n' "${TO_APPLY[@]##*/}"
+  read -r -p "Apply these to the CLOUD project? [y/N] " reply
   [[ "$reply" == "y" || "$reply" == "Y" ]] || { echo "aborted."; exit 0; }
 fi
 
 # ---- 6. apply ------------------------------------------------------------------------------------
 echo
-for f in "${MIGRATIONS[@]}"; do
+for f in "${TO_APPLY[@]}"; do
   echo "== applying $(basename "$f") =="
   docker run --rm -i -e "PGURL=$SUPABASE_DB_URL" -v "$PWD/$f:/tmp/m.sql:ro" postgres:16-alpine \
     sh -c 'psql "$PGURL" -v ON_ERROR_STOP=1 -q -f /tmp/m.sql'
@@ -110,6 +154,12 @@ echo "== verifying =="
 "${PSQL[@]}" -c "select table_name from information_schema.tables where table_schema='public' and table_name in ('predictions','prediction_entries','reward_ledger','reward_claims','wallet_sessions','wallet_streaks','policy_flags') order by 1;"
 "${PSQL[@]}" -c "select proname from pg_proc p join pg_namespace n on n.oid=p.pronamespace where n.nspname='public' and proname in ('enter_prediction','lock_due_predictions','settle_due_predictions','leaderboard','create_reward_claim','finalize_reward_claim') order by 1;"
 "${PSQL[@]}" -tAc "select 'rls enabled on all new tables: ' || bool_and(relrowsecurity) from pg_class c join pg_namespace n on n.oid=c.relnamespace where n.nspname='public' and c.relname in ('predictions','prediction_entries','reward_ledger','reward_claims','wallet_sessions','wallet_streaks','policy_flags');"
+
+# The two repairs, checked as post-conditions rather than assumed from "psql exited 0". Both are
+# things that were once believed true of the live project and were not.
+"${PSQL[@]}" -tAc "select 'anon EXECUTE revoked on all 3 server-only functions: ' || bool_and(not has_function_privilege('anon', p.oid, 'execute')) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in ('enter_prediction','lock_due_predictions','settle_due_predictions');"
+"${PSQL[@]}" -tAc "select 'reward_ledger master-switch trigger installed: ' || count(*) from pg_trigger where tgname = 'reward_ledger_master_switch_trg' and not tgisinternal;"
+"${PSQL[@]}" -tAc "select 'rewards master switch is currently: ' || case when public.rewards_enabled() then 'ON — credits WILL be written' else 'off (default) — no credits will be written' end;"
 
 echo
 echo "Done. Next: PostgREST picks up the new schema within a few seconds; then"

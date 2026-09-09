@@ -1,10 +1,16 @@
-# WANTED — PREDICTION LAYER CONTRACTS v2.0
+# WANTED — PREDICTION LAYER CONTRACTS v2.1
 
 Frozen. Executors treat this as read-only; changes go through the orchestrator and bump the
 version. If code and contract disagree, the contract wins. Companion to `docs/CONTRACTS.md`
 (bridge/decision/event/DB contracts v1.14), which is unchanged by this document.
 
 Research backing every external claim is in §8. Nothing here is guessed.
+
+**v2.1** — §5 now states where the credit-side and claim-side eligibility gates each run, and names
+the `site_config` key `rewards` as the credit-side master switch (v2.0 named only `REWARDS_ENABLED`,
+which cannot reach the credit). §6 records that the two environment rails are baked into a
+deployment and do not apply retroactively, and that an unparseable value is now an error rather
+than an absent limit. No table, function signature or HTTP shape changed.
 
 ---
 
@@ -366,12 +372,42 @@ prediction logic**. `web/src/lib/policy/` exports one function:
 assessEligibility(ctx): Promise<{ eligible: boolean; reasons: PolicyReason[] }>
 ```
 
-Called before any ledger credit and again before any claim. Predicting is always allowed;
-**rewarding is not.** If eligibility cannot be confirmed, no reward is issued — the ledger row is
-simply not written, and the entry still counts for accuracy, streak and leaderboard.
+Predicting is always allowed; **rewarding is not.** If eligibility cannot be confirmed, no reward
+is issued — the ledger row is simply not written, and the entry still counts for accuracy, streak
+and leaderboard.
 
 Policy inputs are config-driven (`POLICY_BLOCKED_REGIONS`, `POLICY_REQUIRE_TERMS`,
 `REWARDS_ENABLED`), never hardcoded in UI. UI may *reflect* ineligibility; it may never *decide* it.
+
+**"Before any ledger credit and again before any claim" is enforced in two different places,
+because the two moments run on two different machines.** This clause used to name only
+`assessEligibility()`, which was reachable in one of them:
+
+| Moment | Runs in | Gate |
+|---|---|---|
+| Credit — a `reward_ledger` row is written | Postgres, inside `settle_due_predictions()` | `public.rewards_enabled()`, read by a `before insert` trigger on `reward_ledger`; plus the existing per-wallet `policy_flags.blocked` check |
+| Claim — credits are converted to an on-chain transfer | Node, in `/api/rewards/claim` | `assessEligibility()`, which reads `REWARDS_ENABLED` and the policy env |
+
+A Postgres function cannot read a Vercel environment variable, so `REWARDS_ENABLED` never gated
+the credit and never could; it gated only the claim. The credit-side switch therefore lives in
+`site_config` under the key `rewards`:
+
+```sql
+insert into public.site_config (key, value) values ('rewards', '{"enabled": true}')
+on conflict (key) do update set value = excluded.value;
+```
+
+It **defaults to off when the row is absent** — unlike the §6 caps, whose absent-row fallbacks are
+permissive placeholders. An absent tuning knob may guess; an absent kill switch may not.
+
+The switch **drops** a credit, it does not defer one. Settlement never revisits a settled
+prediction, so turning rewards on later does not backfill anything suppressed while they were off.
+That is the intended meaning of off: no invisible liability accrues against an unfunded treasury.
+
+The switch is `before insert` **only**. `finalize_reward_claim` returns credits to the claimable
+pool by setting `claim_id = null` on rows that already exist; if the switch blocked that update, an
+operator standing down mid-payout would destroy a viewer's balance — the switch causing the exact
+harm it exists to prevent.
 
 ---
 
@@ -390,6 +426,20 @@ where each is enforced.
 
 Settlement is a Postgres function; it cannot read the deployment's environment, so its three caps
 must come from a table. The claim path is TypeScript, so its two come from the environment.
+
+**The two environment rails are baked into a deployment, and setting them changes nothing until the
+next one.** Vercel applies environment variables at build time: "Any change you make to environment
+variables are not applied to previous deployments, they only apply to new deployments." Adding
+`CLAIM_MIN_AMOUNT` to the project after the serving deployment was built leaves that deployment
+running with `minClaim = 0` and `maxClaim = null` while the dashboard shows both as set. Setting
+either rail is therefore a two-step operation — set it, then redeploy — and the three `site_config`
+caps have no such property: they are read per settlement and take effect immediately.
+
+**A rail that is present but unparseable is an error, not an absent rail.** These two are in BASE
+units while the three caps above are in whole tokens, so `CLAIM_MAX_AMOUNT=0.002` is the obvious
+mistake to make. It used to be caught and turned into `null` — no maximum claim at all, reported
+nowhere. `/api/rewards/claim` now refuses the claim and says why. Leaving a variable unset is still
+a valid configuration and still means "no limit"; only a value nobody can read is fatal.
 
 ```sql
 insert into public.site_config (key, value) values

@@ -15,9 +15,14 @@
 \echo '################ SETUP ################'
 
 -- Generous caps so the reward assertions test the §7 formula, not the §6 clamps.
+--
+-- `rewards` is the master switch (20260909010000). It defaults to OFF when the row is absent, so
+-- without this line every reward assertion below would correctly find an empty ledger. Section 10
+-- turns it back off on purpose and proves that is what happens.
 insert into public.site_config (key, value) values
   ('reward_caps', '{"daily_cap": 100000, "max_per_prediction": 100000, "max_per_wallet_day": 100000}'::jsonb),
-  ('settlement',  '{"grace_minutes": 10}'::jsonb)
+  ('settlement',  '{"grace_minutes": 10}'::jsonb),
+  ('rewards',     '{"enabled": true}'::jsonb)
 on conflict (key) do update set value = excluded.value;
 
 create temporary table t (name text primary key, id uuid);
@@ -252,6 +257,89 @@ select public.create_reward_claim('0xaaa1');
 select public.settle_due_predictions();
 \set ON_ERROR_STOP on
 reset role;
+
+\echo ''
+\echo '################ 10. REWARDS MASTER SWITCH — the credit gate, not just the claim gate ####'
+\echo '-- The regression this section exists for: REWARDS_ENABLED is a Vercel env var, and'
+\echo '--   settle_due_predictions() is a Postgres function that cannot read it. Rewards being'
+\echo '--   "off" blocked claiming and did nothing whatsoever to crediting.'
+
+\echo '-- EXPECT t: on, because SETUP turned it on'
+select public.rewards_enabled() as must_be_true;
+
+\echo '-- EXPECT f: an ABSENT row means off. A missing config must never mean pay out.'
+delete from public.site_config where key = 'rewards';
+select public.rewards_enabled() as must_be_false_when_row_absent;
+
+\echo '-- EXPECT f: and an explicit false means off'
+insert into public.site_config (key, value) values ('rewards', '{"enabled": false}'::jsonb)
+on conflict (key) do update set value = excluded.value;
+select public.rewards_enabled() as must_be_false;
+
+-- A fresh prediction over the SAME real window as survive_yes: 06:20:00Z..06:23:00Z contains no
+-- death in the recording, so it resolves `yes` and 0xaaa1 is correct. Everything about it is
+-- identical to the prediction that credited 5 TTWO in section 3 except the state of the switch.
+with s as (select id from public.sessions limit 1)
+insert into public.predictions
+  (session_id, question, prediction_type, opened_at, locks_at, resolves_at,
+   outcomes, telemetry_rule, reward_pool, reward_asset)
+select s.id, 'SWITCH WITNESS — SAME WINDOW AS survive_yes', 'switchtest',
+  timestamptz '2026-09-04T06:19:00Z', timestamptz '2026-09-04T06:20:00Z',
+  timestamptz '2026-09-04T06:23:00Z',
+  '[{"key":"yes","label":"YES"},{"key":"no","label":"NO"}]'::jsonb,
+  '{"kind":"survives_window","outcome_if_true":"yes","outcome_if_false":"no"}'::jsonb, 10, 'TTWO'
+from s;
+insert into public.prediction_entries (prediction_id, wallet, outcome)
+select id, w.wallet, w.outcome from public.predictions,
+  (values ('0xaaa1','yes'), ('0xbbb2','no')) as w(wallet, outcome)
+where prediction_type = 'switchtest';
+
+select public.lock_due_predictions() as locked;
+select public.settle_due_predictions() as settled;
+
+\echo '-- EXPECT: settled | yes | 1 — the GAME still runs with rewards off. Resolution, results,'
+\echo '--         correctness and streaks are unaffected; only the money is withheld.'
+select status, result, correct_count from public.predictions where prediction_type = 'switchtest';
+
+\echo '-- EXPECT 0: THE WITNESS. Same window, same pool, same correct wallet as the prediction'
+\echo '--         that paid 5 TTWO in section 3 — and no ledger row, because the switch is off.'
+select count(*) as ledger_rows_for_switchtest_must_be_0
+from public.reward_ledger l
+join public.predictions p on p.id = l.prediction_id
+where p.prediction_type = 'switchtest';
+
+\echo '-- EXPECT 0: and the streak DID advance for the correct wallet, proving the suppression is'
+\echo '--         at the ledger and not a settlement that bailed out early.'
+select current_streak > 0 as aaa1_streak_still_advanced
+from public.wallet_streaks where wallet = '0xaaa1';
+
+\echo '-- Turn it back on. EXPECT 0 still: the switch DROPS a credit, it does not defer one.'
+\echo '--         Settlement never revisits a settled prediction, so enabling rewards later does'
+\echo '--         not backfill. That is deliberate — rewards are off while the treasury is'
+\echo '--         unfunded, and accruing an invisible liability to pay out later is the opposite'
+\echo '--         of what off should mean.'
+insert into public.site_config (key, value) values ('rewards', '{"enabled": true}'::jsonb)
+on conflict (key) do update set value = excluded.value;
+select public.settle_due_predictions() as settled_again_should_be_0;
+select count(*) as ledger_rows_for_switchtest_still_0
+from public.reward_ledger l
+join public.predictions p on p.id = l.prediction_id
+where p.prediction_type = 'switchtest';
+
+\echo '-- EXPECT: the switch never touches an UPDATE. finalize_reward_claim returns credits by'
+\echo '--         setting claim_id = null, and an operator flipping rewards off mid-payout must'
+\echo '--         not be able to destroy a balance that already exists.'
+insert into public.site_config (key, value) values ('rewards', '{"enabled": false}'::jsonb)
+on conflict (key) do update set value = excluded.value;
+select id, amount, status from public.create_reward_claim('0xccc3');
+select public.finalize_reward_claim(
+  (select id from public.reward_claims where wallet = '0xccc3' and status = 'pending'),
+  'failed', null, 'simulated failure with rewards switched off');
+\echo '-- EXPECT > 0: ccc3 got its credits back even with the switch off'
+select count(*) as ccc3_rows_returned_to_claimable
+from public.reward_ledger where wallet = '0xccc3' and claim_id is null;
+insert into public.site_config (key, value) values ('rewards', '{"enabled": true}'::jsonb)
+on conflict (key) do update set value = excluded.value;
 
 \echo ''
 \echo '################ DONE ################'
