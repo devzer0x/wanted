@@ -139,11 +139,26 @@ class GeneratorConfig:
     #: in `site_config`. Settlement still clamps against those caps, so this is
     #: the pool a prediction ASKS for, not a promise the treasury has to keep.
     #: A string keeps it exact all the way to Postgres — a float would not.
-    base_reward_pool: str = "1"
+    #: 0.005 TTWO ≈ $1.07 at TTWO $213.89 (Robinhood /rhj/prices, 2026-09-09).
+    #:
+    #: The unit price is why this is small. TTWO is a tokenized share, not a memecoin: one token is
+    #: ~$214, so a pool of "1" — the obvious-looking default this replaced — would have been $214
+    #: PER PREDICTION, and at the ~22 predictions/day this catalogue actually generates that is
+    #: ~$4,700/day. The whole pool is distributed on every settled prediction, so pool x
+    #: predictions-per-day IS the burn rate.
+    #:
+    #: At 0.005 the burn is ~$23.50/day, and a winner's share lands between $0.21 (5 correct) and
+    #: $0.05 (20 correct) — enough that eight to seventeen wins clear the $0.44 minimum claim,
+    #: which is roughly a day of watching. Raise it if the audience grows; the even split means a
+    #: bigger crowd dilutes each winner rather than costing the treasury more.
+    base_reward_pool: str = "0.005"
     #: WANTED EVENTS carry a boosted pool (§13). This is the multiplier, and it
     #: is applied HERE because here is where the pool is funded; settlement only
     #: divides what it is given.
-    event_reward_multiplier: int = 5
+    #: A WANTED EVENT pays 4x the base pool — 0.02 TTWO ≈ $4.28 — which stays under the
+    #: max_per_prediction cap so a highlighted round is never silently clamped down to the
+    #: ordinary amount.
+    event_reward_multiplier: int = 4
     #: Named, not hardcoded — the reward asset is configurable (§1).
     reward_asset: str = "TTWO"
     #: Added to an already-offerable event's rank. See the module docstring for
