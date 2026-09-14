@@ -25,43 +25,56 @@ import { createClient, type SupabaseClient } from "@supabase/supabase-js";
 const FETCH_TIMEOUT_MS = 8000;
 
 /**
- * One deadline per client, shared by every attempt of the operation it serves.
+ * A fetch whose EVERY call gets its own fresh deadline (CONTRACTS-PREDICTIONS §10.5, FM-04).
  *
- * Same technique as `src/lib/supabase/server.ts` (that file's `createDeadlineSignal`, duplicated
- * here because this module intentionally does not import from `src/lib/**`): postgrest-js retries
- * network failures internally, and `AbortSignal.timeout()` aborts with a TimeoutError that
- * postgrest-js does not recognise as an abort, so it retries anyway and sleeps out the whole
- * backoff chain. A manual AbortController produces a genuine AbortError, which postgrest-js
- * rethrows immediately. The timer is unref'd so a resolved client never holds the event loop open.
+ * The old client armed one deadline at construction and shared it with every later call, so a
+ * request that spent 8 s on anything — lock, settle, a chain read — found every write after that
+ * pre-aborted. postgrest-js turns an abort into a returned `{error}` rather than a throw, so a lost
+ * write looked exactly like a slow one. Now each fetch starts its own clock.
+ *
+ * Same technique as `src/lib/supabase/server.ts` (duplicated here because this module intentionally
+ * does not import from `src/lib/**`): a MANUAL AbortController, never `AbortSignal.timeout()`.
+ * postgrest-js 2.109 rethrows a genuine AbortError immediately, while `AbortSignal.timeout()` aborts
+ * with a TimeoutError it does not recognise as an abort, so for GETs it would retry and sleep out the
+ * whole backoff chain (node_modules/@supabase/postgrest-js/dist/index.mjs, executeWithRetry: only
+ * GET/HEAD/OPTIONS are ever retried, and never after an AbortError — so an RPC POST is one attempt
+ * with one deadline). The timer is left to run out rather than cleared when headers arrive, because
+ * the body is read after fetch() resolves and must stay under the same deadline; aborting an
+ * already-consumed response is a no-op, and the timer is unref'd so it never holds the event loop.
  */
-function createDeadlineSignal(): AbortSignal {
-  const controller = new AbortController();
-  const timer: unknown = setTimeout(() => controller.abort(), FETCH_TIMEOUT_MS);
-  if (typeof (timer as { unref?: () => void })?.unref === "function") {
-    (timer as { unref: () => void }).unref();
-  }
-  return controller.signal;
+function fetchWithDeadline(timeoutMs: number) {
+  return (input: RequestInfo | URL, init?: RequestInit): Promise<Response> => {
+    const controller = new AbortController();
+    const timer: unknown = setTimeout(() => controller.abort(), timeoutMs);
+    if (typeof (timer as { unref?: () => void })?.unref === "function") {
+      (timer as { unref: () => void }).unref();
+    }
+    return fetch(input, {
+      ...init,
+      cache: "no-store",
+      signal: init?.signal ? AbortSignal.any([init.signal, controller.signal]) : controller.signal,
+    });
+  };
 }
 
 export function isSupabaseAdminConfigured(): boolean {
   return Boolean(process.env.SUPABASE_URL && process.env.SUPABASE_SECRET_KEY);
 }
 
-/** Null when service-role credentials are absent. Callers must fail honestly (503), never fake data. */
-export function createSupabaseAdmin(): SupabaseClient | null {
+/**
+ * Null when service-role credentials are absent. Callers must fail honestly (503), never fake data.
+ * `timeoutMs` is the per-fetch deadline (default 8 s).
+ */
+export function createSupabaseAdmin(opts?: { timeoutMs?: number }): SupabaseClient | null {
   const url = process.env.SUPABASE_URL;
   const key = process.env.SUPABASE_SECRET_KEY;
   if (!url || !key) return null;
-  const deadline = createDeadlineSignal();
+  const timeoutMs =
+    opts?.timeoutMs !== undefined && Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0
+      ? opts.timeoutMs
+      : FETCH_TIMEOUT_MS;
   return createClient(url, key, {
     auth: { persistSession: false, autoRefreshToken: false },
-    global: {
-      fetch: (input: RequestInfo | URL, init?: RequestInit) =>
-        fetch(input, {
-          ...init,
-          cache: "no-store",
-          signal: init?.signal ? AbortSignal.any([init.signal, deadline]) : deadline,
-        }),
-    },
+    global: { fetch: fetchWithDeadline(timeoutMs) },
   });
 }

@@ -12,13 +12,13 @@
 // trusts a client-supplied message, only a client-supplied signature over a message it rebuilt
 // itself from server-held state.
 
-import { buildSiweMessage, verifySiwe } from "@/lib/auth/siwe";
+import { buildSiweMessage, verifySiwe, RULES_VERSION } from "@/lib/auth/siwe";
 import { publicClient } from "@/lib/chain/config";
 import { createSession } from "@/lib/auth/session";
 import { siweOrigin } from "../../_lib/siweDomain";
 import { assessEligibility } from "@/lib/policy";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../../_lib/supabaseAdmin";
-import { jsonError, jsonOk, notConfigured, getClientIp, readJsonBody } from "../../_lib/http";
+import { jsonError, jsonOk, notConfigured, getClientCountry, getClientIp, readJsonBody, internalError } from "../../_lib/http";
 import { rateLimit, RATE_LIMITS } from "../../_lib/rateLimit";
 import { normalizeAddress } from "../../_lib/wallet";
 
@@ -71,7 +71,7 @@ export async function POST(request: Request): Promise<Response> {
     .maybeSingle<WalletSessionRow>();
 
   if (lookupError) {
-    return jsonError(500, "failed to look up session nonce", { detail: lookupError.message });
+    return internalError("auth/verify: failed to look up session nonce", lookupError, "failed to look up session nonce");
   }
   if (!session) {
     return jsonError(401, "no live nonce for this address — request a new one from /api/auth/nonce");
@@ -86,9 +86,8 @@ export async function POST(request: Request): Promise<Response> {
   try {
     ({ domain, uri } = siweOrigin());
   } catch (err) {
-    return jsonError(503, "sign-in is not configured on this deployment", {
-      detail: err instanceof Error ? err.message : String(err),
-    });
+    console.error(`auth/verify: ${err instanceof Error ? err.message : String(err)}`);
+    return jsonError(503, "sign-in is not configured on this deployment");
   }
   const chainId = session.chain_id ?? publicClient().chain?.id ?? 0;
 
@@ -115,14 +114,16 @@ export async function POST(request: Request): Promise<Response> {
   }
 
   // Burn the nonce before doing anything else — a crash after this point cannot be replayed.
+  // The same UPDATE records which rules version the signed statement named: the message verified
+  // above was rebuilt with RULES_VERSION, so this signature is proof of accepting exactly that.
   const { data: burned, error: burnError } = await admin
     .from("wallet_sessions")
-    .update({ verified_at: new Date().toISOString() })
+    .update({ verified_at: new Date().toISOString(), rules_version: RULES_VERSION })
     .eq("id", session.id)
     .is("verified_at", null)
     .select("id");
   if (burnError) {
-    return jsonError(500, "failed to finalize session", { detail: burnError.message });
+    return internalError("auth/verify: failed to finalize session", burnError, "failed to finalize session");
   }
   // Zero rows updated is NOT an error from PostgREST — it means another concurrent request burned
   // this nonce first. Without checking, both racers would be issued a session off one nonce, and
@@ -131,8 +132,12 @@ export async function POST(request: Request): Promise<Response> {
     return jsonError(409, "nonce was already used — request a new one");
   }
 
-  await createSession(address);
+  await createSession(address, RULES_VERSION);
 
-  const policy = await assessEligibility({ address });
+  const policy = await assessEligibility({
+    address,
+    country: getClientCountry(request),
+    rulesVersion: RULES_VERSION,
+  });
   return jsonOk({ address, eligible: policy.eligible });
 }

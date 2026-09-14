@@ -12,6 +12,7 @@
     "test:e2e:offline": "PLAYWRIGHT_OFFLINE=1 playwright test",
     "verify:siwe": "node scripts/verify-siwe.mjs",
     "verify:treasury": "node scripts/verify-treasury.mjs",
+    "verify:payout": "node scripts/verify-payout.mjs",
     "verify:loop": "node scripts/verify-full-loop.mjs"
   },
   "dependencies": {

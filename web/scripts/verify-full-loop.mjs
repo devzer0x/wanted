@@ -18,8 +18,9 @@
 //     entry has been accepted. Entry and the lock are therefore exercised against a genuinely open
 //     window through the real API, and settlement against genuinely real telemetry. No event is
 //     invented, and no API response is stubbed.
-//   * NOT covered: the game being live (it is not), and broadcasting a real on-chain transfer
-//     (there is no funded treasury). Both are reported as unproven rather than simulated.
+//   * NOT covered here: the game being live (it is not), and paying a claim on chain — the payout
+//     worker is the only signer and is proven separately against a mainnet fork by
+//     scripts/verify-payout.mjs. Neither is simulated here.
 //
 // Usage: node scripts/verify-full-loop.mjs
 //   env: LOOP_BASE (default http://127.0.0.1:4500), LOOP_PG (docker container name of the database)
@@ -74,7 +75,11 @@ console.log("\n=========== WANTED — full prediction loop ===========\n");
 // than defaulted on in the schema because an absent config must never mean "pay out" — the switch
 // exists precisely because REWARDS_ENABLED, a Vercel env var, could never reach the Postgres
 // function that writes the credit. infra/verify-predictions.sql §10 asserts the off case.
-sql(`insert into public.site_config (key, value) values ('rewards', '{"enabled": true}'::jsonb)
+// rewards_enabled() also requires real caps (20260914000001) — generous ones, so the assertions
+// below test the reward formula and not the clamps.
+sql(`insert into public.site_config (key, value) values
+       ('rewards', '{"enabled": true}'::jsonb),
+       ('reward_caps', '{"daily_cap": 100000, "max_per_prediction": 100000, "max_per_wallet_day": 100000}'::jsonb)
      on conflict (key) do update set value = excluded.value;`);
 check("rewards master switch is on for this run", sql("select public.rewards_enabled();") === "t");
 
@@ -287,44 +292,54 @@ const noAuthBal = await api("/api/rewards/balance");
 check("balance requires authentication", noAuthBal.status === 401, `status ${noAuthBal.status}`);
 
 // ---------------------------------------------------------------------------------------------
-console.log("\n--- 8. the claim ---");
-// TREASURY_KEY_SET is exported by the caller with a freshly generated, UNFUNDED key. That takes the
-// claim past the "not configured" guard and all the way to a real transfer attempt against the real
-// chain, which must fail for lack of gas — and the credits must come back.
-const treasuryConfigured = Boolean(process.env.TREASURY_PRIVATE_KEY);
-console.log(`       treasury key present: ${treasuryConfigured}`);
+console.log("\n--- 8. the claim (the outbox: enqueue only — CONTRACTS-PREDICTIONS §10) ---");
+// The claim route no longer signs anything. It enqueues a `queued` claim and returns 202; the payout
+// worker, run by the cron under a lease, is the only signer — and it is proven against a fork of
+// Robinhood Chain mainnet by scripts/verify-payout.mjs. What this loop proves is the viewer's half,
+// through the real routes: the payouts switch, the enqueue, the credit moving onto the claim, the
+// one-in-flight rule, and the balance and history the panel renders from.
+//
+// The server under test must be started with CLAIM_MIN_AMOUNT and CLAIM_MAX_AMOUNT set (they are
+// required now; unset refuses every claim) and REWARDS_ENABLED=true. It needs no treasury key.
+const winnerWallet = winner.address.toLowerCase();
+sql(`insert into public.site_config (key, value) values ('rewards', '{"enabled": true, "payouts": false}'::jsonb)
+     on conflict (key) do update set value = excluded.value;`);
+const paused = await api("/api/rewards/claim", { method: "POST", headers: { cookie: winnerAuth.cookie } });
+check("with payouts OFF the claim is refused as paused (503) and nothing is enqueued",
+  paused.status === 503 && sql("select count(*) from public.reward_claims;") === "0",
+  `status ${paused.status} ${JSON.stringify(paused.body).slice(0, 120)}`);
 
+sql(`update public.site_config set value = value || '{"payouts": true}'::jsonb where key = 'rewards';`);
 const claim = await api("/api/rewards/claim", { method: "POST", headers: { cookie: winnerAuth.cookie } });
 console.log(`       claim -> ${claim.status} ${JSON.stringify(claim.body).slice(0, 220)}`);
+check("the claim is QUEUED (202) — accepted, never reported as paid",
+  claim.status === 202 && claim.body?.status === "queued" && typeof claim.body?.claimId === "string",
+  `status ${claim.status}`);
+check("the response carries no transaction hash (nothing was signed)",
+  !/0x[a-f0-9]{64}/i.test(JSON.stringify(claim.body)));
+check("the queued claim owns the winner's credit, in the same transaction that created it",
+  sql(`select count(*) from public.reward_ledger where wallet='${winnerWallet}' and claim_id is not null;`) === "1" &&
+  sql(`select status from public.reward_claims where wallet='${winnerWallet}';`) === "queued");
+check("no request signed anything: no raw_tx, no nonce anywhere",
+  sql("select count(*) from public.reward_claims where raw_tx is not null or nonce is not null;") === "0");
 
-check(
-  "the claim never returns success and never fabricates a transaction hash",
-  claim.status !== 200 && !/"txHash":"0x[a-f0-9]{64}"/i.test(JSON.stringify(claim.body)),
-  `status ${claim.status}`,
-);
+const again = await api("/api/rewards/claim", { method: "POST", headers: { cookie: winnerAuth.cookie } });
+check("a second claim while one is in flight is refused (409), not double-queued",
+  again.status === 409 && sql(`select count(*) from public.reward_claims where wallet='${winnerWallet}';`) === "1",
+  `status ${again.status}`);
 
-if (treasuryConfigured) {
-  check(
-    "with a key present the claim reaches a REAL broadcast attempt and fails on funds/gas",
-    claim.status === 502,
-    `status ${claim.status}`,
-  );
-  check(
-    "the failed claim is recorded as failed, not left pending",
-    sql("select count(*) from public.reward_claims where status='failed';") === "1",
-  );
-  check(
-    "and the credit was RETURNED to claimable — a failed transfer never burns a reward",
-    sql(`select count(*) from public.reward_ledger where wallet='${winner.address.toLowerCase()}' and claim_id is null;`) === "1",
-  );
-  const balAfter = await api("/api/rewards/balance", { headers: { cookie: winnerAuth.cookie } });
-  check("the balance is claimable again after the failure",
-    balAfter.body?.claimable === "10000000000000000000", String(balAfter.body?.claimable));
-} else {
-  check("without a key the claim is refused honestly as unconfigured", claim.status === 503, `status ${claim.status}`);
-}
-check("no claim was ever marked submitted or confirmed",
-  sql("select count(*) from public.reward_claims where status in ('submitted','confirmed');") === "0");
+const balAfter = await api("/api/rewards/balance", { headers: { cookie: winnerAuth.cookie } });
+check("the balance shows nothing claimable and names the in-flight claim",
+  balAfter.body?.claimable === "0" && balAfter.body?.in_flight_claim?.status === "queued",
+  JSON.stringify(balAfter.body).slice(0, 200));
+const history = await api("/api/rewards/claims", { headers: { cookie: winnerAuth.cookie } });
+const latest = history.body?.claims?.[0];
+check("the claim history shows it queued, 10 TTWO in base units, with no receipt yet",
+  history.status === 200 && latest?.status === "queued" && latest?.amount === "10000000000000000000" &&
+    latest?.tx_hash === null && latest?.explorer_url === null,
+  JSON.stringify(latest));
+check("the claim history is private to the session",
+  (await api("/api/rewards/claims")).status === 401);
 
 console.log("\n--- 9. leaderboard and streaks ---");
 const lb = await api("/api/leaderboard?window=all");

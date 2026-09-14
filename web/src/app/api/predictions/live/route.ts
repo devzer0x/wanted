@@ -38,7 +38,7 @@ import type {
   PredictionDistribution,
 } from "@/lib/prediction/types";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../../_lib/supabaseAdmin";
-import { jsonError, jsonOk, notConfigured } from "../../_lib/http";
+import { jsonOk, notConfigured, internalError } from "../../_lib/http";
 
 export const dynamic = "force-dynamic";
 
@@ -98,7 +98,7 @@ export async function GET(): Promise<Response> {
     .limit(1)
     .maybeSingle<{ id: string }>();
   if (sessionErr) {
-    return jsonError(500, "failed to read sessions", { detail: sessionErr.message });
+    return internalError("predictions/live: failed to read sessions", sessionErr, "failed to read sessions");
   }
 
   let sessionLive = false;
@@ -109,7 +109,7 @@ export async function GET(): Promise<Response> {
       .eq("session_id", openSession.id)
       .maybeSingle<{ heartbeat_at: string }>();
     if (statsErr) {
-      return jsonError(500, "failed to read stats", { detail: statsErr.message });
+      return internalError("predictions/live: failed to read stats", statsErr, "failed to read stats");
     }
     if (statsRow?.heartbeat_at) {
       const age = Date.now() - new Date(statsRow.heartbeat_at).getTime();
@@ -133,7 +133,7 @@ export async function GET(): Promise<Response> {
     .in("status", ["open", "locked"])
     .order("opened_at", { ascending: false });
   if (liveErr) {
-    return jsonError(500, "failed to read predictions", { detail: liveErr.message });
+    return internalError("predictions/live: failed to read predictions", liveErr, "failed to read predictions");
   }
 
   const since = new Date(Date.now() - RECENTLY_SETTLED_WINDOW_MS).toISOString();
@@ -145,7 +145,7 @@ export async function GET(): Promise<Response> {
     .order("resolves_at", { ascending: false })
     .limit(RECENTLY_SETTLED_LIMIT);
   if (resolvedErr) {
-    return jsonError(500, "failed to read resolved predictions", { detail: resolvedErr.message });
+    return internalError("predictions/live: failed to read resolved predictions", resolvedErr, "failed to read resolved predictions");
   }
 
   // Amount scale comes from the configured reward asset, never a hardcoded 18.
@@ -162,7 +162,7 @@ export async function GET(): Promise<Response> {
       .select("*")
       .in("prediction_id", allIds);
     if (distErr) {
-      return jsonError(500, "failed to read prediction_distribution", { detail: distErr.message });
+      return internalError("predictions/live: failed to read prediction_distribution", distErr, "failed to read prediction_distribution");
     }
     for (const row of (distRows ?? []) as Record<string, unknown>[]) {
       const predictionId = row.prediction_id as string;
@@ -201,10 +201,10 @@ export async function GET(): Promise<Response> {
           .in("prediction_id", allIds),
       ]);
     if (entryErr) {
-      return jsonError(500, "failed to read prediction_entries", { detail: entryErr.message });
+      return internalError("predictions/live: failed to read prediction_entries", entryErr, "failed to read prediction_entries");
     }
     if (ledgerErr) {
-      return jsonError(500, "failed to read reward_ledger", { detail: ledgerErr.message });
+      return internalError("predictions/live: failed to read reward_ledger", ledgerErr, "failed to read reward_ledger");
     }
     const rewardByPrediction = new Map<string, string>();
     for (const row of (ledgerRows ?? []) as { prediction_id: string; amount: string | number }[]) {

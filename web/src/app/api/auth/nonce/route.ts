@@ -18,7 +18,7 @@ import { publicClient } from "@/lib/chain/config";
 import { buildSiweMessage } from "@/lib/auth/siwe";
 import { siweOrigin } from "../../_lib/siweDomain";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../../_lib/supabaseAdmin";
-import { jsonError, jsonOk, notConfigured, getClientIp, readJsonBody } from "../../_lib/http";
+import { jsonError, jsonOk, notConfigured, getClientIp, readJsonBody, internalError } from "../../_lib/http";
 import { rateLimit, RATE_LIMITS } from "../../_lib/rateLimit";
 import { normalizeAddress } from "../../_lib/wallet";
 
@@ -80,7 +80,7 @@ export async function POST(request: Request): Promise<Response> {
   });
 
   if (error) {
-    return jsonError(500, "failed to issue nonce", { detail: error.message });
+    return internalError("auth/nonce: failed to issue nonce", error, "failed to issue nonce");
   }
 
   // Return the exact message to sign, built here.
@@ -99,9 +99,8 @@ export async function POST(request: Request): Promise<Response> {
   try {
     ({ domain, uri } = siweOrigin());
   } catch (err) {
-    return jsonError(503, "sign-in is not configured on this deployment", {
-      detail: err instanceof Error ? err.message : String(err),
-    });
+    console.error(`auth/nonce: ${err instanceof Error ? err.message : String(err)}`);
+    return jsonError(503, "sign-in is not configured on this deployment");
   }
   const message = buildSiweMessage({
     address,

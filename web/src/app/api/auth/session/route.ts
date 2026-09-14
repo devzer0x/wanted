@@ -5,15 +5,19 @@
 
 import { readSession } from "@/lib/auth/session";
 import { assessEligibility } from "@/lib/policy";
-import { jsonOk } from "../../_lib/http";
+import { getClientCountry, jsonOk } from "../../_lib/http";
 
 export const dynamic = "force-dynamic";
 
-export async function GET(): Promise<Response> {
+export async function GET(request: Request): Promise<Response> {
   const session = await readSession();
   if (!session?.address) {
     return jsonOk({ address: null, eligible: false });
   }
-  const policy = await assessEligibility({ address: session.address });
+  const policy = await assessEligibility({
+    address: session.address,
+    country: getClientCountry(request),
+    rulesVersion: session.rulesVersion,
+  });
   return jsonOk({ address: session.address, eligible: policy.eligible });
 }

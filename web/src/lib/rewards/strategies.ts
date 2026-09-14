@@ -3,11 +3,11 @@
 // transaction against sum() (not here — this module has no database access), and this is just
 // the shared source of truth for what those caps are and how a pool splits.
 //
-//   REWARDS_DAILY_CAP            base units; unset = no cap
-//   REWARDS_MAX_PER_PREDICTION   base units; unset = no cap
-//   REWARDS_MAX_PER_WALLET_DAY   base units; unset = no cap
-//   CLAIM_MIN_AMOUNT             base units; unset = 0 (no minimum enforced yet)
-//   CLAIM_MAX_AMOUNT             base units; unset = no cap (no manual-release ceiling)
+//   CLAIM_MIN_AMOUNT   base units, REQUIRED, > 0. Decided: 2000000000000000 (0.002 TTWO).
+//   CLAIM_MAX_AMOUNT   base units, REQUIRED, >= CLAIM_MIN_AMOUNT. Decided: 500000000000000000 (0.5).
+//
+// Unset is a misconfiguration, not "no limit" (CONTRACTS-PREDICTIONS §10.6): rewardLimits() throws,
+// the claim route refuses, and the balance route reports `reward_limits_misconfigured`.
 
 export function computeRewardPerWallet(p: {
   pool: bigint;
@@ -30,67 +30,68 @@ export function computeRewardPerWallet(p: {
 }
 
 /**
- * Parses a base-unit integer from the environment, or throws.
+ * Parses a REQUIRED base-unit integer from the environment, or throws.
  *
- * It used to return `null` on a parse failure, which meant an operator who set
- * `CLAIM_MAX_AMOUNT=0.002` — the plausible mistake, because the caps in `site_config` ARE whole
- * token units — got a deployment with no maximum claim at all and no indication of it anywhere.
- * A treasury ceiling that quietly becomes "unlimited" because of a decimal point is the worst
- * failure mode available here, so a value that is present but unreadable is now an error. Absent
- * still means absent: `unset` is a deliberate configuration and keeps its documented meaning.
+ * Absent used to mean "no limit" for both claim rails, so a deployment that simply forgot them paid
+ * claims with no floor and no ceiling. On the money path an absent rail is now a refusal (§10.6).
+ * A value that is present but unreadable is also an error: an operator who writes
+ * `CLAIM_MAX_AMOUNT=0.5` (the plausible mistake, because the caps in `site_config` ARE whole tokens)
+ * must get a refusal, never a silently different ceiling.
+ *
+ * The thrown messages name the variable and quote its (non-secret) value for the operator reading
+ * server logs. Routes never return them: they map the throw to a fixed code.
  */
-function parseOptionalBigintEnv(name: string): bigint | null {
+function parseRequiredBigintEnv(name: "CLAIM_MIN_AMOUNT" | "CLAIM_MAX_AMOUNT"): bigint {
   const raw = process.env[name]?.trim();
-  if (!raw) return null;
-
-  let value: bigint;
-  try {
-    value = BigInt(raw);
-  } catch {
+  if (!raw) {
+    throw new Error(`${name} is not set. It is required, in BASE UNITS (0.002 TTWO is "2000000000000000").`);
+  }
+  if (!/^\d+$/.test(raw)) {
     throw new Error(
-      `${name}="${raw}" is not an integer. This variable is in BASE UNITS (an 18-decimal asset ` +
-        `means 0.002 TTWO is "2000000000000000"), not whole tokens. Leave it unset to disable ` +
-        `the limit.`,
+      `${name}="${raw}" is not a non-negative integer. This variable is in BASE UNITS (an 18-decimal ` +
+        `asset means 0.002 TTWO is "2000000000000000"), not whole tokens.`,
     );
   }
-  if (value < BigInt(0)) {
-    throw new Error(`${name}="${raw}" is negative. Leave it unset to disable the limit.`);
-  }
-  return value;
+  return BigInt(raw);
 }
 
 /**
- * The CLAIM-side limits (CONTRACTS-PREDICTIONS §6). Only these two live in the environment, because
- * only these two are enforced by TypeScript — `/api/rewards/claim` passes them into
- * `create_reward_claim`.
+ * The CLAIM-side limits (CONTRACTS-PREDICTIONS §6, §10.6). Only these two live in the environment,
+ * because only these two are enforced from TypeScript — `/api/rewards/claim` passes them into
+ * `create_reward_claim`, which takes the longest prefix of the wallet's credits under the maximum
+ * and refuses a total under the minimum.
  *
  * The three SETTLEMENT-side caps — daily, per-prediction and per-wallet-per-day — are deliberately
  * NOT here. They are enforced inside `settle_due_predictions()`, which is a Postgres function and
  * cannot read this deployment's environment; it reads them from `public.site_config` under the key
- * `reward_caps`. They used to be parsed here as well, from `REWARDS_DAILY_CAP` and friends, and
- * nothing ever consumed the result — so an operator who set a daily treasury cap in Vercel would
- * have been told nothing and capped nothing. For a treasury rail that is the worst possible failure
- * mode, so the dead half is gone and there is now exactly one place to set them:
+ * `reward_caps`, and with the row absent or malformed it credits nothing (rewards_enabled() is
+ * false). The decided values, and the only example that belongs anywhere:
  *
  *   insert into public.site_config (key, value) values
- *     ('reward_caps', '{"daily_cap": 250, "max_per_prediction": 25, "max_per_wallet_day": 10}')
+ *     ('reward_caps', '{"daily_cap": 0.25, "max_per_prediction": 0.02, "max_per_wallet_day": 0.05}')
  *   on conflict (key) do update set value = excluded.value;
  *
  * Those numbers are WHOLE token units, matching the amount columns. The two below are BASE units,
  * matching the rest of the TypeScript; `/api/rewards/claim` converts them at the SQL boundary.
+ * CLAIM_MAX_AMOUNT (0.5) must stay >= max_per_prediction (0.02), or a single credit could never be
+ * claimed (create_reward_claim raises P0004).
  */
-export type RewardLimits = { minClaim: bigint; maxClaim: bigint | null };
+export type RewardLimits = { minClaim: bigint; maxClaim: bigint };
 
 /**
- * Read per call rather than once at module load, because `parseOptionalBigintEnv` now throws.
- * Next.js evaluates module scope while collecting page data at build time, so a module-level parse
- * would turn one malformed variable into a failed build for the whole site. Evaluating it inside
- * the request keeps the failure loud and confines it to the route that depends on it — which is
- * only `/api/rewards/claim`; no page renders this.
+ * Read per call rather than once at module load, because it throws. Next.js evaluates module scope
+ * while collecting page data at build time, so a module-level parse would turn one missing variable
+ * into a failed build for the whole site. Evaluating it inside the request keeps the failure loud
+ * and confined to the routes that depend on it.
  */
 export function rewardLimits(): RewardLimits {
-  return {
-    minClaim: parseOptionalBigintEnv("CLAIM_MIN_AMOUNT") ?? BigInt(0),
-    maxClaim: parseOptionalBigintEnv("CLAIM_MAX_AMOUNT"),
-  };
+  const minClaim = parseRequiredBigintEnv("CLAIM_MIN_AMOUNT");
+  const maxClaim = parseRequiredBigintEnv("CLAIM_MAX_AMOUNT");
+  if (minClaim <= BigInt(0)) {
+    throw new Error("CLAIM_MIN_AMOUNT must be greater than 0 (decided: 2000000000000000 = 0.002 TTWO).");
+  }
+  if (maxClaim < minClaim) {
+    throw new Error("CLAIM_MAX_AMOUNT must be at least CLAIM_MIN_AMOUNT.");
+  }
+  return { minClaim, maxClaim };
 }

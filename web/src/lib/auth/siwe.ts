@@ -7,12 +7,32 @@
 
 import { getAddress, verifyMessage } from "viem";
 
+/**
+ * The version of the public rules at /rules that signing in accepts.
+ *
+ * It lives here, not in a config module, because it is part of the SIGNED BYTES: the statement
+ * below names it, so a verified signature is itself the proof of which rules a wallet accepted.
+ * Bump it whenever /rules changes in substance. Every existing session then reads as "rules not
+ * accepted" (CONTRACTS-PREDICTIONS §5, POLICY_REQUIRE_TERMS) until the wallet signs in again,
+ * which is exactly the re-consent a change of terms needs. Predicting is never gated on it —
+ * only rewards are.
+ */
+export const RULES_VERSION = 1;
+export const RULES_PATH = "/rules";
+
 // Shown VERBATIM inside the user's wallet signing prompt — this is a public surface, and for
 // many users the first sentence of ours they read closely. Keep it plain about what signing
-// does: it authenticates, it is free, and it moves no funds. Changing this string changes the
-// bytes that get signed, so /verify must rebuild it identically — which it does, because both
-// sides call buildSiweMessage() rather than assembling their own text.
-const STATEMENT = "Sign in to WANTED to make predictions. This is free and moves no funds.";
+// does: it authenticates, it is free, it moves no funds, and it accepts a specific, versioned set
+// of rules the user can open. Changing this string changes the bytes that get signed, so /verify
+// must rebuild it identically — which it does, because both sides call buildSiweMessage() rather
+// than assembling their own text. EIP-4361 forbids a newline inside the statement; this has none.
+function statementFor(uri: string): string {
+  const rulesUrl = `${uri.replace(/\/+$/, "")}${RULES_PATH}`;
+  return (
+    "Sign in to WANTED to make predictions. This is free and moves no funds. " +
+    `By signing you accept the WANTED Rules v${RULES_VERSION} at ${rulesUrl}`
+  );
+}
 const VERSION = "1";
 
 /**
@@ -59,7 +79,7 @@ export function buildSiweMessage(p: {
     `${p.domain} wants you to sign in with your Ethereum account:\n` +
     `${checksummed}\n` +
     `\n` +
-    `${STATEMENT}\n` +
+    `${statementFor(p.uri)}\n` +
     `\n` +
     `URI: ${p.uri}\n` +
     `Version: ${VERSION}\n` +

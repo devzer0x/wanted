@@ -12,7 +12,7 @@
 
 import { readSession } from "@/lib/auth/session";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../../../_lib/supabaseAdmin";
-import { jsonError, jsonOk, notConfigured, getClientIp, readJsonBody } from "../../../_lib/http";
+import { jsonError, jsonOk, notConfigured, getClientIp, readJsonBody, internalError } from "../../../_lib/http";
 import { rateLimit, RATE_LIMITS } from "../../../_lib/rateLimit";
 
 export const dynamic = "force-dynamic";
@@ -60,7 +60,7 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
     if ((error as { code?: string }).code === "23505") {
       return jsonError(409, "already entered this prediction");
     }
-    return jsonError(500, "enter_prediction failed", { detail: error.message });
+    return internalError("predictions/enter: enter_prediction failed", error, "enter_prediction failed");
   }
 
   if (data !== true) {

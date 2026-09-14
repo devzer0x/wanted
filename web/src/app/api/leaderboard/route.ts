@@ -5,7 +5,7 @@
 
 import type { LeaderboardRow, LeaderboardWindow } from "@/lib/prediction/types";
 import { createSupabaseAdmin, isSupabaseAdminConfigured } from "../_lib/supabaseAdmin";
-import { jsonError, jsonOk, notConfigured } from "../_lib/http";
+import { jsonError, jsonOk, notConfigured, internalError } from "../_lib/http";
 import { rewardAsset } from "@/lib/chain/assets";
 import { toBaseUnits } from "../_lib/amount";
 
@@ -26,7 +26,7 @@ export async function GET(request: Request): Promise<Response> {
 
   const { data, error } = await admin.rpc("leaderboard", { p_window: windowParam });
   if (error) {
-    return jsonError(500, "leaderboard failed", { detail: error.message });
+    return internalError("leaderboard: leaderboard failed", error, "leaderboard failed");
   }
 
   // `leaderboard()` returns `earned` as a Postgres numeric in WHOLE token units, which PostgREST

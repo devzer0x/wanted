@@ -20,7 +20,10 @@
 //
 //   NEXT_PUBLIC_TTWO_TOKEN       reward ERC-20 address; empty = unconfigured, surfaces hide
 //   NEXT_PUBLIC_TTWO_SYMBOL      display symbol (default "TTWO")
-//   NEXT_PUBLIC_TTWO_DECIMALS    decimals (default 18, matching the verified contract)
+//   NEXT_PUBLIC_TTWO_DECIMALS    decimals; unset = 18 (the verified contract). Present but not a
+//                                plain integer 0..77 = the asset is UNCONFIGURED (rewardAsset()
+//                                returns null), never a silent 18 (FM-16: a wrong scale is a
+//                                10^n error in the paying-out direction).
 //   NEXT_PUBLIC_WANTED_TOKEN     $WANTED, once it exists. Unrelated to rewards.
 
 import { isAddress } from "viem";
@@ -61,6 +64,21 @@ function parseAddress(raw: string | undefined): `0x${string}` | null {
   return isAddress(trimmed) ? (trimmed as `0x${string}`) : null;
 }
 
+/**
+ * Strict: absent -> 18 (the verified TTWO value); present -> must be a plain decimal integer with no
+ * sign, exponent, fraction or leading zero, in 0..77 (the range api/_lib/amount.ts can shift by).
+ * Anything else -> null, which makes the whole asset unconfigured: a malformed scale is refused, not
+ * guessed. `Number("1e1")`, `Number(" 18 ")` and `Number("0x12")` all parse — this does not use them.
+ */
+function parseDecimals(raw: string | undefined): number | null {
+  if (raw === undefined) return 18;
+  const trimmed = raw.trim();
+  if (trimmed === "") return 18;
+  if (!/^(0|[1-9][0-9]?)$/.test(trimmed)) return null;
+  const n = Number(trimmed);
+  return n <= 77 ? n : null;
+}
+
 /** Null when the reward asset is not yet configured — never invent an address to fill this in. */
 export function rewardAsset(): RewardAsset | null {
   const address = parseAddress(process.env.NEXT_PUBLIC_TTWO_TOKEN);
@@ -68,9 +86,8 @@ export function rewardAsset(): RewardAsset | null {
 
   const symbol = process.env.NEXT_PUBLIC_TTWO_SYMBOL?.trim() || "TTWO";
 
-  const decimalsRaw = process.env.NEXT_PUBLIC_TTWO_DECIMALS?.trim();
-  const parsedDecimals = decimalsRaw ? Number(decimalsRaw) : 18;
-  const decimals = Number.isInteger(parsedDecimals) && parsedDecimals >= 0 ? parsedDecimals : 18;
+  const decimals = parseDecimals(process.env.NEXT_PUBLIC_TTWO_DECIMALS);
+  if (decimals === null) return null;
 
   return { address, symbol, decimals };
 }

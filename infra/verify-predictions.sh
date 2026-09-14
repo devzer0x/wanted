@@ -26,7 +26,19 @@ cleanup
 
 echo "== booting a throwaway Postgres 16 =="
 docker run -d --name "$CONTAINER" -e POSTGRES_PASSWORD=verify -p ${PORT}:5432 postgres:16-alpine >/dev/null
-until docker exec "$CONTAINER" pg_isready -U postgres -q; do sleep 1; done
+# pg_isready alone is not enough: the image's entrypoint runs a TEMPORARY server for initdb,
+# pg_isready succeeds against it, and then it restarts — a query sent in that window gets "server
+# closed the connection unexpectedly". Require two real queries a second apart to both succeed.
+ready=0
+for _ in $(seq 1 60); do
+  if docker exec "$CONTAINER" psql -U postgres -tAqc 'select 1' >/dev/null 2>&1; then
+    ready=$((ready + 1)); [[ $ready -ge 2 ]] && break
+  else
+    ready=0
+  fi
+  sleep 1
+done
+[[ $ready -ge 2 ]] || { echo "Postgres never became ready" >&2; exit 1; }
 
 # Supabase's roles, which the policies migration grants against.
 $PSQL -c "create role anon nologin; create role authenticated nologin; create role service_role nologin bypassrls;"
@@ -56,6 +68,38 @@ echo
 echo "== the assertions =="
 docker cp verify-predictions.sql "$CONTAINER:/tmp/v.sql" >/dev/null
 docker exec -i "$CONTAINER" psql -U postgres -f /tmp/v.sql
+
+echo
+echo "== the lock, contended: a second backend holds the settlement lock; a run must yield =="
+# "Returned 0" alone proves nothing — an uncontended run also returns 0 when nothing is due. So a
+# prediction is made due FIRST (same real no-death window as survive_yes, one entrant): the
+# contended run must return 0 AND leave it unsettled, and the run after the holder exits must
+# settle exactly that one. Only then has the lock, and not an empty queue, been observed.
+Q() { docker exec "$CONTAINER" psql -U postgres -tAq -c "$1"; }
+Q "insert into public.predictions (session_id, question, prediction_type, opened_at, locks_at, resolves_at, outcomes, telemetry_rule, reward_pool, reward_asset)
+   select id, 'LOCK WITNESS', 'lockwitness', timestamptz '2026-09-04T06:19:00Z', timestamptz '2026-09-04T06:20:00Z', timestamptz '2026-09-04T06:23:00Z',
+          '[{\"key\":\"yes\",\"label\":\"YES\"},{\"key\":\"no\",\"label\":\"NO\"}]'::jsonb,
+          '{\"kind\":\"survives_window\",\"outcome_if_true\":\"yes\",\"outcome_if_false\":\"no\"}'::jsonb, 1, 'TTWO'
+   from public.sessions limit 1;" >/dev/null
+Q "insert into public.prediction_entries (prediction_id, wallet, outcome) select id, '0xabc9', 'yes' from public.predictions where prediction_type = 'lockwitness';" >/dev/null
+Q "select public.lock_due_predictions();" >/dev/null
+# A real second connection, not a simulation: advisory locks are shared across sessions, so while
+# this one holds key 7741300101 the wrapper's try-lock in the other must fail.
+docker exec "$CONTAINER" psql -U postgres -tAq -c "select pg_advisory_lock(7741300101); select pg_sleep(4);" >/dev/null &
+HOLDER=$!
+sleep 1.5
+CONTENDED=$(Q "select public.settle_due_predictions_serialized();")
+STILL=$(Q "select status from public.predictions where prediction_type = 'lockwitness';")
+wait $HOLDER
+AFTER=$(Q "select public.settle_due_predictions_serialized();")
+FINAL=$(Q "select status || '|' || coalesce(result, '-') from public.predictions where prediction_type = 'lockwitness';")
+echo "   contended run returned: ${CONTENDED}            (EXPECT 0)"
+echo "   witness while contended: ${STILL}              (EXPECT locked — untouched)"
+echo "   run after holder exited returned: ${AFTER}  (EXPECT 1)"
+echo "   witness afterwards: ${FINAL}              (EXPECT settled|yes)"
+[[ "$CONTENDED" == "0" && "$STILL" == "locked" && "$AFTER" == "1" && "$FINAL" == "settled|yes" ]] \
+  || { echo "FAIL: settlement lock did not serialise"; exit 1; }
+echo "   PASS: the lock, not an empty queue, produced the 0"
 
 echo
 echo "Container ${CONTAINER} will be removed on exit."

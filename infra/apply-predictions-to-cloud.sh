@@ -63,6 +63,18 @@ REPAIR_MIGRATIONS=(
   # The rewards master switch. Default CLOSED, so applying this to a project with no `rewards`
   # site_config row stops reward credits being written until the operator opts in.
   supabase/migrations/20260909010000_rewards_master_switch.sql
+  # Adds wallet_sessions.rules_version. MUST be applied before a deployment whose /api/auth/verify
+  # writes that column goes live, or every sign-in fails with an unknown-column error.
+  supabase/migrations/20260914000000_rules_acceptance.sql
+  # Serialises settlement behind an advisory lock (the cron calls the wrapper; the raw function is
+  # revoked from service_role) and makes rewards_enabled() require real caps. MUST be applied
+  # before a deployment whose cron calls settle_due_predictions_serialized goes live.
+  supabase/migrations/20260914000001_settlement_guards.sql
+  # The payout outbox (CONTRACTS-PREDICTIONS §10). Drops finalize_reward_claim and the 3-argument
+  # create_reward_claim, so it MUST be applied before the deployment whose claim route calls the
+  # 4-argument version — the old route's claims then fail closed until that deploy, which is harmless
+  # while site_config rewards.payouts is off (its default).
+  supabase/migrations/20260914100000_payout_outbox.sql
 )
 MIGRATIONS=("${BASE_MIGRATIONS[@]}" "${REPAIR_MIGRATIONS[@]}")
 
@@ -80,7 +92,7 @@ fi
 # ---- 2. refuse to run if the migrations ever stop being additive ---------------------------------
 echo "== checking the migrations are additive-only =="
 if grep -inE '^[[:space:]]*(drop|truncate|delete[[:space:]]+from)[[:space:]]' "${MIGRATIONS[@]}" \
-   | grep -viE 'drop[[:space:]]+(function|policy|trigger)[[:space:]]+if[[:space:]]+exists' ; then
+   | grep -viE 'drop[[:space:]]+(function|policy|trigger|index)[[:space:]]+if[[:space:]]+exists' ; then
   echo "REFUSING: a destructive statement appeared in the migrations above." >&2
   exit 1
 fi
@@ -159,6 +171,17 @@ echo "== verifying =="
 # things that were once believed true of the live project and were not.
 "${PSQL[@]}" -tAc "select 'anon EXECUTE revoked on all 3 server-only functions: ' || bool_and(not has_function_privilege('anon', p.oid, 'execute')) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in ('enter_prediction','lock_due_predictions','settle_due_predictions');"
 "${PSQL[@]}" -tAc "select 'reward_ledger master-switch trigger installed: ' || count(*) from pg_trigger where tgname = 'reward_ledger_master_switch_trg' and not tgisinternal;"
+"${PSQL[@]}" -tAc "select 'settlement reachable by service_role only through the lock: ' || (has_function_privilege('service_role', 'public.settle_due_predictions_serialized()', 'execute') and not has_function_privilege('service_role', 'public.settle_due_predictions()', 'execute'));"
+"${PSQL[@]}" -tAc "select 'wallet_sessions.rules_version present: ' || count(*) from information_schema.columns where table_schema = 'public' and table_name = 'wallet_sessions' and column_name = 'rules_version';"
+# The payout outbox (20260914100000). Each line must print true / the stated count.
+"${PSQL[@]}" -tAc "select 'finalize_reward_claim and 3-arg create_reward_claim gone: ' || (to_regprocedure('public.finalize_reward_claim(uuid,text,text,text)') is null and to_regprocedure('public.create_reward_claim(text,numeric,numeric)') is null);"
+"${PSQL[@]}" -tAc "select 'payout_lease singleton present: ' || (select count(*) = 1 from public.payout_lease where id = 1);"
+"${PSQL[@]}" -tAc "select 'outbox triggers installed (expect 2): ' || count(*) from pg_trigger where not tgisinternal and tgname in ('reward_claims_guard_status_transition', 'reward_ledger_guard_claim_id');"
+"${PSQL[@]}" -tAc "select 'service_role can call every worker function: ' || bool_and(has_function_privilege('service_role', p.oid, 'execute')) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in ('create_reward_claim','acquire_payout_lease','release_payout_lease','payout_snapshot','init_treasury_account','assign_claim_nonce','record_signed_claim','mark_claim_broadcast','record_claim_attempt','confirm_claim','fail_claim','flag_claim_review','halt_treasury','write_treasury_status','payouts_enabled');"
+"${PSQL[@]}" -tAc "select 'anon/authenticated can call NO payout function: ' || not bool_or(has_function_privilege('anon', p.oid, 'execute') or has_function_privilege('authenticated', p.oid, 'execute')) from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname in ('create_reward_claim','acquire_payout_lease','release_payout_lease','payout_snapshot','init_treasury_account','assign_claim_nonce','record_signed_claim','mark_claim_broadcast','record_claim_attempt','confirm_claim','fail_claim','flag_claim_review','halt_treasury','write_treasury_status','payouts_enabled','resolve_claim_review','resume_payouts','cancel_queued_claim','record_claim_override','assert_payout_lease');"
+"${PSQL[@]}" -tAc "select 'service_role cannot write reward_claims/reward_ledger directly (B1): ' || not (has_table_privilege('service_role','public.reward_claims','insert') or has_table_privilege('service_role','public.reward_claims','update') or has_table_privilege('service_role','public.reward_claims','delete') or has_table_privilege('service_role','public.reward_ledger','insert') or has_table_privilege('service_role','public.reward_ledger','update') or has_table_privilege('service_role','public.reward_ledger','delete'));"
+"${PSQL[@]}" -tAc "select 'service_role cannot rewrite site_config (FS12): ' || not (has_table_privilege('service_role','public.site_config','insert') or has_table_privilege('service_role','public.site_config','update') or has_table_privilege('service_role','public.site_config','delete'));"
+"${PSQL[@]}" -tAc "select 'payouts switch is currently: ' || case when public.payouts_enabled() then 'ON — the worker WILL sign' else 'off (default) — nothing will be signed' end;"
 "${PSQL[@]}" -tAc "select 'rewards master switch is currently: ' || case when public.rewards_enabled() then 'ON — credits WILL be written' else 'off (default) — no credits will be written' end;"
 
 echo

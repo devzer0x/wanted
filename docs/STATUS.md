@@ -169,6 +169,82 @@ and a line containing it is rejected in `say` or `thought`, in any casing. Prove
 regression test — it is not hypothetical, because the production `decisions` table already contains
 two lines where the agent addressed itself by that name, and those render on the public site.
 
+## 2026-09-15 — TTWO payouts rebuilt; NOT funded, NOT deployed
+
+**Nothing below is live.** The work is in the working tree, uncommitted, and none of the four new
+migrations is applied to the cloud project. No treasury key exists. No transfer has ever been
+broadcast to mainnet from this codebase.
+
+**Why it was rebuilt.** An Opus audit of the old claim path (18 failure modes, 2026-09-14) found two
+critical defects: a wallet could claim exactly once in its life (a `submitted` claim never left the
+one-in-flight index, because nothing ever read a receipt), and an ambiguous broadcast error released
+the credits of a transfer that may have landed — a double payment. Fable ruled FM-01..FM-14 must be
+fixed before funding and specified the replacement: an outbox (CONTRACTS-PREDICTIONS §10).
+
+**What exists and how it is verified:**
+- **Eligibility — every wallet was being refused.** Production has `POLICY_BLOCKED_REGIONS` and
+  `POLICY_REQUIRE_TERMS=true`, and no caller passed a country or recorded rules acceptance. Now the
+  SIWE statement names the /rules version, the signed session carries it, `wallet_sessions.rules_version`
+  records it (`20260914000000`), and routes pass Vercel's `x-vercel-ip-country`. New public page
+  `/rules` (v1) renders the restricted list from the same env var policy enforces. Verified:
+  `npm run verify:siwe` 11/11, including a signature over the pre-rules statement being rejected; the
+  `/verify` burn write checked through real PostgREST.
+- **Settlement guards (`20260914000001`).** Settlement runs behind a transaction-scoped advisory lock,
+  reachable by `service_role` only through `settle_due_predictions_serialized()` (FM-10: overlapping
+  runs could each spend the full daily cap). `rewards_enabled()` is false unless all three caps are
+  present, numeric and positive (FM-11: a missing cap meant 1,000,000 TTWO/day), and no longer raises
+  on a non-boolean switch value — the 2026-09-09 version did, which would have aborted every settlement.
+  Verified with a genuinely contended lock: a second backend holds the key, the run returns 0 AND
+  leaves a due prediction unsettled, and the next run settles exactly it.
+- **Payout outbox (`20260914100000`, `web/src/lib/rewards/{payoutWorker,treasury}.ts`).** Claims only
+  enqueue; one lease-holding cron worker signs; signed bytes are persisted before broadcast; nonces
+  come from the database; credits return only with on-chain proof; an unrecorded use of the key halts
+  the treasury. `infra/verify-predictions.sh` exits 0: 35 deliberate refusals all raised as expected,
+  zero unexpected errors, every §12 witness correct (lease fencing incl. an expired zombie lease,
+  strict nonce order 7→11 with a rollback, all four release proofs, halt/resume, publication filter)
+  and invariants I1/I2/I4/I6. **That suite found a real bug**, fixed before anything was applied:
+  `confirm_claim` accepted ANY hash when no override existed (SQL NULL logic — §10.8).
+- **Custody tool** `web/scripts/treasury-push-key.mjs`: 6/6 required checks + 17 extra against real
+  throwaway `cast` keystores (wrong passphrase refused by MAC, wrong/missing `--expect` refused, zero
+  64-hex runs in any output); its real Vercel push has never run.
+- Web typecheck and lint clean.
+
+**Fault drills — PASS, 179/179, three full runs** (`npm run verify:payout`, 2026-09-15). Real Postgres
+16 with every migration, real PostgREST with a real service-role JWT, the product's own compiled
+worker, and an anvil fork of Robinhood Chain mainnet (real TTWO bytecode). Credits come only from
+real settlement over the real recorded session (5,649 events). Drills: happy path (receipt hash =
+tx_hash = keccak256(raw_tx), recipient delta exact to the wei); the same wallet paid again (FM-01);
+crash after persist, before broadcast; ambiguous broadcast — the node took the tx, the caller got a
+502 — paid exactly once (FM-02); dropped tx re-broadcast; reverted tx failed with credits returned;
+an unknown use of the treasury's nonce halts everything until an operator rules; operator cancel;
+three concurrent workers produce exactly one signer; the kill switch; preflight refusals; invariants
+I1–I14. Gas per payout on the fork: 77,659.
+
+**Security review — Fable: conditional GO for the first tranche.** Five Sonnet finders, a Sonnet
+skeptic per finding, Fable's ruling (CONTRACTS-PREDICTIONS §10.9). Two blocking fixes, both landed
+and proven before anything was applied: **B1** — `service_role` could INSERT a claim with no credit
+behind it and the worker would have paid it (now refused: `permission denied for table
+reward_claims`, asserted by running the exploit); **B2** — a wallet blocked mid-signing was still
+paid (now cancelled, nonce handed back). All twelve fix-soon items landed too (FS1–FS12), including
+`service_role` losing write access to `site_config`, override transactions checked for sender and
+nonce, claims signed by a rotated key held for review, and fixed error text on every route. The SQL
+suite exits 0 with 37 deliberate refusals and none unexpected.
+
+**Found by verification, fixed before it mattered:** `confirm_claim` accepted any hash when no override
+existed (SQL NULL logic); `readLatestNonce` mislabelled a bad RPC URL; the public treasury status
+published pre-payout balances.
+
+**Still unproven, and why:** a payout on real mainnet (by design nothing here broadcasts to mainnet;
+first real payout is operator gate G-I); `token_paused` against a real paused token (none of the 194
+tokens on chain 4663 is paused — it is a fail-closed boolean read). `npm run verify:treasury` passes
+every check of our code but the public RPC (`rpc.mainnet.chain.robinhood.com`) answers repeated runs
+from one machine with HTTP 403 pages; the worker treats that as `rpc_unavailable` (never a failed
+claim), and a private `TREASURY_RPC_URL` is recommended before funding to the ceiling.
+
+**Operator gates before any money moves** (docs/RUNBOOK.md §5): apply the migrations, deploy, generate
+the key in your own terminal and push it, redeploy, verify the tick reports the right treasury, then
+fund the first tranche only (0.05 TTWO + 0.005 ETH). Hot ceiling 1.75 TTWO + 0.02 ETH.
+
 **LIVE at wanted.money since 2026-09-09**, serving the deployment built from commit `8e6ea09`.
 Domain registered through Vercel, nameservers verified, 17 environment variables set in production
 and preview, rewards deliberately OFF.

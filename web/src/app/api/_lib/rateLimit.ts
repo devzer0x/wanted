@@ -22,6 +22,12 @@
 // limiter (nonce single-use + expiry, `UNIQUE(prediction_id, wallet)` on entries, the partial
 // unique index on in-flight reward_claims) — so this limiter is defense-in-depth, not the sole
 // guard against abuse.
+//
+// ON THE CLAIM ROUTE the guard that actually bounds abuse is economic, not this limiter:
+// CLAIM_MIN_AMOUNT (0.002 TTWO) against ~5.4e-6 ETH of gas per payout (~78.7k gas at ~0.07 gwei,
+// measured 2026-09-14). A sybil farm splitting credits across free SIWE wallets can at most make a
+// payout cost ~5% of what it pays, and can never make the treasury pay gas for dust. Do not "fix"
+// sybil cost here — a DB-backed limiter and a per-wallet daily claim count remain the correct target.
 
 interface Bucket {
   count: number;

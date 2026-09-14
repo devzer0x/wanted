@@ -97,19 +97,47 @@ export interface RewardBalance {
   reasons: string[];
   /** Below CLAIM_MIN_AMOUNT the claim button must be disabled, with the minimum shown. */
   min_claim: string;
+  /**
+   * The wallet's one non-terminal claim (queued/signed/broadcast/needs_review), or null. While it
+   * exists the claim button is disabled: the database allows one in-flight claim per wallet (§10.2).
+   */
+  in_flight_claim: InFlightClaim | null;
 }
 
-export type ClaimStatus = "pending" | "submitted" | "confirmed" | "failed";
+/**
+ * Payout outbox states, CONTRACTS-PREDICTIONS §10.2. `confirmed` and `failed` are terminal.
+ *   queued        enqueued by POST /api/rewards/claim; nothing signed yet
+ *   signed        the transfer is signed and persisted, about to reach (or re-reach) the chain
+ *   broadcast     sent; waiting for a receipt
+ *   confirmed     a status-1 receipt exists for a hash recorded on the claim — paid
+ *   failed        proven not paid (reverted receipt, recorded cancel, operator review, or never
+ *                 signed); the credits went back to the claimable balance in the same transaction
+ *   needs_review  the chain and the record disagree; held for a human, credits NOT released
+ */
+export type ClaimStatus = "queued" | "signed" | "broadcast" | "confirmed" | "failed" | "needs_review";
 
+export interface InFlightClaim {
+  id: string;
+  status: ClaimStatus;
+  tx_hash: string | null;
+}
+
+/** One row of GET /api/rewards/claims (§10.5). Never carries raw_tx, nonce or error text. */
 export interface Claim {
   id: string;
+  /** Base-unit string. */
   amount: string;
   asset: string;
   status: ClaimStatus;
+  /** The hash that paid (or will pay) this claim; null when there is none, or none we can name. */
   tx_hash: string | null;
+  explorer_url: string | null;
   created_at: string;
-  /** Populated on failure so the UI can show a real reason, not a generic error. */
-  error: string | null;
+  confirmed_at: string | null;
+}
+
+export interface ClaimsResponse {
+  claims: Claim[];
 }
 
 export interface LeaderboardRow {

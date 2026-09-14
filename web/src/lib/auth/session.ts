@@ -36,6 +36,12 @@ function getTtlSeconds(): number {
 interface SessionPayload {
   address: string;
   expiresAt: number;
+  /**
+   * The /rules version the wallet accepted by signing (see RULES_VERSION in lib/auth/siwe.ts).
+   * Optional because cookies minted before rules acceptance existed carry none — those read as
+   * "not accepted", never as accepted. Inside the HMAC, so a client cannot raise it.
+   */
+  rulesVersion?: number;
 }
 
 function sign(body: string, secret: string): string {
@@ -64,7 +70,9 @@ function decode(token: string, secret: string): SessionPayload | null {
       typeof parsed === "object" &&
       parsed !== null &&
       typeof (parsed as SessionPayload).address === "string" &&
-      typeof (parsed as SessionPayload).expiresAt === "number"
+      typeof (parsed as SessionPayload).expiresAt === "number" &&
+      ((parsed as SessionPayload).rulesVersion === undefined ||
+        Number.isInteger((parsed as SessionPayload).rulesVersion))
     ) {
       return parsed as SessionPayload;
     }
@@ -74,10 +82,10 @@ function decode(token: string, secret: string): SessionPayload | null {
   }
 }
 
-export async function createSession(address: string): Promise<void> {
+export async function createSession(address: string, rulesVersion: number): Promise<void> {
   const secret = getSessionSecret();
   const ttlSeconds = getTtlSeconds();
-  const token = encode({ address, expiresAt: Date.now() + ttlSeconds * 1000 }, secret);
+  const token = encode({ address, expiresAt: Date.now() + ttlSeconds * 1000, rulesVersion }, secret);
 
   const store = await cookies();
   store.set(COOKIE_NAME, token, {
@@ -89,7 +97,7 @@ export async function createSession(address: string): Promise<void> {
   });
 }
 
-export async function readSession(): Promise<{ address: string } | null> {
+export async function readSession(): Promise<{ address: string; rulesVersion: number | null } | null> {
   const secret = getSessionSecret();
   const store = await cookies();
   const token = store.get(COOKIE_NAME)?.value;
@@ -99,7 +107,7 @@ export async function readSession(): Promise<{ address: string } | null> {
   if (!payload) return null;
   if (payload.expiresAt <= Date.now()) return null;
 
-  return { address: payload.address };
+  return { address: payload.address, rulesVersion: payload.rulesVersion ?? null };
 }
 
 export async function destroySession(): Promise<void> {

@@ -8,11 +8,18 @@
 //                             (the jurisdictions the contract's §1 names as restricted for the
 //                             underlying Stock Token — kept configurable rather than hardcoded
 //                             because the reward asset itself is configurable)
-//   POLICY_REQUIRE_TERMS      when true, a wallet must have confirmed terms acceptance; this
-//                             function has no terms-acceptance signal in its input contract, so
-//                             while this flag is on it can never confirm acceptance and reports
-//                             ineligible — the safe default — until a real acceptance signal is
-//                             wired into the caller's context.
+//   POLICY_REQUIRE_TERMS      when true, a wallet must have accepted the CURRENT /rules version,
+//                             which it does by signing in: the SIWE statement names the version
+//                             (lib/auth/siwe.ts RULES_VERSION) and the signed session cookie
+//                             carries it. Callers pass it as `rulesVersion`.
+//
+// COUNTRY comes from Vercel's `x-vercel-ip-country` (ISO 3166-1 alpha-2, set by Vercel's edge —
+// https://vercel.com/docs/headers/request-headers), read by getClientCountry() in api/_lib/http.ts.
+// No caller passed it before, which with POLICY_BLOCKED_REGIONS set made every wallet
+// "region_unconfirmed" — nobody could ever have claimed. It is IP geolocation, so a VPN defeats
+// it; /rules forbids that, and it is a residual risk the operator accepts knowingly.
+
+import { RULES_VERSION } from "@/lib/auth/siwe";
 
 export type PolicyReason = string;
 
@@ -36,6 +43,8 @@ export async function assessEligibility(ctx: {
   address: string;
   ip?: string | null;
   country?: string | null;
+  /** The /rules version from the signed session; null for a session minted before acceptance. */
+  rulesVersion?: number | null;
 }): Promise<{ eligible: boolean; reasons: PolicyReason[] }> {
   const reasons: PolicyReason[] = [];
 
@@ -58,7 +67,10 @@ export async function assessEligibility(ctx: {
   }
 
   if (isEnabled(process.env.POLICY_REQUIRE_TERMS)) {
-    reasons.push("terms_not_confirmed");
+    const accepted = ctx.rulesVersion ?? null;
+    if (accepted === null || accepted < RULES_VERSION) {
+      reasons.push("terms_not_confirmed");
+    }
   }
 
   return { eligible: reasons.length === 0, reasons };

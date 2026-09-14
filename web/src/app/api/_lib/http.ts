@@ -33,6 +33,31 @@ export function getClientIp(request: Request): string {
   return "unknown";
 }
 
+/**
+ * The requester's country as an ISO 3166-1 alpha-2 code, from `x-vercel-ip-country`, which Vercel's
+ * edge sets from the client's public IP (https://vercel.com/docs/headers/request-headers). Null
+ * when absent or not two letters — policy treats null as "region_unconfirmed", never as allowed.
+ *
+ * Only meaningful behind Vercel. Anywhere else a client can send this header itself, which is why
+ * nothing but reward ELIGIBILITY reads it, and why eligibility treats a missing value as a refusal.
+ */
+export function getClientCountry(request: Request): string | null {
+  const raw = request.headers.get("x-vercel-ip-country")?.trim().toUpperCase();
+  return raw && /^[A-Z]{2}$/.test(raw) ? raw : null;
+}
+
+/**
+ * A 500 that says nothing about why. CONTRACTS-PREDICTIONS §10.1 principle 7 covers every route, not
+ * only the payout ones: Postgres and PostgREST messages carry table, column and constraint names and
+ * occasionally row values, and none of that belongs in a response body. The SQLSTATE (or "unknown")
+ * goes to the server log under `where`; the caller gets the fixed `message` it chose.
+ */
+export function internalError(where: string, error: unknown, message: string): Response {
+  const code = (error as { code?: unknown } | null)?.code;
+  console.error(`${where}: ${typeof code === "string" && /^[0-9A-Z]{5}$/.test(code) ? code : "unknown"}`);
+  return jsonError(500, message);
+}
+
 export async function readJsonBody<T>(request: Request): Promise<T | null> {
   try {
     return (await request.json()) as T;

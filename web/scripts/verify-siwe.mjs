@@ -110,6 +110,31 @@ try {
       expectedNonce: nonce, expectedDomain: PINNED.domain, expectedAddress: account.address })).ok === true,
   );
 
+  // Rules acceptance. The statement names the rules version, so the signature IS the consent
+  // record. These two assert that the version is in the signed bytes, and that a signature over the
+  // pre-rules statement cannot be passed off as accepting them: /verify rebuilds the current
+  // message, and an old-statement signature must not verify against it.
+  check(
+    "the signed statement names the current rules version and where to read them",
+    honest.includes("By signing you accept the WANTED Rules v1 at https://wanted.example/rules"),
+  );
+  const preRules = honest.replace(/ By signing you accept the WANTED Rules v\d+ at \S+/, "");
+  check(
+    "regression witness: the pre-rules statement really is different bytes",
+    preRules !== honest && !preRules.includes("Rules v"),
+  );
+  const preRulesVerdict = await verifySiwe({ message: honest,
+    signature: await account.signMessage({ message: preRules }), expectedNonce: nonce,
+    expectedDomain: PINNED.domain, expectedAddress: account.address });
+  check(
+    "a signature over the pre-rules statement cannot mint a rules-accepting session",
+    preRulesVerdict.ok === false && preRulesVerdict.error === "invalid_signature",
+  );
+  check(
+    "the statement carries no newline (EIP-4361 forbids one inside it)",
+    honest.split("\n")[3].startsWith("Sign in to WANTED") && honest.split("\n")[4] === "",
+  );
+
   const other = privateKeyToAccount(generatePrivateKey());
   check(
     "a signature from a different key cannot claim the address",

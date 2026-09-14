@@ -8,6 +8,7 @@ const links = [
   { href: "/missions", label: "Missions" },
   { href: "/clips", label: "Clips" },
   { href: "/agent", label: "Who's playing?" },
+  { href: "/rules", label: "Rules" },
 ];
 
 // The `!` on the link colours is required: globals.css styles `a` and `a:hover` outside any cascade
