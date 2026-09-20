@@ -2,8 +2,8 @@
 
 docs/CONTRACTS-PREDICTIONS.md §4 "What actually drives the lifecycle": a
 prediction only advances when something calls the two Postgres RPCs
-`public.lock_due_predictions()` and `public.settle_due_predictions()`. The
-harness is the contract's named PRIMARY driver — it already runs a 2-4 Hz loop
+`public.lock_due_predictions()` and `public.settle_due_predictions_serialized()`.
+The harness is the contract's named PRIMARY driver — it already runs a 2-4 Hz loop
 on the game machine and already holds the service-role key, and this
 package's own windows run as short as 30s, shorter than a Vercel cron's
 1-minute (Pro) / 1-day (Hobby) granularity can track. A Vercel cron remains
@@ -11,13 +11,14 @@ the BACKSTOP for the one case this ticker cannot cover (the harness itself
 dying) — nothing here duplicates or replaces it.
 
 Both RPCs are verified, not guessed (CLAUDE.md rule 6): read directly from
-`infra/supabase/migrations/20260908120000_predictions.sql` — both parameterless,
-`security definer`, `returns integer`. The contract states outright that "a
-double tick from both [drivers] at once is harmless" (idempotent by
-construction), so this module's only real job is cadence and never taking the
-main loop down with it — there is nothing to retry-with-backoff or queue: an
-RPC call is a side effect, not a row, and a failed tick is simply tried again
-next tick.
+`infra/supabase/migrations/20260908120000_predictions.sql`, and the settlement
+wrapper from `20260914000001_settlement_guards.sql` — both parameterless,
+`security definer`, `returns integer`, and both granted to `service_role`. The
+contract states outright that "a double tick from both [drivers] at once is
+harmless" (idempotent by construction), so this module's only real job is
+cadence and never taking the main loop down with it — there is nothing to
+retry-with-backoff or queue: an RPC call is a side effect, not a row, and a
+failed tick is simply tried again next tick.
 
 Reuses the SAME `SupabaseWriter`/Supabase client the rest of the package
 already writes through (CLAUDE.md rule 1 / "reuse this writer, do not stand
@@ -38,7 +39,15 @@ from wasted_harness.logsetup import get_logger
 log = get_logger("wasted.predictions.ticker")
 
 LOCK_FN = "lock_due_predictions"
-SETTLE_FN = "settle_due_predictions"
+#: NOT the bare `settle_due_predictions()`. `20260914000001_settlement_guards.sql:89`
+#: revokes EXECUTE on that one from `service_role`; the only way in is the wrapper at
+#: :66-86, which takes `pg_try_advisory_xact_lock(7741300101)` so two drivers cannot
+#: each spend the full daily cap (FM-10). Calling the bare function raised
+#: `42501 permission denied` on every tick, swallowed by `_call_one`'s broad `except`
+#: and reported as `settled: None` — so the harness locked predictions and then never
+#: settled one, leaving the 1-minute Vercel cron as the sole driver and silently
+#: breaking this module's own 30s windows.
+SETTLE_FN = "settle_due_predictions_serialized"
 
 #: The coordinator's own number: "5 s is fine — they are cheap and idempotent".
 DEFAULT_INTERVAL_S = 5.0

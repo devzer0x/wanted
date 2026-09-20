@@ -11,6 +11,7 @@ genuine "not configured" branch — both exercised against the real
 from __future__ import annotations
 
 import logging
+import re
 from pathlib import Path
 
 from wasted_harness.events import SupabaseWriter
@@ -114,3 +115,71 @@ def test_reuses_the_same_client_no_second_one_stood_up(tmp_path: Path) -> None:
     ticker.interval_s = 0.0  # allow an immediate second tick for this assertion only
     ticker.maybe_tick(session_id=SESSION_ID)
     assert writer._client is client_after_first  # same object — no second client
+
+
+# --- the RPC names this ticker calls must actually be callable by service_role ---
+#
+# The harness holds the service-role key and nothing else. A migration that tightens a
+# grant is invisible to Python: `_call_one`'s `except` is broad "by design: never kill
+# the main loop", so a revoked function fails with 42501 on every tick and surfaces only
+# as `settled: None` in a log line that looks like an idle tick.
+#
+# That is exactly what happened. `20260914000001_settlement_guards.sql` put settlement
+# behind an advisory-lock wrapper and revoked the bare `settle_due_predictions()` from
+# `service_role`; SETTLE_FN still named the bare one, so the contract's PRIMARY driver
+# locked predictions and then never settled a single one. These tests read the real
+# migrations and assert the names this module ships are granted and not revoked, so a
+# future grant change breaks a test instead of silently un-driving the lifecycle.
+
+MIGRATIONS = Path(__file__).resolve().parents[2] / "infra" / "supabase" / "migrations"
+
+GRANT_RE = re.compile(
+    r"^\s*grant\s+execute\s+on\s+function\s+public\.(\w+)\s*\([^)]*\)\s+to\s+([^;]+);",
+    re.IGNORECASE | re.MULTILINE,
+)
+REVOKE_RE = re.compile(
+    r"^\s*revoke\s+execute\s+on\s+function\s+public\.(\w+)\s*\([^)]*\)\s+from\s+([^;]+);",
+    re.IGNORECASE | re.MULTILINE,
+)
+
+
+def service_role_grants() -> set[str]:
+    """Replay every migration in filename order; return the functions `service_role`
+    can still EXECUTE at the end. Order matters — settlement is granted, then revoked."""
+    granted: set[str] = set()
+    for path in sorted(MIGRATIONS.glob("*.sql")):
+        sql = path.read_text()
+        events: list[tuple[int, str, str, bool]] = []
+        for m in GRANT_RE.finditer(sql):
+            events.append((m.start(), m.group(1), m.group(2), True))
+        for m in REVOKE_RE.finditer(sql):
+            events.append((m.start(), m.group(1), m.group(2), False))
+        for _pos, fn, roles, is_grant in sorted(events):
+            if "service_role" not in roles:
+                continue
+            granted.add(fn) if is_grant else granted.discard(fn)
+    return granted
+
+
+def test_the_migrations_are_where_we_think_they_are() -> None:
+    """Guards the two tests below from passing vacuously on an empty glob."""
+    assert MIGRATIONS.is_dir(), MIGRATIONS
+    assert len(list(MIGRATIONS.glob("*.sql"))) >= 8
+    assert "lock_due_predictions" in service_role_grants()
+
+
+def test_every_rpc_this_ticker_calls_is_granted_to_service_role() -> None:
+    granted = service_role_grants()
+    for fn in (LOCK_FN, SETTLE_FN):
+        assert fn in granted, (
+            f"{fn} is not EXECUTE-granted to service_role by the end of the migrations. "
+            f"The harness holds only that key, so every tick would fail 42501 and be "
+            f"swallowed by _call_one. Granted: {sorted(granted)}"
+        )
+
+
+def test_settlement_goes_through_the_advisory_lock_wrapper() -> None:
+    """FM-10: two unserialized drivers could each spend the full daily cap. The bare
+    function is revoked precisely so nothing can bypass the lock — including us."""
+    assert SETTLE_FN == "settle_due_predictions_serialized"
+    assert "settle_due_predictions" not in service_role_grants()
