@@ -17,7 +17,9 @@ that justified it.
 from __future__ import annotations
 
 import json
+import re
 from datetime import datetime, timedelta
+from itertools import pairwise
 from pathlib import Path
 
 import pytest
@@ -33,6 +35,7 @@ from wasted_harness.predictions.catalog import (
     MIN_WINDOW_S,
     REJECTED_TEMPLATES,
     TELEMETRY_RULE_KINDS,
+    UNSETTLEABLE_RULE_KINDS,
     YES_NO_OUTCOMES,
     MeasuredRate,
     PredictionTemplate,
@@ -43,8 +46,6 @@ EXPECTED_PREDICTION_TYPES = {
     "death_in_window",
     "loses_the_cops",
     "survives_a_chase",
-    "enters_vehicle",
-    "exits_vehicle",
     "survives_a_fight",
     "mission_outcome",
     "two_star_standoff",
@@ -101,6 +102,9 @@ def test_rejected_templates_are_documented_and_absent_from_the_catalog() -> None
         "survive_five_stars",
         "steal_a_police_car_and_escape",
         "land_the_helicopter",
+        # shipped in error, withdrawn: recognised by §3, resolvable by nobody
+        "enters_vehicle",
+        "exits_vehicle",
     }
     for prediction_type, reason in REJECTED_TEMPLATES.items():
         assert prediction_type not in {t.prediction_type for t in CATALOG}
@@ -217,45 +221,6 @@ def test_survives_a_chase_does_not_trigger_ambiently() -> None:
 def test_survives_a_chase_triggers_after_a_real_gain() -> None:
     tpl = by_type("survives_a_chase")
     assert tpl.trigger(make_state(wanted=1), [GAIN_EVENT]) is True
-
-
-# -- enters_vehicle / exits_vehicle (uncalibrated, contract-shape only) -------------
-
-
-def test_enters_vehicle_only_on_foot() -> None:
-    tpl = by_type("enters_vehicle")
-    assert tpl.trigger(make_state(in_vehicle=False), []) is True
-    assert tpl.trigger(make_state(in_vehicle=True), []) is False
-
-
-def test_exits_vehicle_only_while_riding() -> None:
-    tpl = by_type("exits_vehicle")
-    assert tpl.trigger(make_state(in_vehicle=True), []) is True
-    assert tpl.trigger(make_state(in_vehicle=False), []) is False
-
-
-def test_exits_vehicle_scores_higher_when_stopped_than_at_speed() -> None:
-    tpl = by_type("exits_vehicle")
-    stopped = make_state(
-        in_vehicle=True,
-        vehicle={
-            "handle": 1, "model": "blista", "display_name": "Blista", "class": "Compacts",
-            "speed": 0.0, "health": 1000.0, "upside_down": False, "in_water": False,
-            "stopped_for_s": 5.0,
-        },
-    )
-    fast = make_state(
-        in_vehicle=True,
-        vehicle={
-            "handle": 1, "model": "blista", "display_name": "Blista", "class": "Compacts",
-            "speed": 35.0, "health": 1000.0, "upside_down": False, "in_water": False,
-            "stopped_for_s": 0.0,
-        },
-    )
-    assert tpl.score(stopped) > tpl.score(fast)
-
-
-# -- survives_a_fight (uncalibrated) -----------------------------------------------
 
 
 def test_survives_a_fight_requires_a_real_threat() -> None:
@@ -566,3 +531,72 @@ def test_the_rejected_event_ideas_are_backed_by_the_real_recording() -> None:
     up_only_ends = activity("up_only", "activity_end")
     assert len(up_only_ends) == 98
     assert len([e for e in up_only_ends if e["payload"].get("outcome") == "completed"]) == 1
+
+
+# -- every shipped question must be one settlement can actually answer ----------------
+#
+# `PredictionTemplate.__post_init__` only asks "is this kind RECOGNISED?"
+# (TELEMETRY_RULE_KINDS). `settle_due_predictions()` separately decides which
+# recognised kinds are RESOLVABLE. Those are different sets, and nothing used to
+# compare them — which is how `enters_vehicle`/`exits_vehicle` shipped: valid on
+# their face, voiding 100% of the time in production, taking real entries the whole
+# while. These tests re-derive the resolvable set from the migration itself, so the
+# constant in catalog.py cannot drift away from the SQL that owns the answer.
+
+SETTLEMENT_SQL = (
+    Path(__file__).resolve().parents[2]
+    / "infra"
+    / "supabase"
+    / "migrations"
+    / "20260908120000_predictions.sql"
+)
+
+BRANCH_RE = re.compile(r"^\s*(?:els)?if\s+v_kind\s", re.MULTILINE)
+KIND_RE = re.compile(r"v_kind\s*(?:=\s*'(\w+)'|in\s*\(([^)]*)\))")
+
+
+def always_void_kinds() -> set[str]:
+    """Kinds whose every dispatch branch is incapable of producing an outcome.
+
+    A branch that never assigns `v_result` can only fall through to a void — so a
+    kind with no result-assigning branch anywhere can never settle yes or no.
+    """
+    sql = SETTLEMENT_SQL.read_text()
+    body = sql[sql.index("if v_kind = 'event_occurs'") : sql.index("v_void_reason := 'unknown_rule_kind'")]
+    bounds = [m.start() for m in BRANCH_RE.finditer(body)] + [len(body)]
+    resolvable: set[str] = set()
+    mentioned: set[str] = set()
+    for lo, hi in pairwise(bounds):
+        branch = body[lo:hi]
+        m = KIND_RE.search(branch)
+        if not m:
+            continue
+        kinds = {m.group(1)} if m.group(1) else set(re.findall(r"'(\w+)'", m.group(2)))
+        mentioned |= kinds
+        if "v_result :=" in branch:
+            resolvable |= kinds
+    return mentioned - resolvable
+
+
+def test_the_settlement_sql_is_parseable_and_the_derivation_is_not_vacuous() -> None:
+    """Guards the two tests below: if the parse silently returned nothing, they
+    would both pass no matter what shipped."""
+    assert SETTLEMENT_SQL.is_file(), SETTLEMENT_SQL
+    derived = always_void_kinds()
+    assert derived, "parsed no always-void kinds at all — the parser has drifted"
+    # event_occurs is the canonical resolvable kind; it must NOT come back as void.
+    assert "event_occurs" not in derived
+
+
+def test_unsettleable_kinds_match_the_migration() -> None:
+    assert always_void_kinds() == set(UNSETTLEABLE_RULE_KINDS)
+
+
+def test_no_shipped_template_uses_a_kind_settlement_can_never_resolve() -> None:
+    void_kinds = always_void_kinds()
+    offenders = {t.prediction_type: t.telemetry_rule["kind"] for t in CATALOG if t.telemetry_rule["kind"] in void_kinds}
+    assert not offenders, (
+        f"these shipped templates can never have a winner: {offenders}. "
+        f"settle_due_predictions() voids their kind unconditionally, so they would "
+        f"collect real entries and settle void 100% of the time."
+    )

@@ -226,6 +226,20 @@ TELEMETRY_RULE_KINDS: frozenset[str] = frozenset(
     }
 )
 
+#: Kinds §3 RECOGNISES but settlement can never RESOLVE. `settle_due_predictions()`
+#: (`20260908120000_predictions.sql:584-591`) matches these and unconditionally sets
+#: `v_void_reason := 'missing_telemetry'`: there is no discrete vehicle-transition
+#: event in the CONTRACTS.md §4 enum and `stats.hud.vehicle` is not time-versioned,
+#: so there is nothing to settle against.
+#:
+#: "Recognised" and "resolvable" are DIFFERENT sets, and that gap is what shipped
+#: `enters_vehicle`/`exits_vehicle` for a while: they passed `__post_init__` because
+#: their kind is in TELEMETRY_RULE_KINDS, then voided 100% of the time — a live card
+#: that takes real entries and never has a winner. `_build_catalog` now refuses them
+#: at import time, and `test_predictions_catalog.py` re-derives this set from the
+#: migration so it cannot drift away from the SQL that owns the truth.
+UNSETTLEABLE_RULE_KINDS: frozenset[str] = frozenset({"vehicle_entered", "vehicle_exited"})
+
 #: `predictions.outcomes` (CONTRACTS-PREDICTIONS §2): every template here is a
 #: plain yes/no question, matching the shape the contract's own example gives.
 YES_NO_OUTCOMES: tuple[dict[str, str], ...] = (
@@ -305,6 +319,25 @@ REJECTED_TEMPLATES: dict[str, str] = {
         "(activity_outcome sees one activity_end row; wanted_clears sees one "
         "wanted_change row). Settlement cannot AND them, so the honest version "
         "of this question is not the question the operator asked for."
+    ),
+    # --- shipped once, then withdrawn: recognised by §3, resolvable by nobody ----
+    "enters_vehicle": (
+        "SHIPPED IN ERROR and withdrawn. 'WILL WANTED GET IN A VEHICLE?' passed "
+        "validation because `vehicle_entered` is in TELEMETRY_RULE_KINDS, but "
+        "`settle_due_predictions()` (20260908120000_predictions.sql:584-591) matches "
+        "that kind and unconditionally voids with `missing_telemetry`: no discrete "
+        "vehicle-transition event exists in the CONTRACTS.md §4 enum and "
+        "`stats.hud.vehicle` is not time-versioned. It collected real entries and "
+        "settled void 100% of the time — a prediction card that never has a winner. "
+        "Same standard as `land_the_helicopter` below: unresolvable, not shipped. "
+        "Re-propose only once §4 gains a real vehicle-transition event."
+    ),
+    "exits_vehicle": (
+        "SHIPPED IN ERROR and withdrawn, identical reason to `enters_vehicle` above "
+        "(`vehicle_exited` is the other kind 20260908120000_predictions.sql:584 "
+        "always voids). Also note both carried reliability=0.75, ABOVE "
+        "mission_outcome's honest 0.5, so the generator's ranking actively preferred "
+        "the two questions that could not resolve."
     ),
     "land_the_helicopter": (
         "the brief's own example, 'CAN WANTED LAND THE HELICOPTER?'. No §3 "
@@ -674,79 +707,7 @@ TPL_SURVIVES_A_CHASE = PredictionTemplate(
 )
 
 
-# --- 4. enters a vehicle -------------------------------------------------------------
-# kind: vehicle_entered — HUD `vehicle` transition null -> non-null (no params
-# per the §3 registry). Source: `player.in_vehicle` / `vehicle` in `/state`,
-# the same field `Perceptor.observe` already diffs for `entered_vehicle`.
-# NOT CALIBRATED against real_session_2026-09-04.json: that fixture is
-# `events`-only (no `stats.hud`/`/state` history), and no §4 event type
-# records a vehicle enter, so no real base rate could be recomputed for this
-# template. Shipped on trigger-shape grounds only (a candidate vehicle must be
-# in view); flagged here rather than implied to be measured.
-
-_ENTERS_VEHICLE_WINDOW = Window(lock_delay_s=10.0, resolve_delay_s=50.0)  # 1 min total
-
-
-def _trigger_enters_vehicle(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
-    return not state.player.dead and not state.player.in_vehicle
-
-
-def _score_enters_vehicle(state: GameState) -> float:
-    # A candidate vehicle nearby raises the odds toward "obviously yes"; none
-    # nearby raises them toward "obviously no". Best uncertainty is somewhere
-    # with exactly a couple of options in view. Uncalibrated — see note above.
-    n = len(state.nearby.vehicles)
-    p = _clamp(0.15 + 0.20 * min(n, 4))
-    watchability = 0.5  # mundane but fast to resolve; not scene-dependent
-    return 0.6 * _uncertainty(p) + 0.4 * watchability
-
-
-TPL_ENTERS_VEHICLE = PredictionTemplate(
-    prediction_type="enters_vehicle",
-    question="WILL WANTED GET IN A VEHICLE?",
-    outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "vehicle_entered"},
-    window=_ENTERS_VEHICLE_WINDOW,
-    trigger=_trigger_enters_vehicle,
-    score=_score_enters_vehicle,
-    reliability=0.75,
-)
-
-
-# --- 5. exits a vehicle ---------------------------------------------------------------
-# kind: vehicle_exited — HUD `vehicle` transition non-null -> null.
-# NOT CALIBRATED against real_session_2026-09-04.json — same reason as
-# `enters_vehicle` above (no vehicle-transition telemetry in an events-only export).
-
-_EXITS_VEHICLE_WINDOW = Window(lock_delay_s=10.0, resolve_delay_s=50.0)  # 1 min total
-
-
-def _trigger_exits_vehicle(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
-    return not state.player.dead and state.player.in_vehicle
-
-
-def _score_exits_vehicle(state: GameState) -> float:
-    # A stopped car is much likelier to be got out of soon than one at speed.
-    # Uncalibrated — see note above.
-    speed = state.vehicle.speed if state.vehicle is not None else 0.0
-    p = _clamp(0.6 - 0.03 * speed)
-    watchability = 0.5
-    return 0.6 * _uncertainty(p) + 0.4 * watchability
-
-
-TPL_EXITS_VEHICLE = PredictionTemplate(
-    prediction_type="exits_vehicle",
-    question="WILL WANTED GET OUT OF THE VEHICLE?",
-    outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "vehicle_exited"},
-    window=_EXITS_VEHICLE_WINDOW,
-    trigger=_trigger_exits_vehicle,
-    score=_score_exits_vehicle,
-    reliability=0.75,
-)
-
-
-# --- 6. survives a fight -----------------------------------------------------------------
+# --- 4. survives a fight -----------------------------------------------------------------
 # kind: survives_window, same rule as the chase question — a different
 # prediction_type/question/trigger, the identical (parameterless) rule.
 # NOT CALIBRATED against real_session_2026-09-04.json: nothing in an
@@ -783,7 +744,7 @@ TPL_SURVIVES_A_FIGHT = PredictionTemplate(
 )
 
 
-# --- 7. mission complete / fail -----------------------------------------------------------
+# --- 5. mission complete / fail -----------------------------------------------------------
 # kind: mission_outcome{expect:"passed"} — `mission_end`(passed) / `mission_fail`.
 # Both event types are emitted (EMITTED_EVENT_TYPES), but NOT in this fixture:
 # real_session_2026-09-04.json's `_provenance.absent_types_and_why` confirms
@@ -825,7 +786,7 @@ TPL_MISSION_OUTCOME = PredictionTemplate(
 )
 
 
-# --- 8. WANTED EVENT: two stars — his ceiling — held for four minutes ------------
+# --- 6. WANTED EVENT: two stars — his ceiling — held for four minutes ------------
 # kind: survives_window — absence of `death`/`busted` in [locks_at, resolves_at].
 # The same parameterless rule `survives_a_chase` uses; a different trigger, a
 # different window, and the only `is_event=True` template in this catalog.
@@ -903,8 +864,6 @@ def _build_catalog() -> tuple[PredictionTemplate, ...]:
         TPL_DEATH_IN_WINDOW,
         TPL_LOSES_THE_COPS,
         TPL_SURVIVES_A_CHASE,
-        TPL_ENTERS_VEHICLE,
-        TPL_EXITS_VEHICLE,
         TPL_SURVIVES_A_FIGHT,
         TPL_MISSION_OUTCOME,
         TPL_TWO_STAR_STANDOFF,
@@ -917,6 +876,14 @@ def _build_catalog() -> tuple[PredictionTemplate, ...]:
         if tpl.prediction_type in REJECTED_TEMPLATES:
             raise ValueError(
                 f"{tpl.prediction_type!r} is in REJECTED_TEMPLATES and must not also be shipped"
+            )
+        kind = tpl.telemetry_rule["kind"]
+        if kind in UNSETTLEABLE_RULE_KINDS:
+            raise ValueError(
+                f"{tpl.prediction_type!r} uses rule kind {kind!r}, which settlement "
+                f"recognises but can never resolve — it voids 100% of the time "
+                f"(20260908120000_predictions.sql:584). A question that can never have "
+                f"a winner must not be offered; put it in REJECTED_TEMPLATES instead."
             )
     return catalog
 

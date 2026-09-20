@@ -145,7 +145,7 @@ def test_end_to_end_generator_row_flows_through_the_real_writer(tmp_path: Path) 
     from wasted_harness.predictions.catalog import CATALOG
 
     generator = PredictionGenerator(catalog=CATALOG, clock=lambda: 0.0, wall_clock=lambda: 1_893_456_000.0)
-    row = generator.generate(make_state(), session_id=SESSION_ID)
+    row = generator.generate(make_state(attacker_handle=42), session_id=SESSION_ID)
     assert row is not None
 
     prediction_writer.write(row)

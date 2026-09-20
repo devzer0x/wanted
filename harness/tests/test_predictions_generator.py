@@ -74,18 +74,31 @@ def _tpl(
     )
 
 
+
+def _triggering_state(**kwargs):
+    """A state some SHIPPED template actually fires on.
+
+    Nothing in the catalogue triggers ambiently any more. `enters_vehicle` and
+    `exits_vehicle` were the only two that fired on an ordinary quiet moment, and
+    both were withdrawn because `settle_due_predictions()` voids their rule kind
+    100% of the time (see REJECTED_TEMPLATES). Every survivor needs a real
+    trigger — here, a live attacker, which `survives_a_fight` fires on.
+    """
+    return make_state(attacker_handle=42, **kwargs)
+
+
 # -- session gating -------------------------------------------------------------
 
 
 def test_no_session_generates_nothing() -> None:
     gen = PredictionGenerator(catalog=CATALOG, clock=FakeClock(), wall_clock=lambda: 1_893_456_000.0)
-    assert gen.generate(make_state(), session_id=None) is None
+    assert gen.generate(_triggering_state(), session_id=None) is None
 
 
 def test_a_live_session_can_generate() -> None:
     clock = FakeClock()
     gen = PredictionGenerator(catalog=CATALOG, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert row is not None
     assert row["session_id"] == SESSION_ID
     assert row["status"] == "open"
@@ -100,7 +113,7 @@ def test_row_timestamps_are_correctly_ordered() -> None:
 
     clock = FakeClock()
     gen = PredictionGenerator(catalog=CATALOG, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert row is not None
     opened = datetime.fromisoformat(row["opened_at"])
     locks = datetime.fromisoformat(row["locks_at"])
@@ -111,7 +124,7 @@ def test_row_timestamps_are_correctly_ordered() -> None:
 def test_state_context_matches_the_frozen_hud_shape() -> None:
     clock = FakeClock()
     gen = PredictionGenerator(catalog=CATALOG, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(health=150, wanted=1), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(health=150, wanted=1), session_id=SESSION_ID)
     assert row is not None
     assert set(row["state_context"]) == {
         "health", "armor", "wanted", "cash", "vehicle", "street", "zone", "clock", "weather",
@@ -133,7 +146,7 @@ def test_never_invents_settlement_owned_fields() -> None:
     """
     clock = FakeClock()
     gen = PredictionGenerator(catalog=CATALOG, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert row is not None
 
     for forbidden in (
@@ -175,7 +188,7 @@ def test_a_wanted_event_carries_the_boosted_pool() -> None:
 def test_created_from_event_is_never_invented() -> None:
     clock = FakeClock()
     gen = PredictionGenerator(catalog=CATALOG, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert row is not None
     assert row["created_from_event"] is None
 
@@ -186,9 +199,9 @@ def test_created_from_event_is_never_invented() -> None:
 def test_min_gap_blocks_a_second_call_at_the_same_instant() -> None:
     clock = FakeClock()
     gen = PredictionGenerator(catalog=CATALOG, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None
-    second = gen.generate(make_state(), session_id=SESSION_ID)
+    second = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert second is None
 
 
@@ -197,10 +210,10 @@ def test_min_gap_clears_once_enough_time_has_passed() -> None:
     catalog = (_tpl("a"), _tpl("b"))
     config = GeneratorConfig(max_concurrent_open=5, min_gap_s=30.0, type_cooldown_s=0.0)
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config)
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None
     clock.advance(30.0)
-    second = gen.generate(make_state(), session_id=SESSION_ID)
+    second = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert second is not None
 
 
@@ -212,10 +225,10 @@ def test_no_duplicate_type_back_to_back_even_when_it_is_the_only_candidate() -> 
     only = (_tpl("only_one"),)
     config = GeneratorConfig(max_concurrent_open=5, min_gap_s=1.0, type_cooldown_s=1000.0)
     gen = PredictionGenerator(catalog=only, clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config)
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None
     clock.advance(5.0)  # clears min_gap_s, does NOT clear type_cooldown_s
-    second = gen.generate(make_state(), session_id=SESSION_ID)
+    second = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert second is None
 
 
@@ -224,10 +237,10 @@ def test_a_different_type_is_free_to_run_immediately_after() -> None:
     catalog = (_tpl("a"), _tpl("b"))
     config = GeneratorConfig(max_concurrent_open=5, min_gap_s=1.0, type_cooldown_s=1000.0)
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config)
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None
     clock.advance(1.0)
-    second = gen.generate(make_state(), session_id=SESSION_ID)
+    second = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert second is not None
     assert second["prediction_type"] != first["prediction_type"]
 
@@ -240,13 +253,13 @@ def test_concurrent_open_cap_blocks_a_third_prediction() -> None:
     catalog = (_tpl("a"), _tpl("b"), _tpl("c"))
     config = GeneratorConfig(max_concurrent_open=2, min_gap_s=1.0, type_cooldown_s=1.0)
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config)
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     clock.advance(1.0)
-    second = gen.generate(make_state(), session_id=SESSION_ID)
+    second = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None and second is not None
     assert gen.open_count == 2
     clock.advance(1.0)
-    third = gen.generate(make_state(), session_id=SESSION_ID)
+    third = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert third is None  # cap reached, even though cooldown and type both clear
 
 
@@ -255,12 +268,12 @@ def test_concurrent_open_cap_clears_once_a_window_resolves() -> None:
     catalog = (_tpl("a", window=Window(lock_delay_s=10.0, resolve_delay_s=20.0)), _tpl("b"))
     config = GeneratorConfig(max_concurrent_open=1, min_gap_s=1.0, type_cooldown_s=1.0)
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config)
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None
     clock.advance(1.0)
-    assert gen.generate(make_state(), session_id=SESSION_ID) is None  # cap=1, still open
+    assert gen.generate(_triggering_state(), session_id=SESSION_ID) is None  # cap=1, still open
     clock.advance(30.0)  # first's window (10+20=30s) has fully elapsed
-    third = gen.generate(make_state(), session_id=SESSION_ID)
+    third = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert third is not None
 
 
@@ -274,7 +287,7 @@ def test_a_misbehaving_trigger_does_not_crash_generation() -> None:
     clock = FakeClock()
     catalog = (_tpl("broken", trigger=_boom), _tpl("fine"))
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert row is not None
     assert row["prediction_type"] == "fine"
 
@@ -283,7 +296,7 @@ def test_higher_score_wins_between_two_eligible_templates() -> None:
     clock = FakeClock()
     catalog = (_tpl("low", score=lambda s: 0.1), _tpl("high", score=lambda s: 0.9))
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0)
-    row = gen.generate(make_state(), session_id=SESSION_ID)
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert row is not None
     assert row["prediction_type"] == "high"
 
@@ -301,7 +314,7 @@ def test_a_zero_type_cooldown_does_not_crash_the_picker() -> None:
     )
     produced = 0
     for _ in range(10):
-        if gen.generate(make_state(), session_id=SESSION_ID) is not None:
+        if gen.generate(_triggering_state(), session_id=SESSION_ID) is not None:
             produced += 1
         clock.advance(1.0)
     assert produced >= 5
@@ -336,7 +349,7 @@ def _run_for(gen: PredictionGenerator, clock: FakeClock, seconds: float, step: f
     rows = []
     elapsed = 0.0
     while elapsed < seconds:
-        row = gen.generate(make_state(), session_id=SESSION_ID)
+        row = gen.generate(_triggering_state(), session_id=SESSION_ID)
         if row is not None:
             rows.append(row)
         clock.advance(step)
@@ -417,18 +430,18 @@ def test_the_event_cooldown_is_configurable_not_baked_in() -> None:
     gen = PredictionGenerator(
         catalog=_event_catalog(), clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config
     )
-    first = gen.generate(make_state(), session_id=SESSION_ID)
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None and first["is_event"] is True
 
     clock.advance(1.0)
-    filler = gen.generate(make_state(), session_id=SESSION_ID)
+    filler = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert filler is not None and filler["is_event"] is False  # never back-to-back
 
     clock.advance(1.0)
-    assert gen.generate(make_state(), session_id=SESSION_ID)["is_event"] is False  # still cooling
+    assert gen.generate(_triggering_state(), session_id=SESSION_ID)["is_event"] is False  # still cooling
 
     clock.advance(120.0)  # cooldown elapsed
-    assert gen.generate(make_state(), session_id=SESSION_ID)["is_event"] is True
+    assert gen.generate(_triggering_state(), session_id=SESSION_ID)["is_event"] is True
 
 
 def test_events_can_be_switched_off_without_touching_the_catalog() -> None:
@@ -478,7 +491,7 @@ def test_the_real_catalog_flags_its_event_row_and_only_that_row() -> None:
     assert row["is_event"] is True
 
     clock.advance(30.0)
-    ordinary = gen.generate(make_state(wanted=0), session_id=SESSION_ID)
+    ordinary = gen.generate(_triggering_state(wanted=0), session_id=SESSION_ID)
     assert ordinary is not None
     assert ordinary["is_event"] is False
 

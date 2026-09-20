@@ -143,11 +143,22 @@ class GeneratorConfig:
     #:
     #: The unit price is why this is small. TTWO is a tokenized share, not a memecoin: one token is
     #: ~$214, so a pool of "1" — the obvious-looking default this replaced — would have been $214
-    #: PER PREDICTION, and at the ~22 predictions/day this catalogue actually generates that is
-    #: ~$4,700/day. The whole pool is distributed on every settled prediction, so pool x
+    #: PER PREDICTION. The whole pool is distributed on every settled prediction, so pool x
     #: predictions-per-day IS the burn rate.
     #:
-    #: At 0.005 the burn is ~$23.50/day, and a winner's share lands between $0.21 (5 correct) and
+    #: Predictions-per-day, remeasured 2026-09-20 after `enters_vehicle`/`exits_vehicle` were
+    #: withdrawn (they could never settle — see catalog.REJECTED_TEMPLATES): those two were the
+    #: only templates that fired ambiently, so generation is now trigger-limited, not cooldown-
+    #: limited (`min_gap_s` of 30 s would allow 2,880/day; nothing comes close). The real rate is
+    #: the measured telemetry rate: 39 wanted-star gains in 86.93 h of recording = ~10.8/day, of
+    #: which 17 (~4.7/day) reach two stars and carry the 4x event pool. That is ~0.054 TTWO/day if
+    #: every one were ordinary and ~0.124 TTWO/day with the event boost — $11.50-$26.60/day at
+    #: $214, against the 0.25 TTWO/day `site_config` cap, so roughly 2x headroom. `survives_a_fight`
+    #: has no measured trigger rate (the fixture is events-only and carries no threat data), so the
+    #: true figure is this plus fights. The earlier note here said ~22/day and ~$23.50/day; that
+    #: counted the two ambient templates and is superseded.
+    #:
+    #: A winner's share lands between $0.21 (5 correct) and
     #: $0.05 (20 correct) — enough that eight to seventeen wins clear the $0.44 minimum claim,
     #: which is roughly a day of watching. Raise it if the audience grows; the even split means a
     #: bigger crowd dilutes each winner rather than costing the treasury more.

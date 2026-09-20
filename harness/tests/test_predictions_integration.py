@@ -45,7 +45,8 @@ from typing import Any
 
 import httpx
 import pytest
-from test_main_loop_resilience import _state_body, _tick_harness, _TickBridge
+from test_main_loop_resilience import _state_body as _base_state_body
+from test_main_loop_resilience import _tick_harness, _TickBridge
 
 from wasted_harness.bridge_client import GameState
 from wasted_harness.main import (
@@ -57,6 +58,24 @@ from wasted_harness.main import (
 )
 from wasted_harness.predictions import CATALOG, PredictionTicker, PredictionWriter
 from wasted_harness.settings import Settings
+
+
+def _state_body(**over: Any) -> dict[str, Any]:
+    """`test_main_loop_resilience._state_body`, plus a hostile ped.
+
+    The shipped catalogue has no ambient question left: `enters_vehicle` and
+    `exits_vehicle` were the only templates that fired on a quiet on-foot moment,
+    and both were withdrawn because settlement voids their rule kind 100% of the
+    time. So a bare /state now triggers nothing, and "nothing was written" would
+    be true for reasons that have nothing to do with what these tests assert.
+    A hostile ped in view is the cheapest real trigger (`survives_a_fight`).
+    """
+    body = _base_state_body(**over)
+    body["nearby"]["peds"] = [
+        {"handle": 7, "model": "g_m_y_lost_01", "distance": 3.0, "relationship": "hostile"}
+    ]
+    return body
+
 
 SESSION_ID = "00000000-0000-0000-0000-0000000000dd"
 
