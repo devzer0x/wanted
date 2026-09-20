@@ -47,14 +47,18 @@ export function WalletButton() {
   const [open, setOpen] = useState(false);
   const ref = useRef<HTMLDivElement>(null);
 
+  const { chooserOpen, setChooserOpen } = wallet;
   useEffect(() => {
-    if (!open) return;
+    if (!open && !chooserOpen) return;
     const onClick = (e: MouseEvent) => {
-      if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
+      if (ref.current && !ref.current.contains(e.target as Node)) {
+        setOpen(false);
+        setChooserOpen(false);
+      }
     };
     document.addEventListener("mousedown", onClick);
     return () => document.removeEventListener("mousedown", onClick);
-  }, [open]);
+  }, [open, chooserOpen, setChooserOpen]);
 
   // `caps` is false for an address on purpose. EIP-55 carries the checksum in letter case, so
   // running `text-transform: uppercase` over a hex address puts a DIFFERENT string on screen from
@@ -85,7 +89,15 @@ export function WalletButton() {
 
   const onClick = () => {
     if (!wallet.address) {
-      void wallet.connect();
+      // A request is already open in the wallet; asking again is what earns a -32002.
+      if (wallet.status === "connecting") return;
+      // More than one wallet answered discovery: the viewer says which, rather than whichever
+      // extension happened to announce first being prompted.
+      if (wallet.providers.length > 1) {
+        setChooserOpen(!chooserOpen);
+        return;
+      }
+      wallet.beginConnect();
       return;
     }
     if (wallet.status === "wrong-network") {
@@ -100,8 +112,8 @@ export function WalletButton() {
       <button
         type="button"
         onClick={onClick}
-        aria-haspopup={Boolean(wallet.address)}
-        aria-expanded={open}
+        aria-haspopup={Boolean(wallet.address) || wallet.providers.length > 1}
+        aria-expanded={open || chooserOpen}
         data-testid="wallet-button"
         data-wallet-status={wallet.status}
         className={`font-display inline-flex h-10 items-center gap-2 whitespace-nowrap rounded-xl border-[3px] px-3 text-[13px] leading-none tracking-[0.04em] transition-[transform,box-shadow] duration-75 focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral sm:px-3.5 sm:text-sm ${
@@ -116,6 +128,62 @@ export function WalletButton() {
         {chip.label}
       </button>
 
+      {chooserOpen && !wallet.address && wallet.status !== "connecting" && wallet.providers.length > 1 && (
+        <div
+          role="dialog"
+          aria-label="Choose a wallet"
+          style={{ ...POP, transformOrigin: "top right" }}
+          className="banner-throb absolute right-0 top-[calc(100%+12px)] z-70 w-[260px] max-w-[calc(100vw-24px)] rounded-[20px] border-[3px] border-ink bg-white p-3 text-ink shadow-[0_8px_0_var(--ink)]"
+        >
+          <p className="ticker px-1 pb-2 text-[10px] text-muted">Choose a wallet</p>
+          <ul className="flex flex-col gap-2">
+            {wallet.providers.map((detail) => (
+              <li key={detail.info.uuid}>
+                <button
+                  type="button"
+                  aria-label={detail.info.name}
+                  onClick={() => {
+                    setChooserOpen(false);
+                    void wallet.connect(detail.info.uuid);
+                  }}
+                  className="flex w-full items-center gap-2.5 rounded-[14px] border-[3px] border-ink bg-white px-3 py-2 text-left text-[13px] font-black hover:bg-yellow-pale focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-coral"
+                >
+                  {/* EIP-6963 specifies `icon` as a data: URI. Anything else is not painted. */}
+                  <span
+                    aria-hidden="true"
+                    className="h-6 w-6 flex-none rounded-md border-2 border-ink bg-sand bg-cover bg-center"
+                    style={
+                      detail.info.icon.startsWith("data:image/")
+                        ? { backgroundImage: `url("${detail.info.icon}")` }
+                        : undefined
+                    }
+                  />
+                  <span className="min-w-0 truncate">{detail.info.name}</span>
+                </button>
+              </li>
+            ))}
+          </ul>
+        </div>
+      )}
+      {wallet.status === "connecting" && !wallet.address && (
+        <div
+          data-testid="wallet-pending-hint"
+          style={POP}
+          className="panel banner-throb absolute right-0 top-[calc(100%+12px)] z-70 w-64 p-3 text-[11.5px] leading-[1.45] font-bold text-ink"
+        >
+          <p>
+            Check your wallet and approve the connection. No popup? Open the wallet from the browser
+            toolbar — it may be locked, or already showing a request.
+          </p>
+          <button
+            type="button"
+            onClick={() => wallet.cancelConnect()}
+            className="mt-2 text-[12px] font-black text-coral underline underline-offset-2 hover:text-ink"
+          >
+            Cancel
+          </button>
+        </div>
+      )}
       {!open && wallet.status === "no-wallet" && (
         <p
           style={POP}

@@ -62,7 +62,7 @@ const RECENTLY_SETTLED_LIMIT = 20;
 // as `RewardBalance.claimable`. Passing the raw column through is a 10^18 error in the readable
 // direction: a real 10 TTWO pool rendered as "Pool: 0 TTWO", which is a wrong number in front of
 // viewers deciding whether an answer is worth giving. Convert at the boundary, like everywhere else.
-function toPrediction(row: Record<string, unknown>, decimals: number): Prediction {
+function toPrediction(row: Record<string, unknown>, decimals: number | null): Prediction {
   return {
     id: row.id as string,
     session_id: row.session_id as string,
@@ -75,8 +75,10 @@ function toPrediction(row: Record<string, unknown>, decimals: number): Predictio
     outcomes: (row.outcomes as Prediction["outcomes"]) ?? [],
     status: row.status as Prediction["status"],
     result: (row.result as string | null) ?? null,
-    reward_pool: toBaseUnits(String(row.reward_pool ?? "0"), decimals).toString(),
-    reward_asset: (row.reward_asset as string) ?? "",
+    // With no configured asset there is no correct scale, and a guessed one prints a wrong pot.
+    // "0" + "" is what the card already reads as "No pot funded yet".
+    reward_pool: decimals === null ? "0" : toBaseUnits(String(row.reward_pool ?? "0"), decimals).toString(),
+    reward_asset: decimals === null ? "" : ((row.reward_asset as string) ?? ""),
     entry_count: Number(row.entry_count ?? 0),
     correct_count: Number(row.correct_count ?? 0),
     is_event: Boolean(row.is_event),
@@ -148,8 +150,10 @@ export async function GET(): Promise<Response> {
     return internalError("predictions/live: failed to read resolved predictions", resolvedErr, "failed to read resolved predictions");
   }
 
-  // Amount scale comes from the configured reward asset, never a hardcoded 18.
-  const decimals = rewardAsset()?.decimals ?? 18;
+  // Amount scale comes from the configured reward asset, never a hardcoded 18 — and when no asset
+  // is configured the pot is withheld rather than scaled by a guess, the same posture as
+  // /api/rewards/balance.
+  const decimals = rewardAsset()?.decimals ?? null;
   const live = (liveRows ?? []).map((r) => toPrediction(r, decimals));
   const resolved = (resolvedRows ?? []).map((r) => toPrediction(r, decimals));
   const allIds = [...live, ...resolved].map((p) => p.id);
@@ -220,6 +224,7 @@ export async function GET(): Promise<Response> {
     // earnings tally. Convert at the boundary, like everywhere else.
     const rewardByPrediction = new Map<string, string>();
     for (const row of (ledgerRows ?? []) as { prediction_id: string; amount: string | number }[]) {
+      if (decimals === null) break; // no asset, no scale: report no amount rather than a wrong one
       rewardByPrediction.set(
         row.prediction_id,
         toBaseUnits(String(row.amount ?? "0"), decimals).toString(),

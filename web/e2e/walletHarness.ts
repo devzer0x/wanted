@@ -44,6 +44,20 @@ export interface HarnessBehavior {
   rejectSwitch: boolean;
   /** The wallet does not know this chain yet: switch throws 4902 until `wallet_addEthereumChain`. */
   chainUnknown: boolean;
+  /**
+   * The connection prompt stays open until the user answers it: `eth_requestAccounts` does not
+   * settle until `approvePendingConnect()`. While it is open, any further `eth_requestAccounts`
+   * is refused with EIP-1193 code -32002 — which is what an extension really does ("Request of
+   * type 'wallet_requestPermissions' already pending for origin … Please wait.").
+   */
+  holdConnect: boolean;
+  /**
+   * The wallet ALREADY holds an unanswered connection request for this origin — it is locked, or
+   * its prompt is open behind another window, or it was opened from an earlier tab — so even the
+   * first `eth_requestAccounts` this page sends is refused with -32002. Seen in production as
+   * "Requested resource not available." `approvePendingConnect()` answers that earlier request.
+   */
+  connectAlreadyPending: boolean;
 }
 
 const DEFAULT_BEHAVIOR: HarnessBehavior = {
@@ -56,6 +70,8 @@ const DEFAULT_BEHAVIOR: HarnessBehavior = {
   rejectSign: false,
   rejectSwitch: false,
   chainUnknown: false,
+  holdConnect: false,
+  connectAlreadyPending: false,
 };
 
 /** One JSON-RPC call the app made to the wallet, recorded in order. */
@@ -77,6 +93,19 @@ interface HarnessConfig {
   address: string;
   info: HarnessInfo;
   behavior: HarnessBehavior;
+  /** Suffix for this wallet's control object and signing binding; "" for the only wallet. */
+  slot: string;
+  /** Inject as `window.ethereum` only and never announce over EIP-6963 (an older wallet). */
+  legacyOnly: boolean;
+}
+
+/** How the stand-in is installed, as opposed to how it answers. */
+export interface InstallOptions {
+  /** Needed to tell two wallets on one page apart; each gets its own control surface. */
+  slot?: string;
+  /** The EIP-6963 display name. */
+  name?: string;
+  legacyOnly?: boolean;
 }
 
 /** The control surface the init script publishes on `window`, used only by the test process. */
@@ -84,12 +113,13 @@ interface HarnessControl {
   calls: () => RpcCall[];
   setBehavior: (patch: Partial<HarnessBehavior>) => void;
   emit: (event: string, payload: unknown) => void;
+  approvePendingConnect: () => void;
 }
 
-interface HarnessWindow extends Window {
-  __walletHarness: HarnessControl;
-  __walletHarnessSign: (messageHex: string) => Promise<string>;
-}
+type HarnessWindow = Window &
+  Record<string, unknown> & {
+    ethereum?: unknown;
+  };
 
 export interface InstalledWallet {
   /** Checksummed address of the real local account backing the provider. */
@@ -102,6 +132,8 @@ export interface InstalledWallet {
   setBehavior(patch: Partial<HarnessBehavior>): Promise<void>;
   /** Fire an EIP-1193 event, the way a wallet does when the user changes chain/account in it. */
   emit(event: string, payload: unknown): Promise<void>;
+  /** The user unlocks the wallet and approves the connection request it was holding. */
+  approvePendingConnect(): Promise<void>;
 }
 
 // Runs in the page at document start, before any app code. Must be self-contained: Playwright
@@ -112,7 +144,11 @@ function harnessInitScript(config: HarnessConfig): void {
   const behavior: HarnessBehavior = Object.assign({}, config.behavior);
   const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
 
+  const controlKey = "__walletHarness" + config.slot;
+  const signKey = "__walletHarnessSign" + config.slot;
   let accounts: string[] = behavior.preAuthorized ? [config.address] : [];
+  // Settlers for `eth_requestAccounts` calls the wallet is holding open (`holdConnect`).
+  let heldConnects: Array<(granted: string[]) => void> = [];
   let chainIdHex: string = behavior.chainIdHex;
   let chainKnown = !behavior.chainUnknown;
 
@@ -146,6 +182,17 @@ function harnessInitScript(config: HarnessConfig): void {
         case "eth_requestAccounts": {
           if (behavior.rejectConnect) {
             throw rpcError(4001, "User rejected the request.");
+          }
+          if (behavior.connectAlreadyPending || heldConnects.length > 0) {
+            throw rpcError(
+              -32002,
+              "Request of type 'wallet_requestPermissions' already pending for origin. Please wait."
+            );
+          }
+          if (behavior.holdConnect) {
+            return new Promise<string[]>((resolve) => {
+              heldConnects.push(resolve);
+            });
           }
           accounts = [config.address];
           emit("accountsChanged", accounts);
@@ -192,7 +239,7 @@ function harnessInitScript(config: HarnessConfig): void {
             throw rpcError(-32602, "personal_sign requires a message");
           }
           // Signed for real, in the Node process, over exactly these bytes.
-          const signature = await w.__walletHarnessSign(list[0]);
+          const signature = await (w[signKey] as (hex: string) => Promise<string>)(list[0]);
           record.result = signature;
           return signature;
         }
@@ -214,7 +261,7 @@ function harnessInitScript(config: HarnessConfig): void {
     },
   };
 
-  w.__walletHarness = {
+  const control: HarnessControl = {
     calls: () => calls.slice(),
     setBehavior: (patch: Partial<HarnessBehavior>) => {
       Object.assign(behavior, patch);
@@ -224,7 +271,23 @@ function harnessInitScript(config: HarnessConfig): void {
       if (event === "accountsChanged" && Array.isArray(payload)) accounts = payload as string[];
       emit(event, payload);
     },
+    approvePendingConnect: () => {
+      behavior.connectAlreadyPending = false;
+      behavior.holdConnect = false;
+      accounts = [config.address];
+      const settle = heldConnects;
+      heldConnects = [];
+      for (const resolve of settle) resolve(accounts);
+      emit("accountsChanged", accounts);
+    },
   };
+  w[controlKey] = control;
+
+  if (config.legacyOnly) {
+    // An older wallet: the provider sits on `window.ethereum` and nothing is announced.
+    w.ethereum = provider;
+    return;
+  }
 
   // EIP-6963: announce on request, and once immediately. The app dispatches
   // `eip6963:requestProvider` from a mount effect, which is what the listener below answers; the
@@ -255,13 +318,16 @@ const HARNESS_ICON =
  */
 export async function installWallet(
   page: Page,
-  behavior: Partial<HarnessBehavior> = {}
+  behavior: Partial<HarnessBehavior> = {},
+  options: InstallOptions = {}
 ): Promise<InstalledWallet> {
   const account = privateKeyToAccount(generatePrivateKey());
+  const slot = options.slot ? `_${options.slot}` : "";
+  const controlKey = `__walletHarness${slot}`;
 
   // Real signing, in Node, over the raw bytes the app passed to `personal_sign` — never over a
   // string this harness reassembles, which is the whole point of the verbatim assertion.
-  await page.exposeFunction("__walletHarnessSign", async (messageHex: string): Promise<string> => {
+  await page.exposeFunction(`__walletHarnessSign${slot}`, async (messageHex: string): Promise<string> => {
     return account.signMessage({ message: { raw: messageHex as `0x${string}` } });
   });
 
@@ -269,34 +335,39 @@ export async function installWallet(
     address: account.address,
     info: {
       uuid: crypto.randomUUID(),
-      name: "WANTED e2e harness wallet",
+      name: options.name ?? "WANTED e2e harness wallet",
       icon: HARNESS_ICON,
       rdns: "dev.wanted.e2e-harness",
     },
     behavior: Object.assign({}, DEFAULT_BEHAVIOR, behavior),
+    slot,
+    legacyOnly: options.legacyOnly ?? false,
   };
 
   await page.addInitScript(harnessInitScript, config);
 
+  // Playwright serialises arguments, not closures, so the control object's key travels as one.
+  type Ctl = Record<string, HarnessControl>;
+
   return {
     address: account.address,
-    calls: () =>
-      page.evaluate(() => (window as unknown as HarnessWindow).__walletHarness.calls()),
+    calls: () => page.evaluate((key) => (window as unknown as Ctl)[key].calls(), controlKey),
     callsTo: async (method: string) => {
-      const all = await page.evaluate(() =>
-        (window as unknown as HarnessWindow).__walletHarness.calls()
-      );
+      const all = await page.evaluate((key) => (window as unknown as Ctl)[key].calls(), controlKey);
       return all.filter((call) => call.method === method);
     },
     setBehavior: (patch: Partial<HarnessBehavior>) =>
-      page.evaluate(
-        (arg) => (window as unknown as HarnessWindow).__walletHarness.setBehavior(arg),
-        patch
-      ),
+      page.evaluate((arg) => (window as unknown as Ctl)[arg.key].setBehavior(arg.patch), {
+        key: controlKey,
+        patch,
+      }),
     emit: (event: string, payload: unknown) =>
-      page.evaluate(
-        (arg) => (window as unknown as HarnessWindow).__walletHarness.emit(arg.event, arg.payload),
-        { event, payload }
-      ),
+      page.evaluate((arg) => (window as unknown as Ctl)[arg.key].emit(arg.event, arg.payload), {
+        key: controlKey,
+        event,
+        payload,
+      }),
+    approvePendingConnect: () =>
+      page.evaluate((key) => (window as unknown as Ctl)[key].approvePendingConnect(), controlKey),
   };
 }

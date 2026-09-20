@@ -1,11 +1,11 @@
 "use client";
 
-import { useCallback, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 import { apiErrorMessage } from "@/components/apiError";
 import { OutcomeBar } from "@/components/predict/OutcomeBar";
 import { PredictionCountdown } from "@/components/predict/PredictionCountdown";
 import { pctOf } from "@/components/predict/distribution";
-import { settlementRule } from "@/components/predict/rule";
+import { measuredOdds, settlementRule } from "@/components/predict/rule";
 import { useWallet } from "@/components/wallet/WalletProvider";
 import { formatBaseUnits, hasBaseUnits } from "@/lib/format";
 import type { MyEntry, Prediction, PredictionDistribution } from "@/lib/prediction/types";
@@ -51,7 +51,21 @@ export function LivePredictionCard({
   const [voting, setVoting] = useState<string | null>(null);
   const [voteError, setVoteError] = useState<string | null>(null);
 
-  const canVote = prediction.status === "open" && !mine;
+  // `status` is only as fresh as the last poll (8 s), and the row itself only flips to `locked`
+  // when a lifecycle tick runs. Without this the outcome bars stayed clickable after the countdown
+  // above them read 0:00 — every such click is refused by the server (409), correctly, but the card
+  // was offering something it could not deliver. The server remains the only authority on the lock.
+  const [lockPassed, setLockPassed] = useState(false);
+  useEffect(() => {
+    const ms = new Date(prediction.locks_at).getTime() - Date.now();
+    const id = setTimeout(() => setLockPassed(true), Math.max(0, Number.isFinite(ms) ? ms : 0));
+    return () => {
+      clearTimeout(id);
+      setLockPassed(false);
+    };
+  }, [prediction.locks_at]);
+
+  const canVote = prediction.status === "open" && !lockPassed && !mine;
   const readyToVote = canVote && wallet.address && wallet.signIn === "signed-in";
 
   const vote = useCallback(
@@ -85,6 +99,7 @@ export function LivePredictionCard({
   const poolFunded = hasBaseUnits(prediction.reward_pool) && Boolean(prediction.reward_asset);
   const { tone, label: headLabel } = headerFor(prediction);
   const rule = settlementRule(prediction);
+  const odds = measuredOdds(prediction);
 
   return (
     <section
@@ -157,6 +172,11 @@ export function LivePredictionCard({
               {rule.text}
             </span>
           )}
+          {odds && (
+            <span className="pill" style={PILL_BG} title={odds.title} data-testid="measured-odds">
+              {odds.text}
+            </span>
+          )}
         </div>
 
         <p className="text-[11px] font-bold leading-snug text-muted">
@@ -192,7 +212,7 @@ export function LivePredictionCard({
                 <span>Connect a wallet to predict.</span>
                 <button
                   type="button"
-                  onClick={() => void wallet.connect()}
+                  onClick={() => wallet.beginConnect()}
                   className="btn btn-coral"
                   style={SMALL_BTN}
                 >

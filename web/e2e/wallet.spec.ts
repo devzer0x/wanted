@@ -210,6 +210,79 @@ test("a declined connection is surfaced as declined, not as connected", async ({
   expect(await sessionAddress(page)).toBeNull();
 });
 
+// A request the wallet is already holding. Production showed this as a red "Requested resource
+// not available." the moment CONNECT WALLET was clicked: EIP-1193 code -32002, which a wallet
+// answers when it ALREADY has an unanswered connection request for this origin — it is locked, or
+// its prompt is open behind another window. That is "look at your wallet", not a failure.
+test("a request already open in the wallet is not an error, and connects once it is approved", async ({
+  page,
+}) => {
+  const wallet = await installWallet(page, {
+    chainIdHex: EXPECTED_CHAIN_ID_HEX,
+    connectAlreadyPending: true,
+  });
+  await page.goto(HOST_PAGE);
+
+  const button = walletButton(page);
+  await button.click();
+
+  await expect(page.getByTestId("wallet-pending-hint")).toBeVisible();
+  await expect(button).toHaveAttribute("data-wallet-status", "connecting");
+  await expect(page.getByText(/requested resource not available/i)).toHaveCount(0);
+
+  // The viewer finds the wallet, unlocks it and approves. Nothing is clicked on the page again.
+  await wallet.approvePendingConnect();
+  await expect(button).toHaveAttribute("data-wallet-status", "connected");
+  await expect(button).toHaveText(new RegExp(escapeRegExp(shortAddress(wallet.address))));
+});
+
+test("a second click while the wallet prompt is open does not ask the wallet twice", async ({ page }) => {
+  const wallet = await installWallet(page, { chainIdHex: EXPECTED_CHAIN_ID_HEX, holdConnect: true });
+  await page.goto(HOST_PAGE);
+
+  const button = walletButton(page);
+  await button.click();
+  await expect(button).toHaveAttribute("data-wallet-status", "connecting");
+  await button.click();
+  await button.click();
+
+  expect(
+    await wallet.callsTo("eth_requestAccounts"),
+    "an impatient second click must not stack a second prompt (the wallet refuses it with -32002)"
+  ).toHaveLength(1);
+  await expect(button).toHaveAttribute("data-wallet-status", "connecting");
+
+  await wallet.approvePendingConnect();
+  await expect(button).toHaveAttribute("data-wallet-status", "connected");
+});
+
+test("with two wallets installed the viewer picks one, and only that wallet is asked", async ({ page }) => {
+  const alpha = await installWallet(page, { chainIdHex: EXPECTED_CHAIN_ID_HEX }, { slot: "a", name: "Alpha Wallet" });
+  const beta = await installWallet(page, { chainIdHex: EXPECTED_CHAIN_ID_HEX }, { slot: "b", name: "Beta Wallet" });
+  await page.goto(HOST_PAGE);
+
+  const button = walletButton(page);
+  await button.click();
+  const chooser = page.getByRole("dialog", { name: "Choose a wallet" });
+  await expect(chooser).toBeVisible();
+  await expect(chooser.getByRole("button", { name: "Alpha Wallet" })).toBeVisible();
+  await chooser.getByRole("button", { name: "Beta Wallet" }).click();
+
+  await expect(button).toHaveAttribute("data-wallet-status", "connected");
+  await expect(button).toHaveText(new RegExp(escapeRegExp(shortAddress(beta.address))));
+  expect(await alpha.callsTo("eth_requestAccounts"), "the wallet nobody chose must not be prompted").toHaveLength(0);
+});
+
+test("a wallet that only injects window.ethereum still connects", async ({ page }) => {
+  const wallet = await installWallet(page, { chainIdHex: EXPECTED_CHAIN_ID_HEX }, { legacyOnly: true });
+  await page.goto(HOST_PAGE);
+
+  const button = walletButton(page);
+  await button.click();
+  await expect(button).toHaveAttribute("data-wallet-status", "connected");
+  await expect(button).toHaveText(new RegExp(escapeRegExp(shortAddress(wallet.address))));
+});
+
 // ---------------------------------------------------------------------------------------------
 // Wrong network. THE assertion here is the hex chain id on the wire.
 // ---------------------------------------------------------------------------------------------

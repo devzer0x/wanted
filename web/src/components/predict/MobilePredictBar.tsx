@@ -108,7 +108,7 @@ export function MobilePredictBar({
           <button
             type="button"
             onClick={() => {
-              if (!wallet.address) void wallet.connect();
+              if (!wallet.address) wallet.beginConnect();
               else if (wallet.status === "wrong-network") void wallet.switchNetwork();
               else void wallet.requestSignIn();
             }}

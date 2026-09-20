@@ -29,3 +29,29 @@ export function settlementRule(prediction: Prediction): { text: string; title: s
     title: `Settled from the game's own telemetry for "${type}", ${seconds} seconds after entries lock.`,
   };
 }
+
+/**
+ * The "recent odds" pill, for a scheduled round.
+ *
+ * An always-available question is only asked while its YES-rate, re-measured by the harness from
+ * the agent's own recent telemetry, is fair (CONTRACTS-PREDICTIONS §3, "Cadence and entry windows"),
+ * and the measurement that justified asking rides on the row as `state_context.calibration`
+ * (`{yes, n, window_s, history_s}`). This prints exactly that and nothing derived from it beyond
+ * the percentage: the odds a viewer is shown are the odds that were measured. Any other shape —
+ * every situational question, which carries no calibration — renders no pill.
+ */
+export function measuredOdds(prediction: Prediction): { text: string; title: string } | null {
+  const calibration = prediction.state_context?.calibration;
+  if (typeof calibration !== "object" || calibration === null) return null;
+  const { yes, n, history_s } = calibration as { yes?: unknown; n?: unknown; history_s?: unknown };
+  if (typeof yes !== "number" || typeof n !== "number") return null;
+  if (!Number.isInteger(yes) || !Number.isInteger(n) || n <= 0 || yes < 0 || yes > n) return null;
+
+  const hours = typeof history_s === "number" && history_s > 0 ? Math.round(history_s / 360) / 10 : null;
+  return {
+    text: `Recent odds: YES ${Math.round((yes / n) * 100)}% (${yes}/${n})`,
+    title:
+      `Measured, not estimated: YES in ${yes} of the last ${n} windows of this exact length` +
+      (hours ? `, over about the last ${hours} h of play.` : "."),
+  };
+}
