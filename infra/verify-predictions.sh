@@ -11,6 +11,10 @@
 #   - a 258-minute death-free stretch       -> a window inside it MUST settle "yes" for survival
 #   - 24 real wanted->0 transitions         -> exercise wanted_clears
 #   - the session's own session_end         -> a window overlapping it MUST void
+#   - 3 activity_end rows at 02:52-02:55Z,  -> event_matches {"outcome":"completed"} MUST settle
+#     the 2nd and 3rd of them "completed"      "yes" and cite the 2nd, not the first row of the type
+#   - 3 activity_end rows at 01:15-01:18Z,  -> the same rule MUST settle "no" (the filter applied),
+#     none of them "completed"                 not void for missing telemetry
 #
 # Usage: ./verify-predictions.sh          (tears its own container up and down)
 set -euo pipefail

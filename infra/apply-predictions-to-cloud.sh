@@ -7,7 +7,7 @@
 # WHAT IT DOES
 #   Applies infra/supabase/migrations/20260908120000_predictions.sql,
 #   ...120001_predictions_policies.sql and ...120002_reward_claim_rpc.sql to the project named in
-#   infra/.env.cloud.
+#   infra/.env.cloud, followed by the re-runnable repairs listed in REPAIR_MIGRATIONS below.
 #
 # WHY IT IS SAFE TO RUN
 #   Every migration listed is ADDITIVE ONLY. They create new tables, a new enum, new functions, new
@@ -75,6 +75,14 @@ REPAIR_MIGRATIONS=(
   # 4-argument version — the old route's claims then fail closed until that deploy, which is harmless
   # while site_config rewards.payouts is off (its default).
   supabase/migrations/20260914100000_payout_outbox.sql
+  # Adds the `event_matches` settlement kind (CONTRACTS-PREDICTIONS v2.4 §3) by replacing
+  # settle_due_predictions() with its own definition plus one branch. `create or replace` only, so
+  # it is re-runnable and belongs here rather than in BASE. Apply it BEFORE any harness that writes
+  # an `event_matches` rule goes live: until then such a prediction voids as `unknown_rule_kind`,
+  # which is the deliberate fail-closed behaviour and not a reason to skip this. It restates no
+  # grant, because `create or replace` keeps the existing ACL — including 20260914000001's revoke
+  # of EXECUTE from service_role, re-checked as a post-condition in step 7.
+  supabase/migrations/20260921000000_event_matches.sql
 )
 MIGRATIONS=("${BASE_MIGRATIONS[@]}" "${REPAIR_MIGRATIONS[@]}")
 
@@ -183,6 +191,9 @@ echo "== verifying =="
 "${PSQL[@]}" -tAc "select 'service_role cannot rewrite site_config (FS12): ' || not (has_table_privilege('service_role','public.site_config','insert') or has_table_privilege('service_role','public.site_config','update') or has_table_privilege('service_role','public.site_config','delete'));"
 "${PSQL[@]}" -tAc "select 'payouts switch is currently: ' || case when public.payouts_enabled() then 'ON — the worker WILL sign' else 'off (default) — nothing will be signed' end;"
 "${PSQL[@]}" -tAc "select 'rewards master switch is currently: ' || case when public.rewards_enabled() then 'ON — credits WILL be written' else 'off (default) — no credits will be written' end;"
+# The event_matches kind (20260921000000). Both lines must print true.
+"${PSQL[@]}" -tAc "select 'settlement understands event_matches: ' || bool_or(p.prosrc like '%event_matches%') from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'settle_due_predictions';"
+"${PSQL[@]}" -tAc "select 'the replace kept settlement behind the lock: ' || (has_function_privilege('service_role', 'public.settle_due_predictions_serialized()', 'execute') and not has_function_privilege('service_role', 'public.settle_due_predictions()', 'execute') and not has_function_privilege('anon', 'public.settle_due_predictions()', 'execute'));"
 
 echo
 echo "Done. Next: PostgREST picks up the new schema within a few seconds; then"

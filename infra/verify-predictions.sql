@@ -6,6 +6,12 @@
 --                                        (08:42:33.680272Z, 08:44:38.543808Z) -> survival = no
 --   * 2026-09-04T01:03:00Z .. 01:06:00Z  contains a real wanted_change {"from":2,"to":0}
 --                                        at 01:04:37.719774Z -> cops cleared = yes
+--   * 2026-09-04T02:52:00Z .. 02:55:00Z  three real activity_end rows: timeout, then TWO completed
+--                                        (02:53:16.913902Z, 02:54:21.002800Z)
+--                                        -> event_matches {"outcome":"completed"} = yes, citing the
+--                                        SECOND row in the window, not the first
+--   * 2026-09-04T01:15:00Z .. 01:18:00Z  three real activity_end rows, NONE completed (gave_up,
+--                                        preempted, timeout) -> the same rule = no
 --
 -- If settlement disagrees with any of these, it disagrees with something that actually happened.
 \set ON_ERROR_STOP on
@@ -645,6 +651,168 @@ select count(*) as i4_duplicate_nonces_must_be_0 from (
 select count(*) as i6_signed_rows_missing_their_record_must_be_0 from public.reward_claims
 where status in ('signed', 'broadcast', 'confirmed')
   and (raw_tx is null or tx_hash is null or nonce is null or amount_base is null or to_address <> wallet);
+
+\echo ''
+\echo '################ 13. event_matches — the PAYLOAD FILTER (20260921000000, §3 v2.4) ########'
+\echo '-- Ground truth computed from the same 2026-09-04 recording, not chosen:'
+\echo '--   window A  02:52:00Z..02:55:00Z  holds three real activity_end rows —'
+\echo '--     02:52:19.610918Z outcome=timeout, 02:53:16.913902Z outcome=completed,'
+\echo '--     02:54:21.002800Z outcome=completed. The FIRST activity_end in the window is NOT the'
+\echo '--     match, so evidence naming 02:53:16.913902Z proves the FILTER ran and not just the type.'
+\echo '--   window B  01:15:00Z..01:18:00Z  holds three real activity_end rows and NO completed one'
+\echo '--     (gave_up 01:16:12.616663Z, preempted 01:16:14.561255Z, timeout 01:17:08.753869Z)'
+\echo '--     -> a definite `no`, which is what makes the question fair rather than void-prone.'
+\echo '-- Both windows are the v2.4 scheduled-round shape: 60 s to enter, then a 180 s window.'
+
+-- Section 11 left the deliberately small decided caps behind and section 12 turned payouts on.
+-- Restore SETUP's generous caps so the credit assertions below test WHO is credited and HOW OFTEN,
+-- not the §6 clamp (which is not what this migration changes).
+insert into public.site_config (key, value) values
+  ('reward_caps', '{"daily_cap": 100000, "max_per_prediction": 100000, "max_per_wallet_day": 100000}'::jsonb),
+  ('rewards',     '{"enabled": true, "payouts": true}'::jsonb)
+on conflict (key) do update set value = excluded.value;
+select public.rewards_enabled() as rewards_on_for_this_section_must_be_t;
+
+-- Seven predictions, all `event_matches`, all over the real recording. The rule JSON is the literal
+-- shape CONTRACTS-PREDICTIONS §3 freezes, including the deliberately broken ones.
+with s as (select id from public.sessions limit 1)
+insert into public.predictions
+  (session_id, question, prediction_type, opened_at, locks_at, resolves_at,
+   outcomes, telemetry_rule, reward_pool, reward_asset)
+select s.id, v.q, v.ptype, v.o, v.l, v.r,
+       '[{"key":"yes","label":"YES"},{"key":"no","label":"NO"}]'::jsonb,
+       v.rule::jsonb, 10, 'TTWO'
+from s, (values
+  -- (a) window A really contains a completed activity_end -> yes
+  ('em_yes', 'WILL WANTED PULL OFF A GOAL IN THE NEXT 3 MINUTES?',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end", "payload_match": {"outcome": "completed"}}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  -- (b) window B contains activity_end rows but none completed -> no (NOT a void, NOT a yes)
+  ('em_no', 'WILL WANTED PULL OFF A GOAL IN THE NEXT 3 MINUTES?',
+   timestamptz '2026-09-04T01:14:00Z', timestamptz '2026-09-04T01:15:00Z', timestamptz '2026-09-04T01:18:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end", "payload_match": {"outcome": "completed"}}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  -- (c) an EMPTY filter is `event_occurs` under another name -> malformed_rule
+  ('em_empty', 'WILL ANY ACTIVITY END? (EMPTY FILTER)',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end", "payload_match": {}}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  -- (d) no filter at all -> malformed_rule
+  ('em_missing', 'WILL ANY ACTIVITY END? (NO FILTER KEY)',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end"}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  -- (e) a filter that is not a JSON OBJECT -> malformed_rule, both shapes
+  ('em_string', 'WILL WANTED FINISH ONE? (FILTER IS A STRING)',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end", "payload_match": "completed"}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  ('em_array', 'WILL WANTED FINISH ONE? (FILTER IS AN ARRAY)',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end", "payload_match": ["completed"]}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  -- (e) ...and a blank event_type is malformed too, filter or no filter (§3 names both)
+  ('em_notype', 'WILL WANTED FINISH ONE? (NO EVENT TYPE)',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "", "payload_match": {"outcome": "completed"}}, "outcome_if_true": "yes", "outcome_if_false": "no"}'),
+  -- (f) a perfectly good rule that nobody answered. Nobody enters, nobody wins.
+  ('em_noentries', 'NOBODY ANSWERED THIS EVENT_MATCHES ONE',
+   timestamptz '2026-09-04T02:51:00Z', timestamptz '2026-09-04T02:52:00Z', timestamptz '2026-09-04T02:55:00Z',
+   '{"kind": "event_matches", "params": {"event_type": "activity_end", "payload_match": {"outcome": "completed"}}, "outcome_if_true": "yes", "outcome_if_false": "no"}')
+) as v(ptype, q, o, l, r, rule);
+
+-- Direct inserts: these windows are in the past, so enter_prediction() correctly refuses them
+-- (section 1 proves that separately). A zero-entry prediction voids as `no_entries` BEFORE the rule
+-- is ever inspected, so every malformed-rule case needs a real entrant or it asserts nothing.
+insert into public.prediction_entries (prediction_id, wallet, outcome)
+select p.id, w.wallet, w.outcome
+from public.predictions p, (values ('0xf00d1', 'yes'), ('0xf00d2', 'no')) as w(wallet, outcome)
+where p.prediction_type = 'em_yes';
+insert into public.prediction_entries (prediction_id, wallet, outcome)
+select p.id, '0xf00d3', 'yes' from public.predictions p
+where p.prediction_type in ('em_no', 'em_empty', 'em_missing', 'em_string', 'em_array', 'em_notype');
+
+\echo '-- EXPECT 8 locked, 8 settled (2 resolved + 6 voided). em_noentries has no entry on purpose.'
+select public.lock_due_predictions() as locked;
+select public.settle_due_predictions() as settled;
+
+\echo '-- (a)+(b) EXPECT: em_yes = settled|yes|1, em_no = settled|no|1. The same rule over two real'
+\echo '--         windows gives two different definite answers, decided by the payload filter.'
+select prediction_type, status, result, entry_count, correct_count
+from public.predictions where prediction_type in ('em_yes', 'em_no') order by prediction_type;
+
+\echo '-- (a) EXPECT: evidence names the REAL completed activity_end at 02:53:16.913902Z, echoes the'
+\echo '--         filter, and the cited row''s own payload says outcome=completed.'
+select (p.resolution_evidence ->> 'ts')::timestamptz = timestamptz '2026-09-04T02:53:16.913902Z'
+         as evidence_ts_is_the_real_completed_row,
+       (p.resolution_evidence -> 'event_id')::bigint =
+         (select e.id from public.events e
+           where e.type = 'activity_end' and e.ts = timestamptz '2026-09-04T02:53:16.913902Z')
+         as evidence_event_id_is_that_recorded_row,
+       (select e.payload ->> 'outcome' from public.events e
+         where e.id = (p.resolution_evidence -> 'event_id')::bigint) as cited_event_outcome,
+       p.resolution_evidence -> 'payload_match' as evidence_payload_match
+from public.predictions p where p.prediction_type = 'em_yes';
+
+\echo '-- (a) EXPECT t: an EARLIER activity_end existed in the same window and was rejected by the'
+\echo '--         filter. Without this, "first row of that type" would have produced the same answer.'
+select (select min(e.ts) from public.events e
+         where e.type = 'activity_end'
+           and e.ts >= timestamptz '2026-09-04T02:52:00Z' and e.ts <= timestamptz '2026-09-04T02:55:00Z')
+       < (p.resolution_evidence ->> 'ts')::timestamptz as an_earlier_activity_end_was_skipped
+from public.predictions p where p.prediction_type = 'em_yes';
+
+\echo '-- (b) EXPECT 3 and 0: window B really did hold activity_end rows, none of them completed.'
+\echo '--         That is why `no` there is an observation and not a missing-telemetry void.'
+select count(*) as real_activity_end_rows_in_window_b,
+       count(*) filter (where payload @> '{"outcome": "completed"}'::jsonb) as completed_ones_must_be_0
+from public.events
+where type = 'activity_end'
+  and ts >= timestamptz '2026-09-04T01:15:00Z' and ts <= timestamptz '2026-09-04T01:18:00Z';
+
+\echo '-- (c)(d)(e) EXPECT void | null | malformed_rule x5. An empty, absent or non-object filter is'
+\echo '--         `event_occurs` wearing this kind''s name, and would settle every such question YES.'
+\echo '--         A blank event_type is malformed for the same reason it is on `event_occurs`.'
+select prediction_type, status, result, entry_count,
+       resolution_evidence ->> 'void_reason' as void_reason
+from public.predictions
+where prediction_type in ('em_empty', 'em_missing', 'em_string', 'em_array', 'em_notype')
+order by prediction_type;
+
+\echo '-- (f) EXPECT void | no_entries | 0 ledger rows: nobody entered, so nobody wins and the'
+\echo '--         treasury spends nothing. The rule itself was valid and never got to run.'
+select prediction_type, status, entry_count,
+       resolution_evidence ->> 'void_reason' as void_reason
+from public.predictions where prediction_type = 'em_noentries';
+select count(*) as ledger_rows_for_the_unanswered_one_must_be_0
+from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+where p.prediction_type = 'em_noentries';
+
+\echo '-- (g) EXPECT one row only: 10.000000000000000000 TTWO to 0xf00d1, who said yes. 0xf00d2 said'
+\echo '--         no, was counted for accuracy and streak, and is not paid.'
+select l.wallet, l.amount, l.asset, l.clamped
+from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+where p.prediction_type = 'em_yes' order by l.wallet;
+select count(*) as ledger_rows_for_em_yes_must_be_1
+from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+where p.prediction_type = 'em_yes';
+
+\echo '-- (g) EXPECT 0 settled and STILL one ledger row: settlement is safely re-runnable over the'
+\echo '--         new kind too (idempotency invariant 2).'
+select public.settle_due_predictions() as rerun_should_settle_0;
+select count(*) as ledger_rows_for_em_yes_still_1
+from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+where p.prediction_type = 'em_yes';
+select count(*) as rows_for_the_losing_wallet_must_be_0
+from public.reward_ledger where wallet = '0xf00d2';
+
+\echo '-- The replace kept everything around the body: 20260921000000 restates no grant, and'
+\echo '--   `create or replace function` keeps the owner and ACL, so 20260908120001/20260909000000''s'
+\echo '--   revokes and 20260914000001''s service_role revoke are all still in force afterwards.'
+select has_function_privilege('service_role', 'public.settle_due_predictions()', 'execute')
+         as service_role_raw_execute_must_still_be_f,
+       has_function_privilege('anon', 'public.settle_due_predictions()', 'execute')
+         as anon_execute_must_still_be_f,
+       has_function_privilege('service_role', 'public.settle_due_predictions_serialized()', 'execute')
+         as wrapper_still_reachable_must_be_t;
+select prosecdef as security_definer_must_be_t, proconfig as search_path_must_be_public_pg_temp
+from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+where n.nspname = 'public' and p.proname = 'settle_due_predictions';
 
 \echo ''
 \echo '################ DONE ################'

@@ -1,4 +1,4 @@
-# WANTED — PREDICTION LAYER CONTRACTS v2.3
+# WANTED — PREDICTION LAYER CONTRACTS v2.4
 
 Frozen. Executors treat this as read-only; changes go through the orchestrator and bump the
 version. If code and contract disagree, the contract wins. Companion to `docs/CONTRACTS.md`
@@ -25,6 +25,14 @@ behaviour: the SIWE statement text; `/api/auth/*` and `/api/rewards/balance` rea
 `POST /api/rewards/claim` only enqueues; one lease-holding cron worker signs. Supersedes every
 statement elsewhere in this document about `finalize_reward_claim`, `pending`/`submitted`, or
 `sendReward` — where §2/§4/§6 disagree with §10, §10 wins.
+
+**v2.4** — a steady cadence, and time to answer. §3 gains one rule kind, `event_matches`
+(`event_occurs` plus a payload filter), which is what makes a fair question askable during ordinary
+free roam; it is a NEW kind rather than a new parameter on `event_occurs` so that a harness ahead of
+the database fails closed (an unknown kind voids) instead of settling every such question YES. §3
+also gains "Cadence and entry windows": an enforced floor on the time a viewer has to enter, and the
+rule that an always-available question is only asked while its own measured recent odds are fair.
+Migration `20260921000000_event_matches.sql`. No table, column, HTTP shape or payout rule changed.
 
 ---
 
@@ -151,6 +159,7 @@ A rule is a JSON object with a `kind`. The settlement function understands exact
 | kind | params | settles from |
 |---|---|---|
 | `event_occurs` | `event_type`, `outcome_if_true`, `outcome_if_false` | an `events` row of that type in the window |
+| `event_matches` | `event_type`, `payload_match` (non-empty JSON object), `outcome_if_true`, `outcome_if_false` | an `events` row of that type in the window whose `payload` contains every key/value of `payload_match` (`payload @> payload_match`). Absence is a definite `outcome_if_false`, exactly as for `event_occurs`. A blank `event_type`, or a `payload_match` that is missing, not an object, or `{}`, voids `malformed_rule` — an empty filter would be `event_occurs` under another name |
 | `wanted_reaches` | `level`, … | `wanted_change` payload `to >= level` |
 | `wanted_clears` | — | `wanted_change` payload `to = 0` |
 | `wanted_gained` | — | any `wanted_change` with `to > from` |
@@ -159,6 +168,36 @@ A rule is a JSON object with a `kind`. The settlement function understands exact
 | `vehicle_exited` | — | HUD `vehicle` transition non-null → null |
 | `mission_outcome` | `expect: passed\|failed` | `mission_end` / `mission_fail` |
 | `activity_outcome` | `activity`, `expect` | `activity_end` payload `outcome` |
+
+### Cadence and entry windows (v2.4)
+
+The shape of a rule, in full, because the harness writes it and SQL reads it:
+
+```json
+{"kind": "event_matches",
+ "params": {"event_type": "activity_end", "payload_match": {"outcome": "completed"}},
+ "outcome_if_true": "yes", "outcome_if_false": "no"}
+```
+
+- **Entry window floor.** `locks_at - opened_at` is never less than **30 s** for any prediction, and
+  is **60 s** for a scheduled round (below). Enforced where the window is constructed
+  (`harness/wasted_harness/predictions/catalog.py`), not by convention. Measured need: the page polls
+  every 8 s and the broadcast runs seconds behind the game, so the 10–20 s the first catalogue
+  allowed was mostly gone before a viewer saw the card. `opened_at < locks_at < resolves_at` and the
+  300 s ceiling on the whole window are unchanged.
+- **Scheduled rounds.** While the agent is live and nothing situational has been asked for
+  `round_interval_s` (default 300 s), the generator asks one *always-available* question: 60 s to
+  enter, then a 180 s window. Situational questions (a wanted star, a fight, a mission) still fire
+  on their own triggers and count as that interval's question.
+- **An always-available question must earn its place on every ask.** Its YES-rate is re-measured by
+  the harness from the agent's own recent telemetry (the same `events` rows settlement will read),
+  over the same window shape, and it is offered only while that rate is inside **[0.20, 0.80]** on
+  at least **12** sampled windows. Measured 2026-09-20: "pulls off a goal within 3 minutes" was 8 %
+  in the 2026-09-04 recording and 50 % in that day's live session — a fixed base rate would have
+  been a giveaway in one of them. When nothing is in band, nothing is asked; an empty card is
+  honest and a foregone conclusion is not.
+- **Nobody enters, nobody wins** is unchanged and already structural: `entry_count = 0` voids as
+  `no_entries` before any credit code is reachable ("Voiding is mandatory", below).
 
 ### Settlement preconditions — telemetry completeness
 
