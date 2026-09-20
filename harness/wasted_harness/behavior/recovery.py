@@ -1818,6 +1818,145 @@ class BlockingScreenWatchdog:
         return key
 
 
+#: How long the game must have been off the foreground before anything is done
+#: about it. The console switch that usually causes this (`tscon` after an RDP
+#: disconnect) is not instant, and the game itself briefly drops the foreground
+#: while it changes display mode; grabbing it back mid-switch is a fight with
+#: Windows, not a recovery.
+FOREGROUND_GRACE_S = 3.0
+
+#: Gap between the first few focus requests — long enough for one to land and
+#: the next poll to see it.
+FOREGROUND_RETRY_GAP_S = 10.0
+
+#: Requests made at :data:`FOREGROUND_RETRY_GAP_S` before dropping to the slow
+#: cadence. Windows may refuse a foreground change outright with no error, so a
+#: refusal that survives these is probably a standing one.
+FOREGROUND_FAST_ATTEMPTS = 3
+
+#: A regain that lasts less than this does not end the episode: something is
+#: taking the foreground straight back (a launcher popup, a crash dialog), and
+#: without this every regain would restart the fast cadence — hundreds of
+#: visible focus flips an hour on the broadcast.
+FOREGROUND_FLAP_WINDOW_S = 60.0
+
+#: How often to say that there is no game window to keep focused. The title
+#: match in `primitives.GAME_WINDOW_TITLES` is unconfirmed against the box, and
+#: a miss there would otherwise make this whole class a silent no-op.
+FOREGROUND_NO_WINDOW_LOG_S = 300.0
+
+#: The slow cadence. There is deliberately no give-up: a request is one cheap
+#: Win32 call, nobody is at the box to see a "needs a human" line, and whatever
+#: was holding the foreground may let go an hour from now.
+FOREGROUND_SLOW_GAP_S = 60.0
+
+
+@dataclass
+class ForegroundKeeper:
+    """Notices that the game window is not the foreground window, and says
+    when to take it back.
+
+    The failure this exists for is invisible to everything above. Measured on
+    the box: after the RDP session was handed to the console, `/health` went on
+    reporting `tick_hz` ~130 with `game_fps` moving, while the broadcast sat on
+    a single frame for hours. An unfocused GTA V keeps SIMULATING — so
+    :class:`BlockingScreenWatchdog` sees a healthy advancing tick and never
+    fires — but it stops PRESENTING, so the capture has nothing new to show,
+    and SendInput reaches only the foreground window, so every key this harness
+    sends lands somewhere else. The harness is the one process guaranteed to be
+    inside the game's session while the show is live, which makes it the one
+    place this can be fixed without a second moving part.
+
+    Pure policy: `feed()` is told what is true and returns whether to call
+    `Primitives.focus_game_window()` now. It only ever says yes in the CONSOLE
+    session. `in_console_session` False is either an operator sitting in an RDP
+    session, whose focus is theirs to keep, or a parked session, where there is
+    no input desktop to focus into; `None` is "could not tell". All three stand
+    down and restart the grace, so the first request after a `tscon` waits for
+    the display to settle.
+    """
+
+    clock: Any = time.monotonic
+    grace_s: float = FOREGROUND_GRACE_S
+    retry_gap_s: float = FOREGROUND_RETRY_GAP_S
+    fast_attempts: int = FOREGROUND_FAST_ATTEMPTS
+    slow_gap_s: float = FOREGROUND_SLOW_GAP_S
+    #: Requests made in the current lost-foreground episode.
+    flap_window_s: float = FOREGROUND_FLAP_WINDOW_S
+    attempts: int = 0
+    _lost_at: float | None = None
+    _last_attempt_at: float = 0.0
+    _regained_at: float | None = None
+    _no_window_logged_at: float | None = None
+
+    def feed(
+        self,
+        game_foreground: bool | None,
+        in_console_session: bool | None,
+        holder: str = "",
+    ) -> bool:
+        """`game_foreground` is `None` when there is no game window at all (a
+        launcher, a crash, a restart) — nothing to focus, so nothing is asked.
+        `holder` is the title of whatever does hold the foreground, for the log."""
+        now = self.clock()
+        if in_console_session is not True:
+            self._reset()
+            return False
+        if game_foreground is None:
+            self._reset()
+            if (
+                self._no_window_logged_at is None
+                or now - self._no_window_logged_at >= FOREGROUND_NO_WINDOW_LOG_S
+            ):
+                self._no_window_logged_at = now
+                log.warning(
+                    "no game window found by title, so its focus cannot be kept; "
+                    "expected only while the game is not running"
+                )
+            return False
+        if game_foreground:
+            if self._lost_at is not None and self.attempts > 0:
+                log.info(
+                    "the game window has the foreground again",
+                    extra={"kv": {"attempts": self.attempts}},
+                )
+                self._regained_at = now
+            self._lost_at = None
+            if self._regained_at is not None and now - self._regained_at >= self.flap_window_s:
+                self._reset()  # it held: the episode is over
+            return False
+
+        if self._lost_at is None:
+            self._lost_at = now
+        lost_for = now - self._lost_at
+        if lost_for < self.grace_s:
+            return False
+        gap = self.retry_gap_s if self.attempts < self.fast_attempts else self.slow_gap_s
+        if self.attempts > 0 and now - self._last_attempt_at < gap:
+            return False
+        self.attempts += 1
+        self._last_attempt_at = now
+        log.warning(
+            "the game window is not the foreground window: the game keeps ticking "
+            "but stops presenting frames, and SendInput lands elsewhere; taking "
+            "the foreground back",
+            extra={
+                "kv": {
+                    "attempt": self.attempts,
+                    "lost_for_s": round(lost_for, 1),
+                    "holder": holder[:80],
+                }
+            },
+        )
+        return True
+
+    def _reset(self) -> None:
+        self.attempts = 0
+        self._lost_at = None
+        self._last_attempt_at = 0.0
+        self._regained_at = None
+
+
 #: Vehicle-search radii, in order, as being stranded drags on. The bridge
 #: clamps whatever it considers unreasonable; escalating here just stops the
 #: harness from asking the same failing question forever.

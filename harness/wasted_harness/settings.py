@@ -9,6 +9,7 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass, field
+from decimal import Decimal, InvalidOperation
 from pathlib import Path
 
 from dotenv import load_dotenv
@@ -25,6 +26,20 @@ def _env(name: str, default: str | None = None) -> str | None:
     if v is not None and v.strip() == "":
         return default
     return v if v is not None else default
+
+
+def _positive_float(name: str, default: str) -> float:
+    """A seconds-valued knob. Unparseable or <= 0 is a startup error, never a
+    silently-dropped setting — an operator who set a cadence and got the
+    default would have no way to tell."""
+    raw = _env(name, default)
+    try:
+        value = float(raw)  # type: ignore[arg-type]
+    except (TypeError, ValueError) as exc:
+        raise ConfigError(f"{name} must be a number of seconds, got {raw!r}") from exc
+    if value <= 0:
+        raise ConfigError(f"{name} must be > 0 seconds, got {raw!r}")
+    return value
 
 
 @dataclass(frozen=True)
@@ -58,18 +73,44 @@ class Settings:
     #: Generate viewer predictions from live telemetry and drive their
     #: lifecycle (docs/CONTRACTS-PREDICTIONS.md §4 names the harness the
     #: PRIMARY driver of `lock_due_predictions()` / `settle_due_predictions()`;
-    #: the Vercel cron is only the backstop for a harness that has died). ON by
-    #: default, because a live show with nothing to predict against is the
-    #: whole feature missing. `WASTED_PREDICTIONS_ENABLED=false` is the kill
-    #: switch on the box — set it there if the prediction migrations have not
-    #: been applied to that Supabase project yet, or the inserts will simply
-    #: fail and pile up in the offline queue.
-    #: OFF by default, deliberately. The prediction layer needs schema that a
+    #: the Vercel cron is only the backstop for a harness that has died).
+    #:
+    #: **OFF by default, deliberately** — `WASTED_PREDICTIONS_ENABLED=true` on
+    #: the box is what turns it on. The prediction layer needs schema a
     #: Supabase project may not have yet, and a box that starts generating
     #: against a missing table requeues every insert on the game-loop thread
     #: until the loop collapses. The safe default for a machine that runs
     #: unattended is "do nothing until told", so this is opt-in per deployment.
+    #: (Two contradictory paragraphs used to stand here, the first claiming ON
+    #: by default. The code below has always been the truth: the default
+    #: string is "false", which the parse reads as off.)
     predictions_enabled: bool = field(default=False)
+    #: --- the prediction generator's operator knobs -------------------------
+    #: All five feed `GeneratorConfig` in `main._wire_predictions`; none of
+    #: them is read anywhere else, and none has a second home. An unparseable
+    #: value is a `ConfigError` at startup, not a silently-ignored one.
+    #:
+    #: `WASTED_PREDICTION_ROUND_S` — CONTRACTS-PREDICTIONS §3's
+    #: `round_interval_s`: how long everything must have been quiet before an
+    #: always-available question is asked. 300 s is the contract's own default.
+    prediction_round_s: float = field(default=300.0)
+    #: `WASTED_PREDICTION_AMBIENT` — kill switch for the scheduled round only.
+    #: Off leaves the situational templates running; it just stops the layer
+    #: asking anything during ordinary free roam.
+    prediction_ambient: bool = field(default=True)
+    #: `WASTED_PREDICTION_MIN_GAP_S` — the floor on the gap between ANY two
+    #: generated predictions (`GeneratorConfig.min_gap_s`).
+    prediction_min_gap_s: float = field(default=30.0)
+    #: `WASTED_PREDICTION_MAX_OPEN` — how many of this run's predictions may be
+    #: unresolved at once (`GeneratorConfig.max_concurrent_open`).
+    prediction_max_open: int = field(default=2)
+    #: `WASTED_PREDICTION_BASE_POOL` — `predictions.reward_pool` in WHOLE token
+    #: units, as an exact decimal STRING (never a float: the column is
+    #: numeric(38,18) and a reward that rounds is a reward that lies). Must
+    #: parse as a Decimal > 0. A WANTED EVENT multiplies it; see
+    #: `GeneratorConfig.base_reward_pool` for the $/day arithmetic behind the
+    #: default.
+    prediction_base_pool: str = field(default="0.005")
 
     @classmethod
     def load(cls, env_file: Path | None = None) -> Settings:
@@ -97,6 +138,35 @@ class Settings:
                 f"{os.environ.get('WASTED_POLL_HZ')!r}"
             ) from exc
         poll_hz = min(4.0, max(2.0, poll_hz))
+        prediction_round_s = _positive_float("WASTED_PREDICTION_ROUND_S", "300")
+        prediction_min_gap_s = _positive_float("WASTED_PREDICTION_MIN_GAP_S", "30")
+        try:
+            prediction_max_open = int(_env("WASTED_PREDICTION_MAX_OPEN", "2"))  # type: ignore[arg-type]
+        except ValueError as exc:
+            raise ConfigError(
+                f"WASTED_PREDICTION_MAX_OPEN must be an integer, got "
+                f"{os.environ.get('WASTED_PREDICTION_MAX_OPEN')!r}"
+            ) from exc
+        if prediction_max_open < 1:
+            raise ConfigError(
+                f"WASTED_PREDICTION_MAX_OPEN must be at least 1 (0 would switch "
+                f"generation off without saying so — use "
+                f"WASTED_PREDICTIONS_ENABLED=false for that); got {prediction_max_open}"
+            )
+        prediction_base_pool = str(_env("WASTED_PREDICTION_BASE_POOL", "0.005"))
+        try:
+            pool = Decimal(prediction_base_pool)
+        except InvalidOperation as exc:
+            raise ConfigError(
+                f"WASTED_PREDICTION_BASE_POOL must be a decimal number in whole token "
+                f"units (e.g. '0.005'), got {prediction_base_pool!r}"
+            ) from exc
+        if pool <= 0:
+            raise ConfigError(
+                f"WASTED_PREDICTION_BASE_POOL must be > 0 (predictions.reward_pool has "
+                f"CHECK (reward_pool > 0), so any insert would be rejected); "
+                f"got {prediction_base_pool!r}"
+            )
         return cls(
             anthropic_api_key=_env("ANTHROPIC_API_KEY"),
             bridge_url=_env("WASTED_BRIDGE_URL", "http://127.0.0.1:7777"),  # type: ignore[arg-type]
@@ -114,6 +184,12 @@ class Settings:
             in ("1", "true", "yes", "on"),
             predictions_enabled=str(_env("WASTED_PREDICTIONS_ENABLED", "false")).strip().lower()
             not in ("0", "false", "no", "off"),
+            prediction_round_s=prediction_round_s,
+            prediction_ambient=str(_env("WASTED_PREDICTION_AMBIENT", "true")).strip().lower()
+            not in ("0", "false", "no", "off"),
+            prediction_min_gap_s=prediction_min_gap_s,
+            prediction_max_open=prediction_max_open,
+            prediction_base_pool=prediction_base_pool,
             # Both paths are anchored to the package, never to the CWD: on the
             # server the harness starts from a scheduled task whose working
             # directory is not the repo. expanduser() so %USERPROFILE%-style

@@ -13,6 +13,7 @@ from __future__ import annotations
 from decimal import Decimal
 from itertools import pairwise
 
+import pytest
 from support.states import make_state
 
 from wasted_harness.predictions.catalog import (
@@ -64,8 +65,14 @@ def _tpl(
         prediction_type=prediction_type,
         question=f"WILL {prediction_type.upper()}?",
         outcomes=YES_NO_OUTCOMES,
-        telemetry_rule={"kind": kind},
-        window=window or Window(lock_delay_s=10.0, resolve_delay_s=20.0),
+        # The §3 shape in full — kind, outcome keys, and params where the kind
+        # takes any. `PredictionTemplate` refuses anything else, because
+        # settlement reads exactly these fields and a rule missing them either
+        # voids or raises inside the settlement transaction.
+        telemetry_rule={"kind": kind, "outcome_if_true": "yes", "outcome_if_false": "no"},
+        # 30s is CONTRACTS-PREDICTIONS §3's floor on `lock_delay_s` (v2.4), so
+        # the smallest legal controlled window is 30 + 30.
+        window=window or Window(lock_delay_s=30.0, resolve_delay_s=30.0),
         trigger=trigger,
         score=score,
         reliability=reliability,
@@ -265,14 +272,14 @@ def test_concurrent_open_cap_blocks_a_third_prediction() -> None:
 
 def test_concurrent_open_cap_clears_once_a_window_resolves() -> None:
     clock = FakeClock()
-    catalog = (_tpl("a", window=Window(lock_delay_s=10.0, resolve_delay_s=20.0)), _tpl("b"))
+    catalog = (_tpl("a", window=Window(lock_delay_s=30.0, resolve_delay_s=30.0)), _tpl("b"))
     config = GeneratorConfig(max_concurrent_open=1, min_gap_s=1.0, type_cooldown_s=1.0)
     gen = PredictionGenerator(catalog=catalog, clock=clock, wall_clock=lambda: 1_893_456_000.0, config=config)
     first = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert first is not None
     clock.advance(1.0)
     assert gen.generate(_triggering_state(), session_id=SESSION_ID) is None  # cap=1, still open
-    clock.advance(30.0)  # first's window (10+20=30s) has fully elapsed
+    clock.advance(60.0)  # first's window (30+30=60s) has fully elapsed
     third = gen.generate(_triggering_state(), session_id=SESSION_ID)
     assert third is not None
 
@@ -321,8 +328,6 @@ def test_a_zero_type_cooldown_does_not_crash_the_picker() -> None:
 
 
 def test_duplicate_prediction_type_in_a_supplied_catalog_is_refused() -> None:
-    import pytest
-
     dupe = (_tpl("same"), _tpl("same"))
     with pytest.raises(ValueError, match="duplicate prediction_type"):
         PredictionGenerator(catalog=dupe)
@@ -509,3 +514,294 @@ def test_same_inputs_produce_the_same_decision() -> None:
     row1 = gen1.generate(state, session_id=SESSION_ID)
     row2 = gen2.generate(state, session_id=SESSION_ID)
     assert row1 == row2
+
+
+# -- the scheduled round (CONTRACTS-PREDICTIONS §3, v2.4) --------------------------
+
+from wasted_harness.predictions.baserate import Calibration  # noqa: E402
+from wasted_harness.predictions.catalog import (  # noqa: E402
+    AMBIENT_LOCK_DELAY_S,
+    AMBIENT_MIN_SAMPLES,
+    AMBIENT_RESOLVE_DELAY_S,
+)
+
+AMBIENT_WINDOW = Window(
+    lock_delay_s=AMBIENT_LOCK_DELAY_S, resolve_delay_s=AMBIENT_RESOLVE_DELAY_S
+)
+
+
+def _ambient(prediction_type: str, trigger=lambda state, events: True) -> PredictionTemplate:
+    return PredictionTemplate(
+        prediction_type=prediction_type,
+        question=f"WILL {prediction_type.upper()}?",
+        outcomes=YES_NO_OUTCOMES,
+        telemetry_rule={
+            "kind": "event_matches",
+            "params": {
+                "event_type": "activity_end",
+                "payload_match": {"outcome": prediction_type},
+            },
+            "outcome_if_true": "yes",
+            "outcome_if_false": "no",
+        },
+        window=AMBIENT_WINDOW,
+        trigger=trigger,
+        score=lambda state: 0.5,
+        reliability=0.85,
+        ambient=True,
+    )
+
+
+def _rate(yes: int, n: int):
+    """A fixed measurement, as `RollingBaseRate.measure` would return it."""
+    return lambda tpl: Calibration(
+        yes=yes, n=n, window_s=tpl.window.resolve_delay_s, history_s=10800.0
+    )
+
+
+def _quiet_state():
+    """Ordinary free roam: no heat, no fight, alive, no mission. Nothing
+    situational in the shipped catalogue triggers on it."""
+    return make_state()
+
+
+def test_without_an_estimator_no_ambient_template_is_ever_offered() -> None:
+    """"No measurement" can only mean "do not ask" — §3 permits an
+    always-available question only while its own rate is in band."""
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"),),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+    )
+    assert gen.base_rate is None
+    for _ in range(50):
+        assert gen.generate(_quiet_state(), session_id=SESSION_ID) is None
+        clock.advance(600.0)
+
+
+def test_an_ambient_template_needs_the_contract_minimum_sample() -> None:
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"),),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        base_rate=_rate(AMBIENT_MIN_SAMPLES // 2, AMBIENT_MIN_SAMPLES - 1),
+    )
+    assert gen.generate(_quiet_state(), session_id=SESSION_ID) is None
+
+    gen.base_rate = _rate(AMBIENT_MIN_SAMPLES // 2, AMBIENT_MIN_SAMPLES)
+    assert gen.generate(_quiet_state(), session_id=SESSION_ID) is not None
+
+
+@pytest.mark.parametrize(
+    ("yes", "n", "offerable"),
+    [
+        (2, 20, False),  # 10% — a giveaway
+        (4, 20, True),  # 20% — the floor, inclusive
+        (10, 20, True),  # 50%
+        (16, 20, True),  # 80% — the ceiling, inclusive
+        (18, 20, False),  # 90% — a giveaway the other way
+    ],
+)
+def test_an_ambient_template_is_offered_only_inside_the_contract_band(
+    yes: int, n: int, offerable: bool
+) -> None:
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"),),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        base_rate=_rate(yes, n),
+    )
+    assert (gen.generate(_quiet_state(), session_id=SESSION_ID) is not None) is offerable
+
+
+def test_the_measurement_that_justified_the_question_rides_on_the_row() -> None:
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"),),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        base_rate=_rate(14, 28),
+    )
+    row = gen.generate(_quiet_state(), session_id=SESSION_ID)
+    assert row is not None
+    assert row["state_context"]["calibration"] == {
+        "yes": 14,
+        "n": 28,
+        "window_s": AMBIENT_RESOLVE_DELAY_S,
+        "history_s": 10800.0,
+    }
+
+
+def test_a_situational_row_carries_no_calibration_key() -> None:
+    """Only an always-available question has to justify itself on every ask;
+    a situational one was calibrated once, in the catalogue."""
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=CATALOG,
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        base_rate=_rate(14, 28),
+    )
+    row = gen.generate(_triggering_state(), session_id=SESSION_ID)
+    assert row is not None
+    assert row["prediction_type"] == "survives_a_fight"
+    assert "calibration" not in row["state_context"]
+
+
+def test_ambient_questions_come_about_once_a_round_and_no_faster() -> None:
+    clock = FakeClock()
+    config = GeneratorConfig(max_concurrent_open=99, type_cooldown_s=0.0, round_interval_s=300.0)
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"), _ambient("timeout")),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        config=config,
+        base_rate=_rate(14, 28),
+    )
+    rows = []
+    at = []
+    for _ in range(int(3600 / 5)):  # one simulated hour at the ticker's cadence
+        row = gen.generate(_quiet_state(), session_id=SESSION_ID)
+        if row is not None:
+            rows.append(row)
+            at.append(clock.t)
+        clock.advance(5.0)
+    assert len(rows) == 12, f"expected one ambient question per 5 minutes, got {len(rows)}"
+    assert all(r["state_context"]["calibration"]["n"] == 28 for r in rows)
+    # Exactly one round apart, measured on the injected clock — not "about".
+    assert [b - a for a, b in pairwise(at)] == [300.0] * 11
+
+
+def test_a_situational_question_pre_empts_the_round_and_resets_it() -> None:
+    """§3: "Situational questions [...] still fire on their own triggers and
+    count as that interval's question"."""
+    clock = FakeClock()
+    config = GeneratorConfig(max_concurrent_open=99, type_cooldown_s=0.0, round_interval_s=300.0)
+    gen = PredictionGenerator(
+        catalog=CATALOG,
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        config=config,
+        base_rate=_rate(14, 28),
+    )
+    # A fight is on: the situational template wins even though the round is open.
+    first = gen.generate(_triggering_state(), session_id=SESSION_ID)
+    assert first is not None
+    assert first["prediction_type"] == "survives_a_fight"
+
+    # ...and it counted as this round's question: nothing ambient for 300s.
+    clock.advance(299.0)
+    assert gen.generate(_quiet_state(), session_id=SESSION_ID) is None
+    clock.advance(1.0)
+    row = gen.generate(_quiet_state(), session_id=SESSION_ID)
+    assert row is not None
+    assert row["prediction_type"] in {"pulls_off_a_goal", "runs_out_of_time", "gets_into_trouble"}
+
+
+def test_the_round_can_be_switched_off_without_touching_the_catalog() -> None:
+    clock = FakeClock()
+    config = GeneratorConfig(max_concurrent_open=99, type_cooldown_s=0.0, ambient_enabled=False)
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"),),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        config=config,
+        base_rate=_rate(14, 28),
+    )
+    for _ in range(20):
+        assert gen.generate(_quiet_state(), session_id=SESSION_ID) is None
+        clock.advance(600.0)
+
+
+def test_among_ambient_candidates_the_closest_to_a_coin_flip_wins() -> None:
+    clock = FakeClock()
+    rates = {"completed": (14, 28), "timeout": (6, 28), "trouble": (8, 28)}
+
+    def base_rate(tpl):
+        yes, n = rates[tpl.prediction_type]
+        return Calibration(yes=yes, n=n, window_s=tpl.window.resolve_delay_s, history_s=10800.0)
+
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"), _ambient("timeout"), _ambient("trouble")),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        config=GeneratorConfig(max_concurrent_open=99, type_cooldown_s=0.0),
+        base_rate=base_rate,
+    )
+    row = gen.generate(_quiet_state(), session_id=SESSION_ID)
+    assert row is not None
+    assert row["prediction_type"] == "completed"  # 50%, against 21% and 29%
+
+
+def test_ambient_rounds_still_obey_the_no_repeat_rule() -> None:
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"), _ambient("timeout")),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        config=GeneratorConfig(max_concurrent_open=99, type_cooldown_s=0.0, round_interval_s=300.0),
+        base_rate=_rate(14, 28),
+    )
+    rows = []
+    for _ in range(6):
+        row = gen.generate(_quiet_state(), session_id=SESSION_ID)
+        if row is not None:
+            rows.append(row["prediction_type"])
+        clock.advance(300.0)
+    assert len(rows) == 6
+    assert not any(a == b for a, b in pairwise(rows)), rows
+
+
+def test_an_ambient_template_does_not_fire_outside_ordinary_free_roam() -> None:
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=[t for t in CATALOG if t.ambient],
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        base_rate=_rate(14, 28),
+    )
+    # Cops on him: that minute belongs to the situational templates.
+    assert gen.generate(make_state(wanted=2), session_id=SESSION_ID) is None
+    assert gen.generate(make_state(dead=True, health=0), session_id=SESSION_ID) is None
+    assert gen.generate(make_state(mission_active=True), session_id=SESSION_ID) is None
+    assert gen.generate(_quiet_state(), session_id=SESSION_ID) is not None
+
+
+def test_a_raising_estimator_does_not_take_the_tick_down() -> None:
+    def _boom(tpl):
+        raise RuntimeError("a real bug in the estimator")
+
+    clock = FakeClock()
+    gen = PredictionGenerator(
+        catalog=(_ambient("completed"),),
+        clock=clock,
+        wall_clock=lambda: 1_893_456_000.0,
+        base_rate=_boom,
+    )
+    assert gen.generate(_quiet_state(), session_id=SESSION_ID) is None
+
+
+def test_the_ambient_pick_is_deterministic_across_two_generators() -> None:
+    wall = lambda: 1_893_456_000.0  # noqa: E731
+    rates = {"completed": (14, 28), "timeout": (14, 28), "trouble": (14, 28)}
+
+    def base_rate(tpl):
+        yes, n = rates[tpl.prediction_type]
+        return Calibration(yes=yes, n=n, window_s=tpl.window.resolve_delay_s, history_s=10800.0)
+
+    def build():
+        return PredictionGenerator(
+            catalog=(_ambient("completed"), _ambient("timeout"), _ambient("trouble")),
+            clock=FakeClock(100.0),
+            wall_clock=wall,
+            base_rate=base_rate,
+        )
+
+    # Three templates measuring identically and none ever picked: the tiebreak
+    # has to be stable or the row differs run to run.
+    assert build().generate(_quiet_state(), SESSION_ID) == build().generate(
+        _quiet_state(), SESSION_ID
+    )

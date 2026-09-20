@@ -12,6 +12,7 @@ was and was not included and why.
 
 from __future__ import annotations
 
+from .baserate import Calibration, RollingBaseRate
 from .catalog import (
     CATALOG,
     TELEMETRY_RULE_KINDS,
@@ -27,6 +28,7 @@ from .writer import PredictionWriter
 __all__ = [
     "CATALOG",
     "TELEMETRY_RULE_KINDS",
+    "Calibration",
     "GeneratorConfig",
     "MeasuredRate",
     "PredictionGenerator",
@@ -34,5 +36,6 @@ __all__ = [
     "PredictionTicker",
     "PredictionWriter",
     "RecentEvent",
+    "RollingBaseRate",
     "Window",
 ]

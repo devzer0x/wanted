@@ -29,7 +29,7 @@ import time
 import uuid
 from collections import deque
 from collections.abc import Callable
-from datetime import UTC, datetime
+from datetime import UTC, datetime, timedelta
 from typing import Any
 
 from . import __version__
@@ -50,6 +50,7 @@ from .behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    ForegroundKeeper,
     GameRestartDetector,
     IdleBreaker,
     JackHandoffGate,
@@ -66,9 +67,14 @@ from .behavior.recovery import (
 )
 from .behavior.roam import (
     ARSENAL_TTL_S,
+    HouseEscape,
+    InteriorEscape,
+    RoamEngine,
+    as_activity,
+)
+from .behavior.roam import (
     PREEMPTED_OUTCOME as ROAM_PREEMPTED,
 )
-from .behavior.roam import HouseEscape, InteriorEscape, RoamEngine, as_activity
 from .behavior.vehicle import (
     ControlRegained,
     MovementToken,
@@ -155,12 +161,19 @@ from .predictions import (
     CATALOG as PREDICTION_CATALOG,
 )
 from .predictions import (
+    GeneratorConfig,
     PredictionGenerator,
     PredictionTicker,
     PredictionWriter,
     RecentEvent,
+    RollingBaseRate,
 )
-from .primitives import gamepad_status, session_diagnostics
+from .primitives import (
+    game_window_is_foreground,
+    gamepad_status,
+    in_remote_session,
+    session_diagnostics,
+)
 from .settings import ConfigError, Settings
 from .totals import LifetimeTotals
 
@@ -276,7 +289,24 @@ PREDICTION_RECENT_MAX = 64
 #: Consecutive failed prediction writes after which generation stops for the run.
 #: Low on purpose: the cost of stopping is "no predictions until restart", and the cost of
 #: continuing is an offline queue that grows on the game-loop thread until the agent stops playing.
+#:
+#: Two counters feed it, because there are two ways a prediction fails to land and only one of
+#: them used to be visible here. `_prediction_write_failures` counts raises out of
+#: `generate()`/`write()`; `SupabaseWriter.predictions_write_failures` counts flushes in which the
+#: `predictions` table itself REFUSED the row (missing table, failed CHECK, RLS). The second is
+#: the likely one on a fresh box, and it was invisible: `events.py` caught it, logged it like any
+#: other table's network blip, and retried it from the disk queue forever.
 PREDICTION_FAILURE_LIMIT = 5
+
+#: How much real telemetry the rolling base rate is warmed with at startup, and how far back it
+#: looks thereafter (CONTRACTS-PREDICTIONS §3's "recent telemetry"). Three hours at the 300 s
+#: round step is 36 sampled windows; the §3 gate needs 12, so a cold start is ~60 minutes of no
+#: always-available question — which is exactly what the warm start exists to avoid.
+PREDICTION_BASE_RATE_HISTORY_S = 3 * 3600.0
+#: Ceiling on the single warm-start read. The busiest real hour in either recording is ~100 events,
+#: so 3 h is a few hundred rows; this is a backstop against a pathological table, not a working
+#: limit, and it is the ONLY prediction read this process ever makes.
+PREDICTION_WARM_START_MAX_ROWS = 2000
 
 #: T4 (findings.md R4): the catalogued mission-name vocabulary MINUS anything
 #: that collides with a character name (`CHECKED_NAMES`) — computed once, not
@@ -985,6 +1015,10 @@ class Harness:
     predictions: PredictionGenerator | None = None
     prediction_writer: PredictionWriter | None = None
     prediction_ticker: PredictionTicker | None = None
+    #: The live re-measurement CONTRACTS-PREDICTIONS §3 requires before an
+    #: always-available question may be asked. `None` when the layer is off —
+    #: and with it `None`, the generator offers no ambient template at all.
+    prediction_base_rate: RollingBaseRate | None = None
     #: The events this process has emitted recently — the generator's
     #: `recent_events` input. `None` when the layer is off, so nothing is
     #: retained for a feature that is not running.
@@ -1146,6 +1180,7 @@ class Harness:
         self.api_backoff = ApiBackoff(rng=self.rng)
         self.death_recovery = DeathArrestRecovery()
         self.blocking_screen_watchdog = BlockingScreenWatchdog()
+        self.foreground_keeper = ForegroundKeeper()
 
         try:
             self.grabber: ScreenGrabber | None = ScreenGrabber()
@@ -1434,11 +1469,102 @@ class Harness:
             # from a broken one.
             log.info("predictions are switched off (WASTED_PREDICTIONS_ENABLED)")
             return
-        self.predictions = PredictionGenerator(PREDICTION_CATALOG)
+        self.prediction_base_rate = RollingBaseRate(
+            history_s=PREDICTION_BASE_RATE_HISTORY_S,
+            round_interval_s=settings.prediction_round_s,
+        )
+        self.predictions = PredictionGenerator(
+            PREDICTION_CATALOG,
+            config=GeneratorConfig(
+                max_concurrent_open=settings.prediction_max_open,
+                min_gap_s=settings.prediction_min_gap_s,
+                round_interval_s=settings.prediction_round_s,
+                ambient_enabled=settings.prediction_ambient,
+                base_reward_pool=settings.prediction_base_pool,
+            ),
+            base_rate=self.prediction_base_rate.measure,
+        )
         self.prediction_writer = PredictionWriter(self.writer)
         self.prediction_ticker = PredictionTicker(self.writer)
         self._prediction_write_failures = 0
+        self._prediction_breaker_announced = False
         self._recent_events = _RecentEvents(PREDICTION_RECENT_MAX, PREDICTION_RECENT_WINDOW_S)
+        log.info(
+            "predictions are on",
+            extra={
+                "kv": {
+                    "round_s": settings.prediction_round_s,
+                    "ambient": settings.prediction_ambient,
+                    "min_gap_s": settings.prediction_min_gap_s,
+                    "max_open": settings.prediction_max_open,
+                    "base_pool": settings.prediction_base_pool,
+                }
+            },
+        )
+        self._warm_start_base_rate()
+
+    def _warm_start_base_rate(self) -> None:
+        """Seed the rolling base rate from real `events` rows already in Supabase.
+
+        Without it, a restart means ~60 minutes before ANY always-available
+        question can be asked: §3 needs 12 sampled windows at 300 s each, and a
+        cold estimator has to live through them. The show restarts more often
+        than that (every deploy, every crash, every watchdog bounce), so a cold
+        start is the normal case, not the edge one.
+
+        Deliberately ANY session, not this one. This run's `session_id` was
+        generated seconds ago and has no rows behind it; what is being measured
+        is the agent's recent behaviour, which does not restart when the
+        process does. (Settlement's completeness gate is the thing that must
+        stay scoped by session — §3 says so explicitly — and this is not that:
+        nothing here settles anything.)
+
+        Best effort and non-fatal in every direction: one bounded read, a
+        single log line either way, and a cold start if it fails. It runs at
+        wiring time, before the loop exists, so there is nothing for it to
+        block; the only bound on how long it may take is the Supabase client's
+        own timeout.
+        """
+        estimator = self.prediction_base_rate
+        if estimator is None or not self.writer.configured:
+            return
+        since = datetime.now(UTC) - timedelta(seconds=PREDICTION_BASE_RATE_HISTORY_S)
+        try:
+            resp = (
+                self.writer._get_client()
+                .table("events")
+                .select("ts,type,payload")
+                .gte("ts", since.isoformat())
+                .order("ts", desc=False)
+                .limit(PREDICTION_WARM_START_MAX_ROWS)
+                .execute()
+            )
+            rows = resp.data or []
+        except Exception as exc:  # broad by design: a cold start is survivable
+            log.warning(
+                "prediction base rate could not be warm started; starting cold "
+                "(no always-available question for about an hour)",
+                extra={"kv": {"error": f"{type(exc).__name__}: {exc}"[:200]}},
+            )
+            return
+        loaded = 0
+        for row in rows:
+            try:
+                ts = datetime.fromisoformat(str(row["ts"])).timestamp()
+            except (KeyError, TypeError, ValueError):
+                continue  # a row we cannot place in time tells us nothing
+            estimator.observe(ts, str(row.get("type")), row.get("payload") or {})
+            loaded += 1
+        log.info(
+            "prediction base rate warm started",
+            extra={
+                "kv": {
+                    "rows": loaded,
+                    "history_s": PREDICTION_BASE_RATE_HISTORY_S,
+                    "observed_span_s": round(estimator.observed_span_s, 1),
+                }
+            },
+        )
 
     def _note_recent_event(self, type_: str, payload: dict[str, Any]) -> None:
         """`_ObservedWriter`'s callback: every §4 event this process emits,
@@ -1447,6 +1573,19 @@ class Harness:
         if recent is None:
             return
         recent.note(type_, payload)
+        estimator = self.prediction_base_rate
+        if estimator is not None:
+            # The SAME choke point, deliberately: `_ObservedWriter` overrides
+            # both `record_event` and `insert_event_now` and calls this from
+            # each, so every §4 event this process records — from any thread,
+            # from any of the ~17 emit sites — reaches the estimator without
+            # anyone having to remember to feed it.
+            #
+            # The timestamp is read here rather than passed through from the
+            # row `record_event` built a microsecond earlier. Both are "when
+            # the harness recorded it", and the difference is far below the
+            # 300 s grid this is sampled on.
+            estimator.observe(time.time(), type_, payload)
 
     def _recent_event_window(self) -> list[RecentEvent]:
         """The last `PREDICTION_RECENT_WINDOW_S` of §4 events, oldest first."""
@@ -4477,6 +4616,28 @@ class Harness:
 
     # -- housekeeping ----------------------------------------------------------
 
+    def _keep_game_foreground(self) -> None:
+        """The opposite blind spot to `BlockingScreenWatchdog`: an UNFOCUSED game
+        keeps ticking, so nothing in `/state` says anything is wrong, while the
+        broadcast holds one frame and every key lands in some other window.
+
+        Never raises: this runs on every iteration, and a focus request that
+        throws must not be what ends the show.
+        """
+        if self.primitives is None:
+            return
+        try:
+            diag = session_diagnostics()
+            # Console session AND not driven over RDP: an operator's focus is theirs.
+            on_console = diag["in_console_session"] is True and in_remote_session() is False
+            if self.foreground_keeper.feed(
+                game_window_is_foreground(), on_console, holder=diag["foreground_window"]
+            ):
+                self.primitives.focus_game_window()
+        except Exception as exc:
+            log.warning("could not keep the game window foreground", extra={"kv": {"error": str(exc)[:160]}})
+
+
     def _believe_state(self, state: GameState | None) -> bool:
         """Is THIS tick's snapshot one we are willing to publish as current?
 
@@ -4622,6 +4783,24 @@ class Harness:
 
     #: Reset on every successful write; see PREDICTION_FAILURE_LIMIT.
     _prediction_write_failures: int = 0
+    #: The breaker says so once, not every tick.
+    _prediction_breaker_announced: bool = False
+
+    def _prediction_failures(self) -> int:
+        """Both ways a prediction fails to land, added up.
+
+        `_prediction_write_failures` is raises out of `generate()`/`write()` —
+        the path that was already counted. The writer's own counter is the one
+        that matters on a real box: a `predictions` insert REFUSED by Postgres
+        (table absent, CHECK failed, RLS) is caught inside `events.py`'s flush,
+        requeued to disk and retried on every flush forever, so nothing ever
+        raised here and the breaker below could not see the failure it exists
+        for. `getattr` because the loop tests build a `Harness` with
+        `object.__new__` and hand it only the collaborators a tick touches.
+        """
+        return self._prediction_write_failures + int(
+            getattr(self.writer, "predictions_write_failures", 0)
+        )
 
     def _offer_prediction(self, state: GameState) -> None:
         """Offer this tick's real `/state` and recent events to the generator,
@@ -4667,7 +4846,24 @@ class Harness:
         # The agent stops playing", which is the one failure mode the show
         # cannot absorb. So stop generating once writes have stopped landing,
         # and say so once rather than every tick.
-        if self._prediction_write_failures >= PREDICTION_FAILURE_LIMIT:
+        failures = self._prediction_failures()
+        if failures >= PREDICTION_FAILURE_LIMIT:
+            if not self._prediction_breaker_announced:
+                self._prediction_breaker_announced = True
+                log.warning(
+                    "prediction writes keep failing; generation is now OFF for this run "
+                    "so the backlog stops growing on the loop thread. Set "
+                    "WASTED_PREDICTIONS_ENABLED=false, or apply the prediction migrations, "
+                    "then restart.",
+                    extra={
+                        "kv": {
+                            "failures": failures,
+                            "server_message": getattr(
+                                self.writer, "last_predictions_error", None
+                            ),
+                        }
+                    },
+                )
             return
         # CONTRACTS-PREDICTIONS §2: "a prediction always belongs to a real
         # session". That is the session every other row this process writes is
@@ -4684,24 +4880,15 @@ class Harness:
             writer.write(row)
         except Exception as exc:
             self._prediction_write_failures += 1
-            if self._prediction_write_failures == PREDICTION_FAILURE_LIMIT:
-                log.warning(
-                    "prediction writes keep failing; generation is now OFF for this run "
-                    "so the backlog stops growing on the loop thread. Set "
-                    "WASTED_PREDICTIONS_ENABLED=false, or apply the prediction migrations, "
-                    "then restart.",
-                    extra={"kv": {"failures": self._prediction_write_failures}},
-                )
-            else:
-                log.warning(
-                    "prediction generation failed; the show carries on without it",
-                    extra={
-                        "kv": {
-                            "error": f"{type(exc).__name__}: {exc}"[:200],
-                            "consecutive_failures": self._prediction_write_failures,
-                        }
-                    },
-                )
+            log.warning(
+                "prediction generation failed; the show carries on without it",
+                extra={
+                    "kv": {
+                        "error": f"{type(exc).__name__}: {exc}"[:200],
+                        "consecutive_failures": self._prediction_failures(),
+                    }
+                },
+            )
             return
         else:
             self._prediction_write_failures = 0
@@ -4790,6 +4977,10 @@ class Harness:
                 # cadence on EVERY iteration, including the ones below that
                 # `continue` before a tick ever happens. See the method.
                 self._tick_prediction_lifecycle()
+                # Also ahead of the poll, for the same reason: it reads nothing
+                # from `state`, and a game loading behind the terminal that
+                # launched it answers `not_ready` for minutes.
+                self._keep_game_foreground()
                 try:
                     state = self.bridge.get_state()
                 except BridgeDownError as exc:

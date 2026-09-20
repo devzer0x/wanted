@@ -20,6 +20,11 @@ from wasted_harness.behavior.recovery import (
     DAMAGE_ATTACK_HP,
     DAMAGE_WINDOW_S,
     DEAD_STUCK_TIMEOUT_S,
+    FOREGROUND_FAST_ATTEMPTS,
+    FOREGROUND_FLAP_WINDOW_S,
+    FOREGROUND_GRACE_S,
+    FOREGROUND_RETRY_GAP_S,
+    FOREGROUND_SLOW_GAP_S,
     HOSTILE_CLOSE_RADIUS_M,
     JACK_HANDOFF_GRACE_S,
     MAX_STALL_RECOVERY_ATTEMPTS,
@@ -37,6 +42,7 @@ from wasted_harness.behavior.recovery import (
     BridgeStallTracker,
     DamageTracker,
     DeathArrestRecovery,
+    ForegroundKeeper,
     GameRestartDetector,
     IdleBreaker,
     JackHandoffGate,
@@ -2308,3 +2314,129 @@ def test_threat_action_runs_from_the_police_when_shot_at_with_nothing_loaded() -
         "type": "fight_ped",
         "params": {"handle": 9012, "weapon": "armed"},
     }
+
+
+# --- ForegroundKeeper: the game ticks while unfocused, so nothing else notices ----
+#
+# Measured on the box: after the RDP session was handed to the console the bridge
+# kept reporting tick_hz ~130 while the broadcast sat on one frame for hours. An
+# unfocused game keeps simulating but stops presenting, and SendInput lands in
+# whatever window does hold the foreground.
+
+
+def test_foreground_keeper_is_silent_while_the_game_has_the_foreground() -> None:
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    for _ in range(50):
+        assert keeper.feed(game_foreground=True, in_console_session=True) is False
+        clock.t += 1.0
+
+
+def test_foreground_keeper_waits_out_the_grace_then_asks_once_per_retry_gap() -> None:
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    assert keeper.feed(game_foreground=False, in_console_session=True) is False
+    clock.t += FOREGROUND_GRACE_S - 0.1
+    assert keeper.feed(game_foreground=False, in_console_session=True) is False
+    clock.t += 0.2
+    assert keeper.feed(game_foreground=False, in_console_session=True) is True
+    # Asked; the next polls inside the retry gap must not ask again.
+    clock.t += FOREGROUND_RETRY_GAP_S - 0.5
+    assert keeper.feed(game_foreground=False, in_console_session=True) is False
+    clock.t += 1.0
+    assert keeper.feed(game_foreground=False, in_console_session=True) is True
+
+
+@pytest.mark.parametrize("in_console", [False, None])
+def test_foreground_keeper_never_acts_outside_the_console_session(in_console: bool | None) -> None:
+    """False is an operator sitting in an RDP session (their focus is theirs) or a
+    parked session (there is no input desktop to focus into); None is "could not
+    tell". None of them may take the foreground."""
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    for _ in range(30):
+        assert keeper.feed(game_foreground=False, in_console_session=in_console) is False
+        clock.t += 5.0
+
+
+def test_foreground_keeper_needs_a_fresh_grace_after_the_session_returns_to_console() -> None:
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    keeper.feed(game_foreground=False, in_console_session=True)
+    clock.t += FOREGROUND_GRACE_S + 1.0
+    # The operator connects over RDP before the keeper acted: stand down entirely.
+    assert keeper.feed(game_foreground=False, in_console_session=False) is False
+    clock.t += 600.0
+    # Back on the console (tscon). The display is still settling: grace again.
+    assert keeper.feed(game_foreground=False, in_console_session=True) is False
+    clock.t += FOREGROUND_GRACE_S + 0.1
+    assert keeper.feed(game_foreground=False, in_console_session=True) is True
+
+
+def test_foreground_keeper_does_nothing_when_there_is_no_game_window() -> None:
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    for _ in range(30):
+        assert keeper.feed(game_foreground=None, in_console_session=True) is False
+        clock.t += 5.0
+
+
+def test_foreground_keeper_resets_when_the_game_gets_the_foreground_back() -> None:
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    keeper.feed(game_foreground=False, in_console_session=True)
+    clock.t += FOREGROUND_GRACE_S + 0.1
+    assert keeper.feed(game_foreground=False, in_console_session=True) is True
+    clock.t += 1.0
+    assert keeper.feed(game_foreground=True, in_console_session=True) is False
+    # Held for the whole flap window: the episode is over and the count is gone.
+    clock.t += FOREGROUND_FLAP_WINDOW_S + 0.1
+    assert keeper.feed(game_foreground=True, in_console_session=True) is False
+    assert keeper.attempts == 0
+    # A new loss is a new episode: grace first, not an instant grab.
+    clock.t += 30.0
+    assert keeper.feed(game_foreground=False, in_console_session=True) is False
+    clock.t += FOREGROUND_GRACE_S + 0.1
+    assert keeper.feed(game_foreground=False, in_console_session=True) is True
+
+
+def test_foreground_keeper_slows_down_but_never_gives_up() -> None:
+    """A refused focus request is cheap and harmless, and nobody is at the box to
+    notice a give-up, so it keeps trying — just not every ten seconds forever."""
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    keeper.feed(game_foreground=False, in_console_session=True)
+    clock.t += FOREGROUND_GRACE_S + 0.1
+    asked = 0
+    for _ in range(FOREGROUND_FAST_ATTEMPTS):
+        assert keeper.feed(game_foreground=False, in_console_session=True) is True
+        asked += 1
+        clock.t += FOREGROUND_RETRY_GAP_S + 0.1
+    # Past the fast attempts the short gap is no longer enough...
+    assert keeper.feed(game_foreground=False, in_console_session=True) is False
+    # ...but the slow one is, indefinitely.
+    for _ in range(5):
+        clock.t += FOREGROUND_SLOW_GAP_S
+        assert keeper.feed(game_foreground=False, in_console_session=True) is True
+        asked += 1
+    assert keeper.attempts == asked
+
+
+def test_foreground_keeper_does_not_restart_the_fast_cadence_in_a_focus_war() -> None:
+    """Something that takes the foreground straight back (a launcher popup, a crash
+    dialog) must not get a fresh fast cadence on every regain: that is a game window
+    visibly flipping in and out on the broadcast, hundreds of times an hour."""
+    clock = FakeClock()
+    keeper = ForegroundKeeper(clock=clock)
+    asked = 0
+    for _ in range(40):  # ~200 s of: lose it, win it back, lose it again 4 s later
+        for _ in range(8):
+            if keeper.feed(game_foreground=False, in_console_session=True):
+                asked += 1
+                break
+            clock.t += 0.5
+        clock.t += 0.5
+        keeper.feed(game_foreground=True, in_console_session=True)
+        clock.t += 0.5
+    # The fast attempts, then the slow cadence: a handful, not dozens.
+    assert FOREGROUND_FAST_ATTEMPTS <= asked <= FOREGROUND_FAST_ATTEMPTS + 4

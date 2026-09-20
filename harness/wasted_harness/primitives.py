@@ -154,6 +154,18 @@ def _u32() -> Any:
         _user32.ShowWindow.restype = ctypes.c_int
         _user32.SetForegroundWindow.argtypes = (ctypes.c_void_p,)
         _user32.SetForegroundWindow.restype = ctypes.c_int
+        # The rest of the focus sequence (`focus_game_window`). Thread ids are
+        # DWORDs; GetWindowThreadProcessId's LPDWORD is optional and passed NULL.
+        _user32.BringWindowToTop.argtypes = (ctypes.c_void_p,)
+        _user32.BringWindowToTop.restype = ctypes.c_int
+        _user32.GetWindowThreadProcessId.argtypes = (ctypes.c_void_p, ctypes.POINTER(ctypes.c_uint32))
+        _user32.GetWindowThreadProcessId.restype = ctypes.c_uint32
+        _user32.AttachThreadInput.argtypes = (ctypes.c_uint32, ctypes.c_uint32, ctypes.c_int)
+        _user32.AttachThreadInput.restype = ctypes.c_int
+        _user32.IsIconic.argtypes = (ctypes.c_void_p,)
+        _user32.IsIconic.restype = ctypes.c_int
+        _user32.GetSystemMetrics.argtypes = (ctypes.c_int,)
+        _user32.GetSystemMetrics.restype = ctypes.c_int
     return _user32
 
 
@@ -222,8 +234,9 @@ def foreground_window_title() -> str:
 #: `focus_game_window` logs loudly rather than guessing at a different HWND.
 GAME_WINDOW_TITLES: tuple[str, ...] = ("Grand Theft Auto V",)
 
-#: ShowWindow's SW_RESTORE — un-minimizes without changing maximized state,
-#: unlike SW_SHOW which can leave a previously-maximized window resized.
+#: ShowWindow's SW_RESTORE. It restores a MAXIMIZED window too, which would
+#: resize a borderless-maximized game mid-show, so it is only ever sent to a
+#: window `IsIconic` says is minimized.
 _SW_RESTORE = 9
 
 
@@ -236,6 +249,51 @@ def _find_game_window() -> int:
         if hwnd:
             return int(hwnd)
     return 0
+
+
+def _same_window(a: int, b: int) -> bool:
+    """HWND equality that survives ctypes' mixed widths. `GetForegroundWindow`
+    comes back through the default 32-bit signed restype while `FindWindowW` is
+    declared `c_void_p`; Windows guarantees only the low 32 bits of a handle are
+    significant, so that is what is compared."""
+    return bool(a) and bool(b) and (a & 0xFFFFFFFF) == (b & 0xFFFFFFFF)
+
+
+def game_window_is_foreground() -> bool | None:
+    """Whether the game window is the foreground window; `None` when there is
+    no game window to ask about, off Windows, or on any failure. Never raises.
+
+    `behavior.recovery.ForegroundKeeper` polls this every tick: an unfocused
+    game keeps ticking, so nothing in `/state` or `/health` says it has stopped
+    presenting frames and stopped receiving input.
+    """
+    if sys.platform != "win32":
+        return None
+    try:
+        hwnd = _find_game_window()
+        if not hwnd:
+            return None
+        return _same_window(int(_u32().GetForegroundWindow() or 0), hwnd)
+    except Exception:  # a probe must never take the loop down
+        return None
+
+
+#: GetSystemMetrics index: nonzero when the calling process belongs to a
+#: Terminal Services client session, i.e. an operator is on RDP in THIS session.
+_SM_REMOTESESSION = 0x1000
+
+
+def in_remote_session() -> bool | None:
+    """True while this process's session is being driven over RDP; `None` off
+    Windows or on failure. Never raises. The belt to `in_console_session`'s
+    braces: `ForegroundKeeper` must never pull the foreground out from under an
+    operator's hands."""
+    if sys.platform != "win32":
+        return None
+    try:
+        return bool(_u32().GetSystemMetrics(_SM_REMOTESESSION))
+    except Exception:  # a probe must never take the loop down
+        return None
 
 
 def session_diagnostics() -> dict[str, Any]:
@@ -341,10 +399,12 @@ class Primitives:
         at the exact moment a blocking-screen recovery keypress needed to
         reach the game — nothing else in this harness ever changes window
         focus, so a keypress with no window focused would land nowhere.
-        Restores first (`SW_RESTORE`, in case the game window was
-        minimized) then calls `SetForegroundWindow`, and verifies the result
-        via `foreground_window_title()` rather than trusting the return
-        code — Windows can refuse a foreground-focus request outright
+        Returns at once if the game already has the foreground. Otherwise
+        un-minimizes if needed, shares input state with the current
+        foreground thread (`AttachThreadInput`) for the duration of
+        `BringWindowToTop` + `SetForegroundWindow`, and verifies by comparing
+        `GetForegroundWindow()` with the game's HWND rather than trusting the
+        return code — Windows can refuse a foreground-focus request outright
         (foreground-lock-timeout rules) with no error the caller sees.
         Returns whether the game window is confirmed foreground afterward;
         `press_key` presses the key either way (a wrong-window press is
@@ -361,10 +421,38 @@ class Primitives:
                 extra={"kv": {"titles": GAME_WINDOW_TITLES}},
             )
             return False
-        u32.ShowWindow(hwnd, _SW_RESTORE)
-        u32.SetForegroundWindow(hwnd)
+        if _same_window(int(u32.GetForegroundWindow() or 0), hwnd):
+            # Already ours. Returning here matters beyond the saved 250 ms: the
+            # attach below would otherwise tie this thread's input queue to the
+            # GAME's own UI thread, on the blocking-screen path where that thread
+            # may be wedged. scripts/window-focus.ps1 short-circuits the same way.
+            return True
+        if u32.IsIconic(hwnd):
+            u32.ShowWindow(hwnd, _SW_RESTORE)
+        # A bare SetForegroundWindow is refused whenever another process holds
+        # the foreground — which after `go-live.ps1` is the terminal it ran in.
+        # Same sequence as scripts/window-focus.ps1, for the same reason: share
+        # input state with the current foreground thread for the duration of
+        # the call. No ALT tap — here a synthetic ALT is a real key into the game.
+        k32 = ctypes.WinDLL("kernel32", use_last_error=True)  # type: ignore[attr-defined]
+        k32.GetCurrentThreadId.restype = ctypes.c_uint32
+        my_tid = int(k32.GetCurrentThreadId())
+        fg_hwnd = int(u32.GetForegroundWindow() or 0)
+        fg_tid = int(u32.GetWindowThreadProcessId(fg_hwnd, None)) if fg_hwnd else 0
+        attached = bool(
+            fg_tid and fg_tid != my_tid and u32.AttachThreadInput(my_tid, fg_tid, 1)
+        )
+        try:
+            u32.BringWindowToTop(hwnd)
+            u32.SetForegroundWindow(hwnd)
+        finally:
+            if attached:
+                u32.AttachThreadInput(my_tid, fg_tid, 0)
+        time.sleep(0.25)  # the switch is not synchronous; verifying at once reads the old window
+        # By HWND, never by title: any other window with the game's name in its
+        # title would read as success.
+        focused = _same_window(int(u32.GetForegroundWindow() or 0), hwnd)
         title = foreground_window_title()
-        focused = any(t in title for t in GAME_WINDOW_TITLES)
         if not focused:
             log.warning(
                 "SetForegroundWindow did not appear to focus the game window",

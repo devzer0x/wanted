@@ -32,3 +32,22 @@ Used by the prediction catalogue's calibration tests, which re-derive their base
 file on every run rather than trusting a number written in a comment, and by
 `infra/verify-predictions.sh`, which replays it into a real Postgres to prove settlement reaches the
 outcomes that actually happened.
+
+### `real_session_2026-09-20.json`
+
+230 `public.events` rows from session `77650284-d0c3-4c72-9af2-b51a08ef738e`, pulled unmodified
+from the production Supabase project with the read-only publishable key while the session was
+still live, ordered by `ts` ascending. Spans `2026-09-20T20:17:50Z` to `2026-09-20T22:36:57Z`:
+2 h 19 m of ordinary free roam — 113 `activity_start`, 112 `activity_end`, 4 breaks, and the
+session's own `session_start`. No `session_end`, because it had not ended.
+
+It exists because the 2026-09-04 recording predates the free-roam rework: goals completed 7 % of
+the time there and 30 % here, so a base rate measured on that file alone describes an agent that
+no longer plays that way. "Pulls off a goal within three minutes" is 8 % on one and 50 % on the
+other, which is the whole argument for re-measuring an always-available question's odds on every
+ask (CONTRACTS-PREDICTIONS §3, "Cadence and entry windows").
+
+Its `_provenance.absent_types_and_why` is longer than the other file's, and that is the point of
+reading it: no `wanted_change`, `death` or `busted` occurred, so this recording cannot exercise
+any wanted, survival or death rule — and every situational template in the catalogue was
+unofferable for its entire length.

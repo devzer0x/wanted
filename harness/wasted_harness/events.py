@@ -88,6 +88,28 @@ EMITTED_EVENT_TYPES: frozenset[str] = EVENT_TYPES - UNPRODUCED_EVENT_TYPES
 
 MAX_BATCH = 20
 
+#: The one table whose write failures the caller has to be able to SEE.
+#:
+#: Every other table here fails the same way and it is survivable: the row goes
+#: to the offline queue, the queue drains when Supabase comes back, and nobody
+#: was waiting on it. A `predictions` row is different in two ways. It is
+#: REJECTED rather than merely undeliverable when the prediction migrations are
+#: not applied to that project, or a CHECK fails, or RLS refuses the write —
+#: and a rejection never heals, so the row is retried from the disk queue on
+#: every flush, forever, on the game-loop thread. And the layer that produced
+#: it has a circuit breaker (`main.PREDICTION_FAILURE_LIMIT`) that existed but
+#: could never fire, because `flush()` catches the failure here and reports
+#: `False` for reasons that have nothing to do with predictions.
+#:
+#: So this writer counts CONSECUTIVE flushes in which a `predictions` run
+#: failed, says the table's name and the server's own message out loud (rate
+#: limited), and lets the breaker read the count.
+PREDICTIONS_TABLE = "predictions"
+#: At most one ERROR per this many seconds. A rejected insert is retried on
+#: every flush (2 s), so an unlimited log would be ~1,800 identical lines an
+#: hour in the file the 3am operator has to read.
+PREDICTIONS_ERROR_LOG_INTERVAL_S = 60.0
+
 # A Supabase outage must not fill the server's disk. At ~1 KB/row this caps the
 # backlog around 40 MB; past it the OLDEST rows are dropped (loudly) so the most
 # recent hours of the show survive.
@@ -172,6 +194,15 @@ class SupabaseWriter:
         #: it implies. Starts False: nothing has failed yet, and the first flush
         #: sets it honestly either way.
         self.unflushed = False
+        #: Consecutive flushes in which a `predictions` run failed. Reset to 0
+        #: by any flush that actually lands one. Read by
+        #: `main.Harness._offer_prediction`'s circuit breaker — see
+        #: PREDICTIONS_TABLE above for why that could not work without this.
+        self.predictions_write_failures = 0
+        #: The server's own words for the last predictions rejection, for the
+        #: operator and for the breaker's log line. Never parsed.
+        self.last_predictions_error: str | None = None
+        self._last_predictions_error_log_at = float("-inf")
         # The clip pipeline writes from a worker thread; the loop writes from
         # the main thread. Guards the buffer swap, not the network call.
         self._buffer_lock = threading.Lock()
@@ -399,6 +430,8 @@ class SupabaseWriter:
 
         remaining: list[dict[str, Any]] = []
         ok = True
+        predictions_failed = False
+        predictions_written = 0
         # `stats` carries `heartbeat_at`, which settlement reads as "the writer has
         # caught up past this moment". Each (table, op) run is a SEPARATE request, so
         # a failed `events` run followed by a successful `stats` run in the same flush
@@ -467,10 +500,28 @@ class SupabaseWriter:
                 self._log_write_failure(f"{table} {op}", exc)
                 remaining.extend(entry for entry, _row in pairs[written:])
                 ok = False
+                if table == PREDICTIONS_TABLE:
+                    predictions_failed = True
+                    self._note_predictions_failure(exc)
             except Exception as exc:  # unexpected — still never kill the loop
                 self._log_write_failure(f"{table} {op} (unexpected)", exc)
                 remaining.extend(entry for entry, _row in pairs[written:])
                 ok = False
+                if table == PREDICTIONS_TABLE:
+                    predictions_failed = True
+                    self._note_predictions_failure(exc)
+            else:
+                if table == PREDICTIONS_TABLE:
+                    predictions_written += written
+        # Consecutive, not cumulative: one flush that lands a prediction row
+        # clears the count, because whatever was rejecting them has stopped.
+        # A flush carrying no predictions at all changes nothing either way —
+        # the agent being quiet is not evidence about the table.
+        if predictions_failed:
+            self.predictions_write_failures += 1
+        elif predictions_written:
+            self.predictions_write_failures = 0
+            self.last_predictions_error = None
         return ok, remaining
 
     # -- reads -----------------------------------------------------------------
@@ -658,6 +709,35 @@ class SupabaseWriter:
         )
 
     # -- misc ------------------------------------------------------------------
+
+    def _note_predictions_failure(self, exc: Exception) -> None:
+        """Say, at ERROR, that the PREDICTIONS table refused a row, and why.
+
+        `_log_write_failure` already logged it at WARNING alongside every other
+        table's transient trouble, which is exactly the problem: a missing
+        column, a failed CHECK or an RLS refusal is not transient, and it
+        reads identically to a five-second network blip in the log. This line
+        names the table and carries the server's own message, so the operator
+        is told which of the two they have.
+        """
+        detail = getattr(exc, "message", None) or str(exc)
+        self.last_predictions_error = f"{type(exc).__name__}: {detail}"[:300]
+        now = time.monotonic()
+        if now - self._last_predictions_error_log_at < PREDICTIONS_ERROR_LOG_INTERVAL_S:
+            return
+        self._last_predictions_error_log_at = now
+        log.error(
+            "supabase REFUSED a predictions row; it will be retried from the offline "
+            "queue until this is fixed",
+            extra={
+                "kv": {
+                    "table": PREDICTIONS_TABLE,
+                    "server_message": self.last_predictions_error,
+                    "consecutive_failed_flushes": self.predictions_write_failures + 1,
+                    "queue": str(self.queue_path),
+                }
+            },
+        )
 
     @staticmethod
     def _log_write_failure(what: str, exc: Exception) -> None:

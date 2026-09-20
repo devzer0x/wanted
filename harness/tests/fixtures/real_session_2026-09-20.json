@@ -1,0 +1,3058 @@
+{
+ "_provenance": {
+  "note": "A RECORDING OF A REAL SESSION, pulled unmodified from the production Supabase project via the read-only publishable key. Not hand-written. CLAUDE.md rule 1 permits fixtures only on these terms.",
+  "session_id": "77650284-d0c3-4c72-9af2-b51a08ef738e",
+  "captured_at": "2026-09-20T22:41:47.211193+00:00",
+  "source": "public.events, ordered by ts ascending, every row the session had at capture time, paginated. The session was STILL LIVE at capture, so there is no session_end.",
+  "span": [
+   "2026-09-20T20:17:50.537927+00:00",
+   "2026-09-20T22:36:57.476325+00:00"
+  ],
+  "counts": {
+   "activity_end": 112,
+   "activity_start": 113,
+   "break": 4,
+   "session_start": 1
+  },
+  "why_it_exists": "The 2026-09-04 recording predates the free-roam rework: goals completed 7% of the time there and 30% here, so any base rate measured on that file alone describes an agent that no longer exists. Calibration that has to hold for the agent as he plays now is measured against this one too.",
+  "absent_types_and_why": {
+   "wanted_change/death/busted": "none occurred: just over two hours of peaceful free roam. This recording therefore cannot exercise any wanted, survival or death rule.",
+   "mission_start/mission_end/mission_fail": "missions remain switched OFF by operator decision (docs/STATUS.md 2026-09-03).",
+   "bridge_down/bridge_up": "no bridge outage occurred.",
+   "session_end": "the session was still running when this was captured.",
+   "stunt": "never produced by the harness; see UNPRODUCED_EVENT_REASONS in events.py."
+  }
+ },
+ "events": [
+  {
+   "id": 7174,
+   "ts": "2026-09-20T20:17:50.537927+00:00",
+   "type": "session_start",
+   "payload": {
+    "game_edition": "legacy",
+    "harness_version": "0.2.0"
+   }
+  },
+  {
+   "id": 7175,
+   "ts": "2026-09-20T20:18:23.920027+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "that's a nice car",
+    "params": {
+     "prefer": "nicer",
+     "search_radius_m": 30.0
+    },
+    "activity": "steal_nice_car"
+   }
+  },
+  {
+   "id": 7176,
+   "ts": "2026-09-20T20:18:33.131925+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "that's a nice car",
+    "goal_id": "steal_nice_car",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "steal_nice_car",
+    "category": "acquisition",
+    "verified": false,
+    "duration_s": 9.2
+   }
+  },
+  {
+   "id": 7177,
+   "ts": "2026-09-20T20:18:40.021798+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "up only",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 50.0
+    },
+    "activity": "up_only"
+   }
+  },
+  {
+   "id": 7178,
+   "ts": "2026-09-20T20:18:40.023834+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "up only",
+    "goal_id": "up_only",
+    "outcome": "bridge_task_lost",
+    "activity": "up_only",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7179,
+   "ts": "2026-09-20T20:18:44.098669+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 50.0
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7180,
+   "ts": "2026-09-20T20:18:44.100178+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7181,
+   "ts": "2026-09-20T20:18:46.495336+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "the ground is boring",
+    "params": {
+     "x": -724.0,
+     "y": -1444.0
+    },
+    "activity": "go_flying"
+   }
+  },
+  {
+   "id": 7182,
+   "ts": "2026-09-20T20:18:46.83526+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "the ground is boring",
+    "goal_id": "go_flying",
+    "outcome": "bridge_task_lost",
+    "activity": "go_flying",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 0.3
+   }
+  },
+  {
+   "id": 7183,
+   "ts": "2026-09-20T20:18:57.322338+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "public transport",
+    "params": {
+     "x": -533.0067,
+     "y": 12.684063,
+     "z": 44.2794228,
+     "run": true
+    },
+    "activity": "hijack_bus"
+   }
+  },
+  {
+   "id": 7184,
+   "ts": "2026-09-20T20:20:07.072146+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "road_dodge",
+    "why": "public transport",
+    "goal_id": "hijack_bus",
+    "outcome": "preempted",
+    "activity": "hijack_bus",
+    "category": "acquisition",
+    "verified": false,
+    "duration_s": 69.8
+   }
+  },
+  {
+   "id": 7185,
+   "ts": "2026-09-20T20:20:07.412303+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "he looks like he has opinions",
+    "params": {
+     "handle": 329287,
+     "weapon": "unarmed"
+    },
+    "activity": "pick_a_fight"
+   }
+  },
+  {
+   "id": 7186,
+   "ts": "2026-09-20T20:20:15.54996+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "he looks like he has opinions",
+    "goal_id": "pick_a_fight",
+    "outcome": "completed",
+    "activity": "pick_a_fight",
+    "category": "trouble",
+    "verified": true,
+    "duration_s": 8.1
+   }
+  },
+  {
+   "id": 7187,
+   "ts": "2026-09-20T20:20:50.761158+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 40.0
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7188,
+   "ts": "2026-09-20T20:23:14.883566+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "preempted",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 144.1
+   }
+  },
+  {
+   "id": 7189,
+   "ts": "2026-09-20T20:23:26.897506+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "it has been quiet",
+    "params": {
+     "handle": 544329,
+     "duration_s": 8.0
+    },
+    "activity": "earn_two_stars"
+   }
+  },
+  {
+   "id": 7190,
+   "ts": "2026-09-20T20:26:28.816719+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "it has been quiet",
+    "goal_id": "earn_two_stars",
+    "outcome": "timeout",
+    "activity": "earn_two_stars",
+    "category": "trouble",
+    "verified": false,
+    "duration_s": 181.9
+   }
+  },
+  {
+   "id": 7191,
+   "ts": "2026-09-20T20:26:31.548907+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7192,
+   "ts": "2026-09-20T20:27:44.100144+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 72.5
+   }
+  },
+  {
+   "id": 7193,
+   "ts": "2026-09-20T20:27:58.206472+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "that's a nice car",
+    "params": {
+     "x": -1416.19727,
+     "y": 468.623474,
+     "z": 108.674423,
+     "run": true
+    },
+    "activity": "steal_nice_car"
+   }
+  },
+  {
+   "id": 7194,
+   "ts": "2026-09-20T20:28:25.58051+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "road_dodge",
+    "why": "that's a nice car",
+    "goal_id": "steal_nice_car",
+    "outcome": "preempted",
+    "activity": "steal_nice_car",
+    "category": "acquisition",
+    "verified": false,
+    "duration_s": 27.4
+   }
+  },
+  {
+   "id": 7195,
+   "ts": "2026-09-20T20:28:25.919264+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 50.0
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7196,
+   "ts": "2026-09-20T20:31:00.763051+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 154.8
+   }
+  },
+  {
+   "id": 7197,
+   "ts": "2026-09-20T20:31:07.706501+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7198,
+   "ts": "2026-09-20T20:33:46.112443+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 158.4
+   }
+  },
+  {
+   "id": 7199,
+   "ts": "2026-09-20T20:33:49.922947+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7200,
+   "ts": "2026-09-20T20:36:50.045754+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "timeout",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 180.1
+   }
+  },
+  {
+   "id": 7201,
+   "ts": "2026-09-20T20:36:50.392645+00:00",
+   "type": "activity_start",
+   "payload": {
+    "params": {
+     "x": -22.6297,
+     "y": -1439.13684,
+     "z": 29.6549,
+     "protagonist": "franklin"
+    },
+    "activity": "go_start_a_job"
+   }
+  },
+  {
+   "id": 7202,
+   "ts": "2026-09-20T20:42:53.253099+00:00",
+   "type": "activity_end",
+   "payload": {
+    "outcome": "gave_up",
+    "activity": "go_start_a_job",
+    "duration_s": 362.9
+   }
+  },
+  {
+   "id": 7203,
+   "ts": "2026-09-20T20:44:55.234396+00:00",
+   "type": "activity_start",
+   "payload": {
+    "params": {
+     "x": -22.6297,
+     "y": -1439.13684,
+     "z": 29.6549,
+     "protagonist": "franklin"
+    },
+    "activity": "go_start_a_job"
+   }
+  },
+  {
+   "id": 7204,
+   "ts": "2026-09-20T20:48:51.398307+00:00",
+   "type": "activity_end",
+   "payload": {
+    "outcome": "marker_did_not_trigger",
+    "activity": "go_start_a_job",
+    "duration_s": 236.2
+   }
+  },
+  {
+   "id": 7205,
+   "ts": "2026-09-20T20:48:52.42244+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "that's a nice car",
+    "params": {
+     "prefer": "nicer",
+     "search_radius_m": 30.0
+    },
+    "activity": "steal_nice_car"
+   }
+  },
+  {
+   "id": 7206,
+   "ts": "2026-09-20T20:48:59.275746+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "that's a nice car",
+    "goal_id": "steal_nice_car",
+    "outcome": "completed",
+    "activity": "steal_nice_car",
+    "category": "acquisition",
+    "verified": true,
+    "duration_s": 6.9
+   }
+  },
+  {
+   "id": 7207,
+   "ts": "2026-09-20T20:49:09.21037+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7208,
+   "ts": "2026-09-20T20:50:14.281494+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 65.1
+   }
+  },
+  {
+   "id": 7209,
+   "ts": "2026-09-20T20:50:32.245223+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "they need to know I'm here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "honk_run"
+   }
+  },
+  {
+   "id": 7210,
+   "ts": "2026-09-20T20:52:02.53953+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "they need to know I'm here",
+    "goal_id": "honk_run",
+    "outcome": "timeout",
+    "activity": "honk_run",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 90.3
+   }
+  },
+  {
+   "id": 7211,
+   "ts": "2026-09-20T20:52:21.452696+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7212,
+   "ts": "2026-09-20T20:55:21.756647+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "timeout",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 180.3
+   }
+  },
+  {
+   "id": 7213,
+   "ts": "2026-09-20T20:55:26.888231+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7214,
+   "ts": "2026-09-20T20:58:27.15129+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "timeout",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 180.2
+   }
+  },
+  {
+   "id": 7215,
+   "ts": "2026-09-20T20:58:32.593374+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7216,
+   "ts": "2026-09-20T21:00:15.007478+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 102.4
+   }
+  },
+  {
+   "id": 7217,
+   "ts": "2026-09-20T21:00:20.124338+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7218,
+   "ts": "2026-09-20T21:00:51.551077+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "idle",
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "preempted",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 31.4
+   }
+  },
+  {
+   "id": 7219,
+   "ts": "2026-09-20T21:00:51.552586+00:00",
+   "type": "break",
+   "payload": {
+    "phase": "start",
+    "planned_s": 363.697531240826
+   }
+  },
+  {
+   "id": 7220,
+   "ts": "2026-09-20T21:06:56.27206+00:00",
+   "type": "break",
+   "payload": {
+    "phase": "end",
+    "planned_s": 363.697531240826
+   }
+  },
+  {
+   "id": 7221,
+   "ts": "2026-09-20T21:07:01.845376+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7222,
+   "ts": "2026-09-20T21:07:01.846377+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7223,
+   "ts": "2026-09-20T21:07:06.23015+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7224,
+   "ts": "2026-09-20T21:07:06.232152+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7225,
+   "ts": "2026-09-20T21:07:10.711812+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7226,
+   "ts": "2026-09-20T21:07:10.712816+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7227,
+   "ts": "2026-09-20T21:07:23.426533+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7228,
+   "ts": "2026-09-20T21:07:23.427534+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7229,
+   "ts": "2026-09-20T21:07:29.448363+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7230,
+   "ts": "2026-09-20T21:07:29.449367+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7231,
+   "ts": "2026-09-20T21:07:32.502168+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7232,
+   "ts": "2026-09-20T21:07:32.503168+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7233,
+   "ts": "2026-09-20T21:07:35.212504+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7234,
+   "ts": "2026-09-20T21:07:35.213506+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7235,
+   "ts": "2026-09-20T21:07:44.508115+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7236,
+   "ts": "2026-09-20T21:07:44.510625+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7237,
+   "ts": "2026-09-20T21:07:56.550737+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7238,
+   "ts": "2026-09-20T21:07:56.55174+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7239,
+   "ts": "2026-09-20T21:08:02.692675+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7240,
+   "ts": "2026-09-20T21:08:02.692675+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7241,
+   "ts": "2026-09-20T21:08:12.513666+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7242,
+   "ts": "2026-09-20T21:08:12.514666+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7243,
+   "ts": "2026-09-20T21:08:21.341015+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7244,
+   "ts": "2026-09-20T21:08:21.343017+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7245,
+   "ts": "2026-09-20T21:08:28.251314+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7246,
+   "ts": "2026-09-20T21:08:28.252357+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7247,
+   "ts": "2026-09-20T21:08:39.905884+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "nothing between here and there",
+    "params": {
+     "x": -275.5,
+     "y": 6635.8
+    },
+    "activity": "freeway_run"
+   }
+  },
+  {
+   "id": 7248,
+   "ts": "2026-09-20T21:08:39.90689+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "nothing between here and there",
+    "goal_id": "freeway_run",
+    "outcome": "bridge_task_lost",
+    "activity": "freeway_run",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7249,
+   "ts": "2026-09-20T21:08:45.31434+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7250,
+   "ts": "2026-09-20T21:09:47.322496+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 62.0
+   }
+  },
+  {
+   "id": 7251,
+   "ts": "2026-09-20T21:09:50.352434+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "x": 1961.2,
+     "y": 3740.5
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7252,
+   "ts": "2026-09-20T21:11:15.674152+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "preempted",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 85.3
+   }
+  },
+  {
+   "id": 7253,
+   "ts": "2026-09-20T21:11:17.172767+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "where's he going in that",
+    "params": {
+     "handle": 361562,
+     "in_vehicle": true
+    },
+    "activity": "chase_that_car"
+   }
+  },
+  {
+   "id": 7254,
+   "ts": "2026-09-20T21:11:39.690905+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "where's he going in that",
+    "goal_id": "chase_that_car",
+    "outcome": "completed",
+    "activity": "chase_that_car",
+    "category": "stunt",
+    "verified": true,
+    "duration_s": 22.5
+   }
+  },
+  {
+   "id": 7255,
+   "ts": "2026-09-20T21:11:43.110675+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "up only",
+    "params": {
+     "x": 726.0,
+     "y": 1198.0
+    },
+    "activity": "up_only"
+   }
+  },
+  {
+   "id": 7256,
+   "ts": "2026-09-20T21:11:44.466564+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "up only",
+    "goal_id": "up_only",
+    "outcome": "bridge_task_lost",
+    "activity": "up_only",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 1.4
+   }
+  },
+  {
+   "id": 7257,
+   "ts": "2026-09-20T21:11:50.154847+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "the ground is boring",
+    "params": {
+     "x": -724.0,
+     "y": -1444.0
+    },
+    "activity": "go_flying"
+   }
+  },
+  {
+   "id": 7258,
+   "ts": "2026-09-20T21:11:50.483022+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "the ground is boring",
+    "goal_id": "go_flying",
+    "outcome": "bridge_task_lost",
+    "activity": "go_flying",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 0.3
+   }
+  },
+  {
+   "id": 7259,
+   "ts": "2026-09-20T21:11:56.647946+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7260,
+   "ts": "2026-09-20T21:13:05.310621+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 68.7
+   }
+  },
+  {
+   "id": 7261,
+   "ts": "2026-09-20T21:13:18.231844+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7262,
+   "ts": "2026-09-20T21:14:32.327002+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 74.1
+   }
+  },
+  {
+   "id": 7263,
+   "ts": "2026-09-20T21:14:42.41006+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7264,
+   "ts": "2026-09-20T21:15:47.484298+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "preempted",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 65.1
+   }
+  },
+  {
+   "id": 7265,
+   "ts": "2026-09-20T21:15:54.593763+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7266,
+   "ts": "2026-09-20T21:15:54.593763+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7267,
+   "ts": "2026-09-20T21:15:59.763058+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7268,
+   "ts": "2026-09-20T21:15:59.765084+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7269,
+   "ts": "2026-09-20T21:16:08.278158+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7270,
+   "ts": "2026-09-20T21:16:08.279712+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7271,
+   "ts": "2026-09-20T21:16:19.54369+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7272,
+   "ts": "2026-09-20T21:16:19.545205+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7273,
+   "ts": "2026-09-20T21:16:23.904839+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7274,
+   "ts": "2026-09-20T21:16:23.906343+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7275,
+   "ts": "2026-09-20T21:16:26.381363+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7276,
+   "ts": "2026-09-20T21:16:26.382879+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7277,
+   "ts": "2026-09-20T21:16:38.017234+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "they need to know I'm here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "honk_run"
+   }
+  },
+  {
+   "id": 7278,
+   "ts": "2026-09-20T21:17:06.961468+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "they need to know I'm here",
+    "goal_id": "honk_run",
+    "outcome": "preempted",
+    "activity": "honk_run",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 28.9
+   }
+  },
+  {
+   "id": 7279,
+   "ts": "2026-09-20T21:17:11.56222+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "that road goes up",
+    "params": {
+     "x": 155.0,
+     "y": -3067.0
+    },
+    "activity": "big_jump"
+   }
+  },
+  {
+   "id": 7280,
+   "ts": "2026-09-20T21:18:55.166834+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "resume",
+    "why": "that road goes up",
+    "goal_id": "big_jump",
+    "outcome": "preempted",
+    "activity": "big_jump",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 103.6
+   }
+  },
+  {
+   "id": 7281,
+   "ts": "2026-09-20T21:18:55.512235+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "the SMG is in the car",
+    "params": {
+     "handle": 718947,
+     "duration_s": 12.0
+    },
+    "activity": "drive_by_run"
+   }
+  },
+  {
+   "id": 7282,
+   "ts": "2026-09-20T21:19:02.41963+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "resume",
+    "why": "the SMG is in the car",
+    "goal_id": "drive_by_run",
+    "outcome": "preempted",
+    "activity": "drive_by_run",
+    "category": "trouble",
+    "verified": false,
+    "duration_s": 6.9
+   }
+  },
+  {
+   "id": 7283,
+   "ts": "2026-09-20T21:19:02.763344+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7284,
+   "ts": "2026-09-20T21:19:47.74307+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 45.0
+   }
+  },
+  {
+   "id": 7285,
+   "ts": "2026-09-20T21:19:49.824546+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7286,
+   "ts": "2026-09-20T21:20:36.848041+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 47.0
+   }
+  },
+  {
+   "id": 7287,
+   "ts": "2026-09-20T21:20:41.333699+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7288,
+   "ts": "2026-09-20T21:21:12.827686+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 31.5
+   }
+  },
+  {
+   "id": 7289,
+   "ts": "2026-09-20T21:21:34.934172+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "x": -1223.5,
+     "y": -1491.1
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7290,
+   "ts": "2026-09-20T21:26:35.10365+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "timeout",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 300.2
+   }
+  },
+  {
+   "id": 7291,
+   "ts": "2026-09-20T21:26:45.793496+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "it has been quiet",
+    "params": {
+     "handle": 760445,
+     "duration_s": 8.0
+    },
+    "activity": "earn_two_stars"
+   }
+  },
+  {
+   "id": 7292,
+   "ts": "2026-09-20T21:29:45.912795+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "it has been quiet",
+    "goal_id": "earn_two_stars",
+    "outcome": "timeout",
+    "activity": "earn_two_stars",
+    "category": "trouble",
+    "verified": false,
+    "duration_s": 180.1
+   }
+  },
+  {
+   "id": 7293,
+   "ts": "2026-09-20T21:29:48.305315+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7294,
+   "ts": "2026-09-20T21:32:50.548491+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "timeout",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 182.2
+   }
+  },
+  {
+   "id": 7295,
+   "ts": "2026-09-20T21:33:08.908078+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "where's he going in that",
+    "params": {
+     "handle": 81931,
+     "in_vehicle": true
+    },
+    "activity": "chase_that_car"
+   }
+  },
+  {
+   "id": 7296,
+   "ts": "2026-09-20T21:33:09.869661+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "where's he going in that",
+    "goal_id": "chase_that_car",
+    "outcome": "completed",
+    "activity": "chase_that_car",
+    "category": "stunt",
+    "verified": true,
+    "duration_s": 1.0
+   }
+  },
+  {
+   "id": 7297,
+   "ts": "2026-09-20T21:33:15.753119+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "they need to know I'm here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "honk_run"
+   }
+  },
+  {
+   "id": 7298,
+   "ts": "2026-09-20T21:33:45.296599+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "they need to know I'm here",
+    "goal_id": "honk_run",
+    "outcome": "completed",
+    "activity": "honk_run",
+    "category": "scenic",
+    "verified": true,
+    "duration_s": 29.5
+   }
+  },
+  {
+   "id": 7299,
+   "ts": "2026-09-20T21:33:54.820162+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7300,
+   "ts": "2026-09-20T21:34:52.810461+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "preempted",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 58.0
+   }
+  },
+  {
+   "id": 7301,
+   "ts": "2026-09-20T21:34:53.889408+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7302,
+   "ts": "2026-09-20T21:34:53.889919+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7303,
+   "ts": "2026-09-20T21:35:06.704694+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7304,
+   "ts": "2026-09-20T21:35:06.70621+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7305,
+   "ts": "2026-09-20T21:35:15.544532+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7306,
+   "ts": "2026-09-20T21:35:15.546065+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7307,
+   "ts": "2026-09-20T21:35:24.091938+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7308,
+   "ts": "2026-09-20T21:35:24.09345+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7309,
+   "ts": "2026-09-20T21:35:33.005446+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7310,
+   "ts": "2026-09-20T21:35:33.006951+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7311,
+   "ts": "2026-09-20T21:35:42.282086+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7312,
+   "ts": "2026-09-20T21:36:41.647601+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 59.4
+   }
+  },
+  {
+   "id": 7313,
+   "ts": "2026-09-20T21:36:51.972415+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7314,
+   "ts": "2026-09-20T21:38:36.840578+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 104.9
+   }
+  },
+  {
+   "id": 7315,
+   "ts": "2026-09-20T21:38:58.335576+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "x": -1223.5,
+     "y": -1491.1
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7316,
+   "ts": "2026-09-20T21:40:56.883039+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "preempted",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 118.5
+   }
+  },
+  {
+   "id": 7317,
+   "ts": "2026-09-20T21:41:02.599482+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "nothing between here and there",
+    "params": {
+     "x": -275.5,
+     "y": 6635.8
+    },
+    "activity": "freeway_run"
+   }
+  },
+  {
+   "id": 7318,
+   "ts": "2026-09-20T21:41:02.938848+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "nothing between here and there",
+    "goal_id": "freeway_run",
+    "outcome": "bridge_task_lost",
+    "activity": "freeway_run",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 0.3
+   }
+  },
+  {
+   "id": 7319,
+   "ts": "2026-09-20T21:41:05.332985+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7320,
+   "ts": "2026-09-20T21:44:05.552975+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "timeout",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 180.2
+   }
+  },
+  {
+   "id": 7321,
+   "ts": "2026-09-20T21:44:23.148214+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7322,
+   "ts": "2026-09-20T21:45:00.784494+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 37.6
+   }
+  },
+  {
+   "id": 7323,
+   "ts": "2026-09-20T21:45:20.77776+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "where's he going in that",
+    "params": {
+     "handle": 303665,
+     "in_vehicle": true
+    },
+    "activity": "chase_that_car"
+   }
+  },
+  {
+   "id": 7324,
+   "ts": "2026-09-20T21:45:20.996837+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "where's he going in that",
+    "goal_id": "chase_that_car",
+    "outcome": "completed",
+    "activity": "chase_that_car",
+    "category": "stunt",
+    "verified": true,
+    "duration_s": 0.2
+   }
+  },
+  {
+   "id": 7325,
+   "ts": "2026-09-20T21:45:27.877585+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7326,
+   "ts": "2026-09-20T21:46:16.134938+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 48.3
+   }
+  },
+  {
+   "id": 7327,
+   "ts": "2026-09-20T21:46:28.144795+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "the SMG is in the car",
+    "params": {
+     "handle": 227890,
+     "duration_s": 12.0
+    },
+    "activity": "drive_by_run"
+   }
+  },
+  {
+   "id": 7328,
+   "ts": "2026-09-20T21:49:28.283153+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "the SMG is in the car",
+    "goal_id": "drive_by_run",
+    "outcome": "timeout",
+    "activity": "drive_by_run",
+    "category": "trouble",
+    "verified": false,
+    "duration_s": 180.1
+   }
+  },
+  {
+   "id": 7329,
+   "ts": "2026-09-20T21:49:37.702508+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "they need to know I'm here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "honk_run"
+   }
+  },
+  {
+   "id": 7330,
+   "ts": "2026-09-20T21:51:08.023076+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "they need to know I'm here",
+    "goal_id": "honk_run",
+    "outcome": "timeout",
+    "activity": "honk_run",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 90.3
+   }
+  },
+  {
+   "id": 7331,
+   "ts": "2026-09-20T21:51:10.397889+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7332,
+   "ts": "2026-09-20T21:52:34.494827+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 84.1
+   }
+  },
+  {
+   "id": 7333,
+   "ts": "2026-09-20T21:52:53.767078+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "x": -1034.6,
+     "y": -2733.6
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7334,
+   "ts": "2026-09-20T21:57:43.858209+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "preempted",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 290.1
+   }
+  },
+  {
+   "id": 7335,
+   "ts": "2026-09-20T21:57:45.080972+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "nothing between here and there",
+    "params": {
+     "x": -275.5,
+     "y": 6635.8
+    },
+    "activity": "freeway_run"
+   }
+  },
+  {
+   "id": 7336,
+   "ts": "2026-09-20T21:57:45.399512+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "nothing between here and there",
+    "goal_id": "freeway_run",
+    "outcome": "bridge_task_lost",
+    "activity": "freeway_run",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 0.3
+   }
+  },
+  {
+   "id": 7337,
+   "ts": "2026-09-20T21:57:50.733859+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "up only",
+    "params": {
+     "x": -438.8,
+     "y": 1076.0
+    },
+    "activity": "up_only"
+   }
+  },
+  {
+   "id": 7338,
+   "ts": "2026-09-20T21:57:51.087969+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "up only",
+    "goal_id": "up_only",
+    "outcome": "bridge_task_lost",
+    "activity": "up_only",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 0.4
+   }
+  },
+  {
+   "id": 7339,
+   "ts": "2026-09-20T21:58:09.36134+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7340,
+   "ts": "2026-09-20T21:59:12.290444+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "threat",
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "preempted",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 62.9
+   }
+  },
+  {
+   "id": 7341,
+   "ts": "2026-09-20T21:59:12.629837+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7342,
+   "ts": "2026-09-20T21:59:12.630344+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7343,
+   "ts": "2026-09-20T21:59:24.663672+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7344,
+   "ts": "2026-09-20T21:59:24.665181+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7345,
+   "ts": "2026-09-20T21:59:27.744668+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7346,
+   "ts": "2026-09-20T21:59:27.746179+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7347,
+   "ts": "2026-09-20T21:59:37.617489+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7348,
+   "ts": "2026-09-20T21:59:37.619062+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "bridge_task_lost",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 0.0
+   }
+  },
+  {
+   "id": 7349,
+   "ts": "2026-09-20T21:59:54.170184+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "where's he going in that",
+    "params": {
+     "handle": 88919,
+     "in_vehicle": true
+    },
+    "activity": "chase_that_car"
+   }
+  },
+  {
+   "id": 7350,
+   "ts": "2026-09-20T22:00:41.969726+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "where's he going in that",
+    "goal_id": "chase_that_car",
+    "outcome": "timeout",
+    "activity": "chase_that_car",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 47.8
+   }
+  },
+  {
+   "id": 7351,
+   "ts": "2026-09-20T22:00:49.003022+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7352,
+   "ts": "2026-09-20T22:03:47.116188+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 178.1
+   }
+  },
+  {
+   "id": 7353,
+   "ts": "2026-09-20T22:04:00.276915+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7354,
+   "ts": "2026-09-20T22:04:54.672461+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 54.4
+   }
+  },
+  {
+   "id": 7355,
+   "ts": "2026-09-20T22:04:58.403981+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7356,
+   "ts": "2026-09-20T22:08:06.529386+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "timeout",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 188.1
+   }
+  },
+  {
+   "id": 7357,
+   "ts": "2026-09-20T22:08:14.467456+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7358,
+   "ts": "2026-09-20T22:09:22.500583+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 68.0
+   }
+  },
+  {
+   "id": 7359,
+   "ts": "2026-09-20T22:09:25.95013+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7360,
+   "ts": "2026-09-20T22:10:15.967973+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 50.0
+   }
+  },
+  {
+   "id": 7361,
+   "ts": "2026-09-20T22:10:19.760627+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7362,
+   "ts": "2026-09-20T22:11:18.967041+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 59.2
+   }
+  },
+  {
+   "id": 7363,
+   "ts": "2026-09-20T22:11:33.907024+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7364,
+   "ts": "2026-09-20T22:12:18.497573+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 44.6
+   }
+  },
+  {
+   "id": 7365,
+   "ts": "2026-09-20T22:12:21.590583+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7366,
+   "ts": "2026-09-20T22:12:59.662667+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 38.1
+   }
+  },
+  {
+   "id": 7367,
+   "ts": "2026-09-20T22:13:14.582442+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "nothing between here and there",
+    "params": {
+     "x": -275.5,
+     "y": 6635.8
+    },
+    "activity": "freeway_run"
+   }
+  },
+  {
+   "id": 7368,
+   "ts": "2026-09-20T22:14:37.505352+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "nothing between here and there",
+    "goal_id": "freeway_run",
+    "outcome": "completed",
+    "activity": "freeway_run",
+    "category": "stunt",
+    "verified": true,
+    "duration_s": 82.9
+   }
+  },
+  {
+   "id": 7369,
+   "ts": "2026-09-20T22:14:53.894102+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "x": -1223.5,
+     "y": -1491.1
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7371,
+   "ts": "2026-09-20T22:16:14.916182+00:00",
+   "type": "break",
+   "payload": {
+    "phase": "start",
+    "planned_s": 193.1169377634218
+   }
+  },
+  {
+   "id": 7370,
+   "ts": "2026-09-20T22:16:14.916182+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "idle",
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "preempted",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 81.0
+   }
+  },
+  {
+   "id": 7372,
+   "ts": "2026-09-20T22:19:29.794087+00:00",
+   "type": "break",
+   "payload": {
+    "phase": "end",
+    "planned_s": 193.1169377634218
+   }
+  },
+  {
+   "id": 7373,
+   "ts": "2026-09-20T22:19:31.145475+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "the ground is boring",
+    "params": {
+     "x": -724.0,
+     "y": -1444.0
+    },
+    "activity": "go_flying"
+   }
+  },
+  {
+   "id": 7374,
+   "ts": "2026-09-20T22:20:42.488306+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "the ground is boring",
+    "goal_id": "go_flying",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "go_flying",
+    "category": "stunt",
+    "verified": false,
+    "duration_s": 71.3
+   }
+  },
+  {
+   "id": 7375,
+   "ts": "2026-09-20T22:20:52.849051+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 50.0
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7376,
+   "ts": "2026-09-20T22:20:55.296449+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 2.5
+   }
+  },
+  {
+   "id": 7377,
+   "ts": "2026-09-20T22:21:07.296045+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "that's a nice car",
+    "params": {
+     "x": -724.8713,
+     "y": -1368.42273,
+     "z": 0.300003,
+     "run": true
+    },
+    "activity": "steal_nice_car"
+   }
+  },
+  {
+   "id": 7378,
+   "ts": "2026-09-20T22:21:58.119514+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "that's a nice car",
+    "goal_id": "steal_nice_car",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "steal_nice_car",
+    "category": "acquisition",
+    "verified": false,
+    "duration_s": 50.8
+   }
+  },
+  {
+   "id": 7379,
+   "ts": "2026-09-20T22:21:58.45804+00:00",
+   "type": "activity_start",
+   "payload": {
+    "params": {
+     "x": -717.8866,
+     "y": -1396.26489,
+     "z": 4.623279,
+     "protagonist": "franklin"
+    },
+    "activity": "go_start_a_job"
+   }
+  },
+  {
+   "id": 7380,
+   "ts": "2026-09-20T22:22:54.090603+00:00",
+   "type": "activity_end",
+   "payload": {
+    "outcome": "marker_did_not_trigger",
+    "activity": "go_start_a_job",
+    "duration_s": 55.6
+   }
+  },
+  {
+   "id": 7381,
+   "ts": "2026-09-20T22:22:55.370307+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 40.0
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7382,
+   "ts": "2026-09-20T22:23:23.402711+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 28.0
+   }
+  },
+  {
+   "id": 7383,
+   "ts": "2026-09-20T22:23:37.755696+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 50.0
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7384,
+   "ts": "2026-09-20T22:23:40.851448+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 3.1
+   }
+  },
+  {
+   "id": 7385,
+   "ts": "2026-09-20T22:23:50.802107+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somebody typed the cheat, and it was not me",
+    "cheat": "arsenal",
+    "params": {
+     "count": 2,
+     "handle": 270714
+    },
+    "activity": "burn_the_city",
+    "cheat_ttl_s": 180.0
+   }
+  },
+  {
+   "id": 7386,
+   "ts": "2026-09-20T22:24:33.091705+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "somebody typed the cheat, and it was not me",
+    "cheat": "arsenal",
+    "goal_id": "burn_the_city",
+    "outcome": "actions_done_goal_unmet",
+    "activity": "burn_the_city",
+    "category": "trouble",
+    "verified": false,
+    "duration_s": 42.3
+   }
+  },
+  {
+   "id": 7387,
+   "ts": "2026-09-20T22:24:53.166036+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 60.0
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7388,
+   "ts": "2026-09-20T22:25:24.329174+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "road_dodge",
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "preempted",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": false,
+    "duration_s": 31.2
+   }
+  },
+  {
+   "id": 7389,
+   "ts": "2026-09-20T22:25:24.330699+00:00",
+   "type": "activity_start",
+   "payload": {
+    "params": {
+     "x": -717.8866,
+     "y": -1396.26489,
+     "z": 4.623279,
+     "protagonist": "franklin"
+    },
+    "activity": "go_start_a_job"
+   }
+  },
+  {
+   "id": 7390,
+   "ts": "2026-09-20T22:30:08.774392+00:00",
+   "type": "activity_end",
+   "payload": {
+    "outcome": "marker_gone",
+    "activity": "go_start_a_job",
+    "duration_s": 284.4
+   }
+  },
+  {
+   "id": 7391,
+   "ts": "2026-09-20T22:30:10.001546+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 60.0
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7392,
+   "ts": "2026-09-20T22:31:21.818406+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 71.8
+   }
+  },
+  {
+   "id": 7393,
+   "ts": "2026-09-20T22:31:28.656844+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "somewhere better than here",
+    "params": {
+     "prefer": "any",
+     "search_radius_m": 40.0
+    },
+    "activity": "drive_to_landmark"
+   }
+  },
+  {
+   "id": 7394,
+   "ts": "2026-09-20T22:31:32.055895+00:00",
+   "type": "activity_end",
+   "payload": {
+    "by": "road_dodge",
+    "why": "somewhere better than here",
+    "goal_id": "drive_to_landmark",
+    "outcome": "preempted",
+    "activity": "drive_to_landmark",
+    "category": "scenic",
+    "verified": false,
+    "duration_s": 3.4
+   }
+  },
+  {
+   "id": 7395,
+   "ts": "2026-09-20T22:31:40.449399+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "that's a nice car",
+    "params": {
+     "prefer": "nicer",
+     "search_radius_m": 30.0
+    },
+    "activity": "steal_nice_car"
+   }
+  },
+  {
+   "id": 7396,
+   "ts": "2026-09-20T22:31:48.366512+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "that's a nice car",
+    "goal_id": "steal_nice_car",
+    "outcome": "completed",
+    "activity": "steal_nice_car",
+    "category": "acquisition",
+    "verified": true,
+    "duration_s": 7.9
+   }
+  },
+  {
+   "id": 7397,
+   "ts": "2026-09-20T22:31:54.820627+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "the SMG is in the car",
+    "params": {
+     "handle": 61567,
+     "duration_s": 12.0
+    },
+    "activity": "drive_by_run"
+   }
+  },
+  {
+   "id": 7398,
+   "ts": "2026-09-20T22:34:54.884173+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "the SMG is in the car",
+    "goal_id": "drive_by_run",
+    "outcome": "timeout",
+    "activity": "drive_by_run",
+    "category": "trouble",
+    "verified": false,
+    "duration_s": 180.1
+   }
+  },
+  {
+   "id": 7399,
+   "ts": "2026-09-20T22:35:01.714231+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7400,
+   "ts": "2026-09-20T22:35:45.868486+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 44.2
+   }
+  },
+  {
+   "id": 7401,
+   "ts": "2026-09-20T22:35:53.36986+00:00",
+   "type": "activity_start",
+   "payload": {
+    "why": "anything beats standing here",
+    "params": {
+     "style": "ignore_lights"
+    },
+    "activity": "roam_the_block"
+   }
+  },
+  {
+   "id": 7402,
+   "ts": "2026-09-20T22:36:57.12723+00:00",
+   "type": "activity_end",
+   "payload": {
+    "why": "anything beats standing here",
+    "goal_id": "roam_the_block",
+    "outcome": "completed",
+    "activity": "roam_the_block",
+    "category": "errand",
+    "verified": true,
+    "duration_s": 63.8
+   }
+  },
+  {
+   "id": 7403,
+   "ts": "2026-09-20T22:36:57.476325+00:00",
+   "type": "activity_start",
+   "payload": {
+    "params": {
+     "x": -22.6297,
+     "y": -1439.13684,
+     "z": 29.6549,
+     "protagonist": "franklin"
+    },
+    "activity": "go_start_a_job"
+   }
+  }
+ ]
+}

@@ -39,6 +39,7 @@ from wasted_harness.behavior.recovery import (
     ClearedByGameBackoff,
     DamageTracker,
     DeathArrestRecovery,
+    ForegroundKeeper,
     GameRestartDetector,
     IdleBreaker,
     JackHandoffGate,
@@ -167,6 +168,9 @@ def _harness(bridge: Any) -> Harness:
     h._start_clips = lambda: None
     h._write_session_start = lambda: None
     h._end_activity_if_running = lambda outcome, *, by=None: None
+    # `run()` consults these at the top of every iteration, before the poll.
+    h.primitives = None
+    h.foreground_keeper = ForegroundKeeper()
     return h
 
 

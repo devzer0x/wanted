@@ -48,6 +48,27 @@ behind `loses_the_cops` (0.85) and `survives_a_chase` (0.80) — it would never
 once be picked. The bonus is configurable and applies only to templates that
 already passed the rarity gate.
 
+**The scheduled round (CONTRACTS-PREDICTIONS §3, v2.4).** The four mechanisms
+above all answer "how often may we ask?". The round answers "and what if
+nothing has happened?" — which is the ordinary case: the 2026-09-20 recording
+is 2 h 19 m of real play with zero `wanted_change`, `death` or `busted` rows,
+so every situational template in the catalogue was unofferable for the whole
+broadcast. Once nothing at all has been generated for `round_interval_s`
+(default 300 s), AMBIENT templates become eligible; a situational template
+pre-empts the round whenever one triggers, and resets its clock, because §3
+says a situational question "count[s] as that interval's question".
+
+An ambient template additionally has to pass §3's fairness gate on EVERY ask:
+`base_rate` (`baserate.RollingBaseRate.measure`, injected) re-measures its
+YES-rate from the agent's own recent telemetry over the same window shape
+settlement will read, and it is offered only on at least
+`AMBIENT_MIN_SAMPLES` sampled windows with a rate inside [`AMBIENT_MIN_RATE`,
+`AMBIENT_MAX_RATE`]. With no estimator injected, no ambient template is ever
+offered — "no measurement" can only mean "do not ask". Among the survivors the
+pick is the rate closest to a coin flip, then novelty (`_pick_ambient`), and
+the measurement that justified it rides on the row in
+`state_context["calibration"]`.
+
 **Reward pools, including the boosted ones, are not this module's to write.**
 The row carries `is_event` and nothing else reward-related; see `catalog.py`'s
 module docstring for where the boost belongs (the layer that funds
@@ -66,7 +87,22 @@ from typing import Any
 from wasted_harness.bridge_client import GameState
 from wasted_harness.logsetup import get_logger
 
-from .catalog import PredictionTemplate, RecentEvent, Window
+from .baserate import Calibration
+from .catalog import (
+    AMBIENT_MAX_RATE,
+    AMBIENT_MIN_RATE,
+    AMBIENT_MIN_SAMPLES,
+    DEFAULT_ROUND_INTERVAL_S,
+    PredictionTemplate,
+    RecentEvent,
+    Window,
+)
+
+#: `RollingBaseRate.measure`, injected. `None` (the default) means no live
+#: measurement is available, which is NOT "0%" — it means no ambient template
+#: may be offered at all, because §3 lets one be asked only while its own
+#: re-measured rate is in band.
+BaseRateFn = Callable[[PredictionTemplate], Calibration]
 
 log = get_logger("wasted.predictions.generator")
 
@@ -113,6 +149,20 @@ class GeneratorConfig:
     max_concurrent_open: int = 2
     min_gap_s: float = _MIN_WINDOW_S
     type_cooldown_s: float = _MIN_WINDOW_S * 3.0
+
+    #: --- CONTRACTS-PREDICTIONS §3 "Scheduled rounds" -----------------------
+    #: "While the agent is live and nothing situational has been asked for
+    #: `round_interval_s` (default 300 s), the generator asks one
+    #: always-available question." So this is the gate on AMBIENT templates
+    #: only: they become eligible once nothing AT ALL has been generated for
+    #: this long, and a situational question resets the clock the same way an
+    #: ambient one does — that is what "count as that interval's question"
+    #: means. Operator knob: `WASTED_PREDICTION_ROUND_S`.
+    round_interval_s: float = DEFAULT_ROUND_INTERVAL_S
+    #: Kill switch for the scheduled round, the same shape as `events_enabled`:
+    #: leaves the catalogue alone, stops ambient questions being offered.
+    #: Operator knob: `WASTED_PREDICTION_AMBIENT`.
+    ambient_enabled: bool = True
 
     #: --- WANTED EVENT rarity, the whole of it, in three named knobs --------
     #: An hour between events: 40x `type_cooldown_s`, and a hard ceiling of 24
@@ -189,6 +239,11 @@ class PredictionGenerator:
     clock: Callable[[], float] = time.monotonic
     wall_clock: Callable[[], float] = time.time
     config: GeneratorConfig = field(default_factory=GeneratorConfig)
+    #: `RollingBaseRate.measure`. WITHOUT IT NO AMBIENT TEMPLATE IS EVER
+    #: OFFERED, and that is the correct default rather than a degraded one:
+    #: §3 permits an always-available question only while its own re-measured
+    #: rate is in band, so "no measurement" can only mean "do not ask".
+    base_rate: BaseRateFn | None = None
 
     _last_generated_at: float = field(default=float("-inf"), init=False, repr=False)
     _last_type: str | None = field(default=None, init=False, repr=False)
@@ -246,11 +301,20 @@ class PredictionGenerator:
         best: PredictionTemplate | None = None
         best_rank = float("-inf")
         events_offerable = self._events_offerable(now)
+        # §3 "Scheduled rounds": an always-available question is asked only
+        # when nothing at all has been asked for a whole round. Situational
+        # templates PRE-EMPT the round — they are collected separately below
+        # and win outright whenever one of them triggers, because a wanted
+        # star or a fight IS that interval's question.
+        ambient_round = self._ambient_round_open(now)
+        ambient: list[tuple[PredictionTemplate, Calibration, float]] = []
         for tpl in self.catalog:
             if tpl.prediction_type == self._last_type:
                 continue  # no duplicate prediction_type back-to-back
             if tpl.is_event and not events_offerable:
                 continue  # WANTED EVENTS are rare on purpose — see _events_offerable
+            if tpl.ambient and not ambient_round:
+                continue  # not this interval's turn — see _ambient_round_open
             last_picked = self._last_picked_at.get(tpl.prediction_type, float("-inf"))
             if now - last_picked < self.config.type_cooldown_s:
                 continue
@@ -271,14 +335,23 @@ class PredictionGenerator:
                     },
                 )
                 continue
+            if tpl.ambient:
+                measured = self._calibration_for(tpl)
+                if measured is not None:
+                    ambient.append((tpl, measured, last_picked))
+                continue
             rank = self._rank(tpl, state, now, last_picked)
             if rank > best_rank:
                 best, best_rank = tpl, rank
 
+        calibration: Calibration | None = None
         if best is None:
-            return None
+            picked = self._pick_ambient(ambient, now)
+            if picked is None:
+                return None
+            best, calibration = picked
 
-        row = self._build_row(best, state, session_id)
+        row = self._build_row(best, state, session_id, calibration)
         self._last_generated_at = now
         self._last_type = best.prediction_type
         self._last_picked_at[best.prediction_type] = now
@@ -287,6 +360,82 @@ class PredictionGenerator:
         self._last_was_event = best.is_event
         self._open.append((best.prediction_type, now + best.window.total_s))
         return row
+
+    # -- the scheduled round (CONTRACTS-PREDICTIONS §3) ---------------------------
+
+    def _ambient_round_open(self, now: float) -> bool:
+        """Whether an ALWAYS-AVAILABLE question may be offered on this tick.
+
+        §3: "While the agent is live and nothing situational has been asked for
+        `round_interval_s` (default 300 s), the generator asks one
+        always-available question." `_last_generated_at` moves on EVERY
+        generation, situational or ambient, which is the same sentence's
+        "Situational questions [...] count as that interval's question".
+        """
+        if not self.config.ambient_enabled:
+            return False
+        if self.config.round_interval_s <= 0:
+            return True
+        return now - self._last_generated_at >= self.config.round_interval_s
+
+    def _calibration_for(self, tpl: PredictionTemplate) -> Calibration | None:
+        """This template's live re-measured rate, or `None` when it may not be asked.
+
+        `None` covers all three §3 refusals, and they are deliberately not
+        distinguished to the caller: no measurement at all, too few sampled
+        windows, or a rate outside [0.20, 0.80]. "When nothing is in band,
+        nothing is asked; an empty card is honest and a foregone conclusion is
+        not."
+        """
+        if self.base_rate is None:
+            return None
+        try:
+            calibration = self.base_rate(tpl)
+        except Exception as exc:  # never kill the tick over a measurement
+            log.warning(
+                "base-rate measurement raised; not offering this ambient template",
+                extra={
+                    "kv": {
+                        "prediction_type": tpl.prediction_type,
+                        "error": f"{type(exc).__name__}: {exc}"[:200],
+                    }
+                },
+            )
+            return None
+        if calibration.n < AMBIENT_MIN_SAMPLES:
+            return None
+        rate = calibration.rate
+        if rate is None or not (AMBIENT_MIN_RATE <= rate <= AMBIENT_MAX_RATE):
+            return None
+        return calibration
+
+    def _pick_ambient(
+        self,
+        candidates: Sequence[tuple[PredictionTemplate, Calibration, float]],
+        now: float,
+    ) -> tuple[PredictionTemplate, Calibration] | None:
+        """Closest to a coin flip wins; ties break on novelty, then on name.
+
+        Not `_rank`: for an always-available question the live measurement is
+        the only honest statement about how uncertain it is, and every other
+        term `_rank` weighs (watchability, resolution speed) is identical
+        across these templates by construction — they share §3's one window
+        shape and none of them has a dramatic moment behind it. The final
+        `prediction_type` tiebreak is what keeps the pick deterministic when
+        two templates measure identically and were last picked at the same
+        instant (which is the cold-start case: never picked, both at -inf).
+        """
+        if not candidates:
+            return None
+        best = min(
+            candidates,
+            key=lambda c: (
+                abs((c[1].rate or 0.0) - 0.5),
+                -(now - c[2]) if c[2] != float("-inf") else float("-inf"),
+                c[0].prediction_type,
+            ),
+        )
+        return best[0], best[1]
 
     # -- WANTED EVENT rarity ------------------------------------------------------
 
@@ -337,16 +486,27 @@ class PredictionGenerator:
         self._open = [(pt, resolves_at) for pt, resolves_at in self._open if resolves_at > now]
 
     def _build_row(
-        self, tpl: PredictionTemplate, state: GameState, session_id: str
+        self,
+        tpl: PredictionTemplate,
+        state: GameState,
+        session_id: str,
+        calibration: Calibration | None = None,
     ) -> dict[str, Any]:
         opened = self.wall_clock()
         locks = opened + tpl.window.lock_delay_s
         resolves = locks + tpl.window.resolve_delay_s
+        # §3: "the odds shown to a viewer are the odds that were measured".
+        # The measurement rides on the row itself, so the card and the archive
+        # both carry the evidence for why this question was considered fair —
+        # rather than it living only in a log line on the game server.
+        state_context = _hud_snapshot(state)
+        if calibration is not None:
+            state_context["calibration"] = calibration.as_json()
         return {
             "session_id": session_id,
             "question": tpl.question,
             "prediction_type": tpl.prediction_type,
-            "state_context": _hud_snapshot(state),
+            "state_context": state_context,
             # Nullable per CONTRACTS-PREDICTIONS §2; this package has no
             # reliable events.id at generation time (buffered inserts return
             # none — see events.py), so it is honestly left null rather than

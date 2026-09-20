@@ -187,6 +187,57 @@ says so at its own definition rather than pretending otherwise.
      minutes" can never even be asked; `steal_cop_car` started **2** times in
      86.93 h and completed **0**; `go_flying` ended **92** times and completed
      **0** (`up_only`: 1/98), and no §3 rule kind can observe a landing at all.
+
+## 2026-09-21: the entry-window floor, and what it moved (contract v2.4 §3)
+
+`MIN_ENTRY_WINDOW_S` (30 s) now floors `lock_delay_s` in `Window` itself, and
+every shipped template's lock was raised to meet it. **Settlement reads only
+`[locks_at, resolves_at]`, so moving the lock moves the measured window**, and
+every calibrated rate below was recounted from the recording against its NEW
+window — at zero generation delay for the headline figure, and swept across
+the whole 0-60 s band (`PREDICTION_RECENT_WINDOW_S` in `main.py`) for the
+range. `tests/test_predictions_catalog.py` re-derives all of it.
+
+| template | lock | settled span | old rate | **new rate** | band 0-60 s |
+|---|---|---|---|---|---|
+| `death_in_window`   | 15->30 | 225 s | 43.6% | **35.9%** (14/39) | 25.6-35.9% |
+| `loses_the_cops`    | 10->30 |  80 s | 53.8% | **53.8%** (21/39) | 35.9-53.8% |
+| `survives_a_chase`  | 10->30 | 140 s | 48.7% | **56.4%** (22/39) | 56.4-74.4% |
+| `two_star_standoff` | 15->30 | 240 s | 29.4% | **41.2%** (7/17)  | 41.2-47.1% |
+| `survives_a_fight`  | 10->30 |  50 s | — | — (no threat telemetry in an events-only export) |
+| `mission_outcome`   | 20->30 | 280->270 s | — | — (no mission events in either recording) |
+
+All four measured rates stay inside [`EVENT_MIN_BASE_RATE`,
+`EVENT_MAX_BASE_RATE`] across the whole delay band, so nothing had to be
+withdrawn. Two notes on the "old" column, because the comparison is not
+like-for-like: those three figures were measured ANCHOR-TO-ANCHOR (`(gain,
+gain+total]`), which is not what settlement reads; the new ones are the real
+settled window. `loses_the_cops` landing on 53.8% again is a coincidence of
+this recording, not a property of the change. `mission_outcome` was already at
+the 300 s ceiling, so its ten seconds came off the settled span rather than
+being added to the total.
+
+## 2026-09-21: the rule SHAPE was wrong, and nothing could have settled
+
+Found while re-measuring, fixed here, and worth stating plainly because it is
+the whole prediction layer rather than a detail. `settle_due_predictions()`
+reads `telemetry_rule -> 'params'` and `telemetry_rule ->> 'outcome_if_true'`
+/ `'outcome_if_false'`. Every rule in this catalogue was written FLAT, and the
+parameterless kinds carried no outcome keys at all. Against the real SQL:
+
+* `death_in_window` and `mission_outcome` would void `malformed_rule` on every
+  settlement (`coalesce(v_params ->> 'event_type', '') = ''` is true when
+  `params` is absent) — real entries, no winner, ever;
+* `loses_the_cops`, `survives_a_chase`, `survives_a_fight` and
+  `two_star_standoff` would reach `update ... set status = 'settled', result =
+  v_result` with `v_result` NULL, and
+  `predictions_guard_status_transition` RAISES on a result that is not one of
+  the row's outcome keys — aborting the whole settlement transaction, taking
+  every other due prediction in that run down with it.
+
+`_rule()` is now the single place the shape is written and `_validate_rule()`
+refuses anything else at import time, so this class of break cannot recur. No
+production row was ever affected: `predictions` has zero rows.
 """
 
 from __future__ import annotations
@@ -207,14 +258,19 @@ from wasted_harness.bridge_client import GameState
 RecentEvent = dict[str, Any]
 
 #: docs/CONTRACTS-PREDICTIONS.md §3 — the CLOSED settlement registry. Copied
-#: verbatim (kind names only; the params column is documentation, not
-#: enforced here — settlement owns validating its own params). A rule whose
-#: kind is not in this set voids at settlement and "credits nobody" per §3's
-#: "Voiding is mandatory" rule, so nothing in this package may ever construct
-#: one.
+#: verbatim (kind names only). A rule whose kind is not in this set voids at
+#: settlement and "credits nobody" per §3's "Voiding is mandatory" rule, so
+#: nothing in this package may ever construct one.
+#:
+#: `event_matches` is the v2.4 addition: `event_occurs` plus a `payload_match`
+#: filter, and a NEW kind rather than a new parameter on `event_occurs`
+#: precisely so that a harness ahead of the database fails CLOSED — an
+#: unrecognised kind voids, where an ignored extra parameter would have settled
+#: every such question YES on the first `activity_end` of any shape.
 TELEMETRY_RULE_KINDS: frozenset[str] = frozenset(
     {
         "event_occurs",
+        "event_matches",
         "wanted_reaches",
         "wanted_clears",
         "wanted_gained",
@@ -225,6 +281,28 @@ TELEMETRY_RULE_KINDS: frozenset[str] = frozenset(
         "activity_outcome",
     }
 )
+
+#: The params each §3 kind REQUIRES, by name. Settlement reads them out of
+#: `telemetry_rule -> 'params'` (a nested object — see `_validate_rule`) and
+#: voids `malformed_rule` when a required one is blank, so this table is what
+#: stops such a rule being constructed in the first place.
+REQUIRED_RULE_PARAMS: dict[str, tuple[str, ...]] = {
+    "event_occurs": ("event_type",),
+    "event_matches": ("event_type", "payload_match"),
+    "wanted_reaches": ("level",),
+    "wanted_clears": (),
+    "wanted_gained": (),
+    "survives_window": (),
+    "mission_outcome": ("expect",),
+    "activity_outcome": ("activity", "expect"),
+}
+
+#: What a `payload_match` value is allowed to be. `payload @> payload_match` is
+#: a containment test against real event payloads, and the only values that
+#: compare meaningfully there are JSON scalars: a nested object or array would
+#: be a containment test nobody here has measured, and `None` is a real value
+#: in these payloads (`activity_end.by` is null most of the time).
+_JSON_SCALARS = (str, bool, int, float, type(None))
 
 #: Kinds §3 RECOGNISES but settlement can never RESOLVE. `settle_due_predictions()`
 #: (`20260908120000_predictions.sql:584-591`) matches these and unconditionally sets
@@ -251,6 +329,39 @@ YES_NO_OUTCOMES: tuple[dict[str, str], ...] = (
 #: outside this is refused at construction — see :class:`Window`.
 MIN_WINDOW_S = 30.0
 MAX_WINDOW_S = 300.0
+
+#: --- CONTRACTS-PREDICTIONS.md §3 "Cadence and entry windows" (v2.4) ---------
+#:
+#: **Entry window floor.** `locks_at - opened_at` is never less than 30 s for
+#: any prediction. Contract's own measured need, quoted: "the page polls every
+#: 8 s and the broadcast runs seconds behind the game, so the 10-20 s the first
+#: catalogue allowed was mostly gone before a viewer saw the card". Enforced in
+#: `Window.__post_init__`, "not by convention" — the contract names this file.
+MIN_ENTRY_WINDOW_S = 30.0
+
+#: **Scheduled rounds.** An always-available question gives "60 s to enter,
+#: then a 180 s window". Both halves are fixed by §3, so an ambient template is
+#: refused at construction unless its window is exactly these two numbers: the
+#: 60 s is the contract's floor for a scheduled round, and the 180 s is the
+#: window every rolling base rate in this system is measured over
+#: (`baserate.RollingBaseRate`) — a template that resolved over some other span
+#: would be offered on odds measured for a span it does not use.
+AMBIENT_LOCK_DELAY_S = 60.0
+AMBIENT_RESOLVE_DELAY_S = 180.0
+
+#: **An always-available question must earn its place on every ask.** §3: it is
+#: offered "only while that rate is inside [0.20, 0.80] on at least 12 sampled
+#: windows". The measurement itself is `baserate.RollingBaseRate`; these three
+#: constants are the admission test the generator applies to what it returns.
+AMBIENT_MIN_SAMPLES = 12
+AMBIENT_MIN_RATE = 0.20
+AMBIENT_MAX_RATE = 0.80
+
+#: §3's own default cadence for a scheduled round: "while the agent is live and
+#: nothing situational has been asked for `round_interval_s` (default 300 s)".
+#: Also the step the rolling base rate samples its windows at, so the odds a
+#: viewer is shown are measured on the same grid the questions are asked on.
+DEFAULT_ROUND_INTERVAL_S = 300.0
 
 #: The highest `wanted_change.to` in 86.93 h of real recording
 #: (`real_session_2026-09-04.json`: 63 `wanted_change` events, max `to` = 2).
@@ -397,6 +508,18 @@ class Window:
     `opened_at < locks_at < resolves_at` (CONTRACTS-PREDICTIONS §2's CHECK) is
     guaranteed by construction: both delays must be positive, so `locks_at` is
     strictly after `opened_at` and `resolves_at` strictly after `locks_at`.
+
+    `lock_delay_s` is the whole of a viewer's chance to answer, and §3 (v2.4)
+    puts a hard floor of :data:`MIN_ENTRY_WINDOW_S` under it — "enforced where
+    the window is constructed (`harness/wasted_harness/predictions/catalog.py`),
+    not by convention", which is this method.
+
+    **Moving the lock moves what is MEASURED, not just who can enter.**
+    Settlement reads `[locks_at, resolves_at]` and nothing else, so raising
+    `lock_delay_s` shifts the whole settled window later by the same amount
+    against the telemetry. Every base rate in this module was therefore
+    re-measured when the floor landed; see the module docstring's 2026-09-21
+    calibration section for the before/after numbers.
     """
 
     lock_delay_s: float
@@ -408,15 +531,151 @@ class Window:
                 f"both delays must be > 0 (opened_at < locks_at < resolves_at); "
                 f"got lock_delay_s={self.lock_delay_s}, resolve_delay_s={self.resolve_delay_s}"
             )
+        # Total first, deliberately: a window that is out of range on BOTH
+        # counts should report the range, which is the more basic fault.
         if not (MIN_WINDOW_S <= self.total_s <= MAX_WINDOW_S):
             raise ValueError(
                 f"window total (lock_delay_s + resolve_delay_s) must be "
                 f"{MIN_WINDOW_S}-{MAX_WINDOW_S}s (brief §9); got {self.total_s}s"
             )
+        if self.lock_delay_s < MIN_ENTRY_WINDOW_S:
+            raise ValueError(
+                f"lock_delay_s is the whole time a viewer has to enter and "
+                f"CONTRACTS-PREDICTIONS §3 floors it at {MIN_ENTRY_WINDOW_S}s "
+                f"(the page polls every 8s and the broadcast runs seconds "
+                f"behind the game); got lock_delay_s={self.lock_delay_s}"
+            )
 
     @property
     def total_s(self) -> float:
         return self.lock_delay_s + self.resolve_delay_s
+
+    @property
+    def is_scheduled_round(self) -> bool:
+        """Exactly §3's scheduled-round shape: 60 s to enter, then 180 s."""
+        return (
+            self.lock_delay_s == AMBIENT_LOCK_DELAY_S
+            and self.resolve_delay_s == AMBIENT_RESOLVE_DELAY_S
+        )
+
+
+def _validate_rule(prediction_type: str, rule: dict[str, Any], outcomes: tuple[dict[str, str], ...]) -> None:
+    """Refuse any `telemetry_rule` `settle_due_predictions()` cannot act on.
+
+    **This is the shape the SQL actually reads, and it is not the shape this
+    file used to write.** `settle_due_predictions()` does
+
+        v_params        := p.telemetry_rule -> 'params';
+        v_outcome_true  := p.telemetry_rule ->> 'outcome_if_true';
+        v_outcome_false := p.telemetry_rule ->> 'outcome_if_false';
+
+    (`20260908120000_predictions.sql`, the dispatch block), and
+    CONTRACTS-PREDICTIONS §3 (v2.4) spells the same object out in full:
+
+        {"kind": "event_matches",
+         "params": {"event_type": "activity_end", "payload_match": {...}},
+         "outcome_if_true": "yes", "outcome_if_false": "no"}
+
+    Every rule in this catalogue used to be written FLAT — `{"kind":
+    "event_occurs", "event_type": "death", ...}` — and with no outcome keys at
+    all on the parameterless kinds. Against the real SQL that is not a cosmetic
+    difference, it is total breakage, and it is why this validator exists:
+
+    * a flat `event_occurs`/`mission_outcome` rule reads `v_params ->>
+      'event_type'` as NULL, hits the `coalesce(..., '') = ''` guard and voids
+      `malformed_rule` — a card that takes real entries and can never have a
+      winner; and
+    * a rule with no `outcome_if_true`/`outcome_if_false` leaves `v_result`
+      NULL, and `predictions_guard_status_transition` then RAISES ("settled
+      with result <NULL> which is not one of its outcome keys"), which aborts
+      the whole settlement transaction — every other due prediction with it.
+
+    So: params nested, outcome keys present, and each one an actual key of this
+    template's own `outcomes`.
+    """
+    kind = rule.get("kind")
+    if kind not in TELEMETRY_RULE_KINDS:
+        raise ValueError(
+            f"{prediction_type!r}: telemetry_rule.kind {kind!r} is not in the "
+            f"CONTRACTS-PREDICTIONS.md §3 registry ({sorted(TELEMETRY_RULE_KINDS)}). "
+            f"An unrecognised kind voids at settlement — refusing to build it."
+        )
+    keys = {o["key"] for o in outcomes}
+    for field_name in ("outcome_if_true", "outcome_if_false"):
+        value = rule.get(field_name)
+        if value not in keys:
+            raise ValueError(
+                f"{prediction_type!r}: telemetry_rule.{field_name}={value!r} is not one of "
+                f"this template's outcome keys {sorted(keys)}. settle_due_predictions() "
+                f"writes it straight into `predictions.result`, and the status-transition "
+                f"trigger raises on a result that is not an outcome key — aborting the "
+                f"whole settlement run, not just this row."
+            )
+    params = rule.get("params", {})
+    if not isinstance(params, dict):
+        # ValueError, not TypeError (TRY004): every construction refusal in
+        # this module is a ValueError, and a caller that catches one to mean
+        # "this template will not ship" should not have to catch two.
+        raise ValueError(  # noqa: TRY004
+            f"{prediction_type!r}: telemetry_rule.params must be a JSON object "
+            f"(settlement reads `telemetry_rule -> 'params'`); got {type(params).__name__}"
+        )
+    for required in REQUIRED_RULE_PARAMS.get(kind, ()):
+        if required not in params:
+            raise ValueError(
+                f"{prediction_type!r}: kind {kind!r} requires params.{required}; "
+                f"settlement voids `malformed_rule` without it"
+            )
+    if kind in ("event_occurs", "event_matches"):
+        event_type = params.get("event_type")
+        if not isinstance(event_type, str) or not event_type.strip():
+            raise ValueError(
+                f"{prediction_type!r}: params.event_type must be a non-empty string; "
+                f"got {event_type!r} (settlement voids `malformed_rule` on a blank one)"
+            )
+    if kind == "event_matches":
+        # §3: "a `payload_match` that is missing, not an object, or `{}`, voids
+        # `malformed_rule` — an empty filter would be `event_occurs` under
+        # another name". Refused here so it can never be written.
+        match = params.get("payload_match")
+        if not isinstance(match, dict) or not match:
+            raise ValueError(
+                f"{prediction_type!r}: params.payload_match must be a non-empty JSON object "
+                f"(§3: an empty filter is `event_occurs` under another name); got {match!r}"
+            )
+        for key, value in match.items():
+            if not isinstance(key, str) or not key:
+                raise ValueError(
+                    f"{prediction_type!r}: payload_match keys must be non-empty strings; "
+                    f"got {key!r}"
+                )
+            if not isinstance(value, _JSON_SCALARS):
+                raise ValueError(  # noqa: TRY004  — see _validate_rule's first raise
+                    f"{prediction_type!r}: payload_match[{key!r}] must be a JSON scalar "
+                    f"(`payload @> payload_match` is a containment test); "
+                    f"got {type(value).__name__}"
+                )
+
+
+def _rule(
+    kind: str,
+    params: dict[str, Any] | None = None,
+    *,
+    outcome_if_true: str = "yes",
+    outcome_if_false: str = "no",
+) -> dict[str, Any]:
+    """Build one §3-shaped `telemetry_rule`. The ONE place the shape is written.
+
+    `params` is omitted entirely for the parameterless kinds rather than
+    written as `{}`, matching what §3's table says those kinds take ("—") and
+    what the SQL reads (it never touches `v_params` in those branches).
+    """
+    rule: dict[str, Any] = {"kind": kind}
+    if params:
+        rule["params"] = dict(params)
+    rule["outcome_if_true"] = outcome_if_true
+    rule["outcome_if_false"] = outcome_if_false
+    return rule
 
 
 @dataclass(frozen=True)
@@ -454,43 +713,72 @@ class PredictionTemplate:
     #: layer keys a boosted pool off; see the module docstring. Setting it
     #: REQUIRES `measured` below.
     is_event: bool = False
+    #: An ALWAYS-AVAILABLE question (CONTRACTS-PREDICTIONS §3, "Scheduled
+    #: rounds"). It has no dramatic trigger — ordinary free roam is its trigger
+    #: — so it is the thing the generator asks when nothing situational has
+    #: happened for a round, and the ONLY thing whose fairness has to be
+    #: re-established on every single ask (§3: "An always-available question
+    #: must earn its place on every ask"). That re-measurement is
+    #: `baserate.RollingBaseRate`, applied by the generator; this flag is what
+    #: marks a template as subject to it.
+    ambient: bool = False
     #: The real, recounted base rate behind this template, where one exists.
     #: Optional for an ordinary template (several in this catalog have no
     #: calibrating telemetry at all and say so at their own definition);
-    #: MANDATORY for an event.
+    #: MANDATORY for an event. When present it is ALWAYS held to
+    #: [EVENT_MIN_BASE_RATE, EVENT_MAX_BASE_RATE] — a number somebody measured
+    #: and then shipped outside the band is a foregone conclusion whether or
+    #: not it carries the WANTED EVENT highlight.
     measured: MeasuredRate | None = None
 
     def __post_init__(self) -> None:
-        kind = self.telemetry_rule.get("kind")
-        if kind not in TELEMETRY_RULE_KINDS:
-            raise ValueError(
-                f"{self.prediction_type!r}: telemetry_rule.kind {kind!r} is not in the "
-                f"CONTRACTS-PREDICTIONS.md §3 registry ({sorted(TELEMETRY_RULE_KINDS)}). "
-                f"An unrecognised kind voids at settlement — refusing to build it."
-            )
+        _validate_rule(self.prediction_type, self.telemetry_rule, self.outcomes)
         if not (0.0 <= self.reliability <= 1.0):
             raise ValueError(f"{self.prediction_type!r}: reliability must be in [0,1]")
-        if not self.is_event:
-            return
-        # A WANTED EVENT is highlighted and may carry a boosted pool. It ships
-        # only on a rate somebody actually counted off a real recording.
-        if self.measured is None:
-            raise ValueError(
-                f"{self.prediction_type!r}: an event template (is_event=True) must ship a "
-                f"MeasuredRate recounted from a real recording. An unmeasured 'major event' "
-                f"is a guess with a highlight on it — refusing to build it."
-            )
-        if self.measured.n < EVENT_MIN_SAMPLE:
-            raise ValueError(
-                f"{self.prediction_type!r}: measured on {self.measured.n} real anchors, below "
-                f"EVENT_MIN_SAMPLE={EVENT_MIN_SAMPLE}. Not enough real moments to call this a "
-                f"base rate — refusing to build it."
-            )
-        if not (EVENT_MIN_BASE_RATE <= self.measured.rate <= EVENT_MAX_BASE_RATE):
+        if self.ambient:
+            if self.is_event:
+                raise ValueError(
+                    f"{self.prediction_type!r}: a template cannot be both ambient and a "
+                    f"WANTED EVENT. An event is the rarest thing on the card and an ambient "
+                    f"question is the most routine; flagging both makes the rarity gate and "
+                    f"the round scheduler fight over the same row."
+                )
+            if not self.window.is_scheduled_round:
+                raise ValueError(
+                    f"{self.prediction_type!r}: an ambient template must run §3's scheduled-"
+                    f"round window exactly — lock_delay_s={AMBIENT_LOCK_DELAY_S}, "
+                    f"resolve_delay_s={AMBIENT_RESOLVE_DELAY_S} ('60 s to enter, then a 180 s "
+                    f"window'); got {self.window.lock_delay_s}/{self.window.resolve_delay_s}. "
+                    f"RollingBaseRate measures this exact shape, so a different one would be "
+                    f"offered on odds measured for a window it does not use."
+                )
+        if self.is_event:
+            # A WANTED EVENT is highlighted and may carry a boosted pool. It
+            # ships only on a rate somebody actually counted off a recording.
+            if self.measured is None:
+                raise ValueError(
+                    f"{self.prediction_type!r}: an event template (is_event=True) must ship a "
+                    f"MeasuredRate recounted from a real recording. An unmeasured 'major event' "
+                    f"is a guess with a highlight on it — refusing to build it."
+                )
+            if self.measured.n < EVENT_MIN_SAMPLE:
+                raise ValueError(
+                    f"{self.prediction_type!r}: measured on {self.measured.n} real anchors, "
+                    f"below EVENT_MIN_SAMPLE={EVENT_MIN_SAMPLE}. Not enough real moments to "
+                    f"call this a base rate — refusing to build it."
+                )
+        # The admission band applies to ANY measured rate, event or not: a
+        # number somebody counted and then shipped outside the band is a
+        # foregone conclusion whether or not it carries the highlight. This is
+        # the check that would have caught a re-measured window drifting out of
+        # range when the §3 entry-window floor moved every lock.
+        if self.measured is not None and not (
+            EVENT_MIN_BASE_RATE <= self.measured.rate <= EVENT_MAX_BASE_RATE
+        ):
             raise ValueError(
                 f"{self.prediction_type!r}: measured base rate {self.measured.rate:.3f} is "
                 f"outside [{EVENT_MIN_BASE_RATE}, {EVENT_MAX_BASE_RATE}] — a foregone "
-                f"conclusion, not an event. Refusing to build it."
+                f"conclusion, not a question. Refusing to build it."
             )
 
 
@@ -563,11 +851,23 @@ def _recent_wanted_gain_to(recent_events: Sequence[RecentEvent], level: int) -> 
 # --- 1. death soon after a real wanted-star gain ---------------------------------
 # kind: event_occurs{event_type:"death"} — an `events` row of type `death` in
 # the window. `death` IS emitted (wasted_harness.events.EMITTED_EVENT_TYPES).
-# CALIBRATED: 240s after a real gain, 17/39 real gains (43.6%) were followed
-# by a real `death` event and none of the earlier windows tried (90-210s)
-# cleared 40% — see module docstring §"Calibration", point 4.
+# RE-MEASURED 2026-09-21 for the §3 entry-window floor (lock 15s -> 30s, the
+# settled window unchanged at 225s but now starting 15s later): 14/39 real
+# gains (35.9%) are followed by a real `death` row inside [locks_at,
+# resolves_at]. Band across the whole 0-60s generation delay: 25.6-35.9%.
+# The old comment here said 43.6%; that figure was measured anchor-to-anchor
+# (`(gain, gain+240s]`), which is NOT what settlement reads.
 
-_DEATH_WINDOW = Window(lock_delay_s=15.0, resolve_delay_s=225.0)  # 240s total
+_DEATH_WINDOW = Window(lock_delay_s=30.0, resolve_delay_s=225.0)  # 255s total
+
+DEATH_IN_WINDOW_RATE = MeasuredRate(
+    yes=14,
+    n=39,
+    fixture="tests/fixtures/real_session_2026-09-04.json",
+    anchor="wanted_change with to > from",
+    settled_window_s=225.0,
+    generation_delay_band_s=(0.0, 60.0),
+)
 
 
 def _trigger_death_in_window(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
@@ -584,16 +884,16 @@ def _trigger_death_in_window(state: GameState, recent_events: Sequence[RecentEve
 
 
 def _score_death_in_window(state: GameState) -> float:
-    # Seeded from the measured 43.6% base rate (n=39), nudged by real-time
+    # Seeded from the re-measured 35.9% base rate (n=39), nudged by real-time
     # danger signals the calibration data could not see (it has no /state).
     p = _clamp(
-        0.436
+        DEATH_IN_WINDOW_RATE.rate
         + 0.20 * (1.0 - _health_fraction(state))
         + 0.10 * (1.0 if _under_attack(state) else 0.0)
         + 0.05 * (1.0 if _hostile_nearby(state) else 0.0)
     )
     # Weighted toward watchability rather than 50/50 with uncertainty: the
-    # measured base rate (43.6%) already sits close to 0.5, so pushing p up
+    # measured base rate (35.9%) already sits close to 0.5, so pushing p up
     # with real danger signals trades a little uncertainty for a lot of
     # "this is the moment to watch" — a near-death instant is more must-see
     # than it is more predictable, and the blend should say so.
@@ -607,26 +907,34 @@ TPL_DEATH_IN_WINDOW = PredictionTemplate(
     prediction_type="death_in_window",
     question="NOW THAT THE COPS ARE ON HIM: WILL WANTED DIE IN THE NEXT 4 MINUTES?",
     outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={
-        "kind": "event_occurs",
-        "event_type": "death",
-        "outcome_if_true": "yes",
-        "outcome_if_false": "no",
-    },
+    telemetry_rule=_rule("event_occurs", {"event_type": "death"}),
     window=_DEATH_WINDOW,
     trigger=_trigger_death_in_window,
     score=_score_death_in_window,
     reliability=0.85,
+    measured=DEATH_IN_WINDOW_RATE,
 )
 
 
 # --- 2. loses the cops, right after a real wanted-star gain -----------------------
 # kind: wanted_clears — `wanted_change` payload `to = 0`.
-# CALIBRATED: 90s after a real gain, 21/39 real gains (53.8%) cleared to 0 —
-# the coordinator's own "single best question found", reproduced independently
-# here. See module docstring §"Calibration", point 4.
+# RE-MEASURED 2026-09-21 for the §3 entry-window floor (lock 10s -> 30s, the
+# settled window unchanged at 80s): 21/39 real gains (53.8%) clear to 0 inside
+# [locks_at, resolves_at]. The headline number is unchanged by coincidence, not
+# by construction — the old 53.8% was the anchor-to-anchor `(gain, gain+90s]`
+# approximation, and the true settled window `[gain+30, gain+110]` happens to
+# catch the same 21 gains. Band across the 0-60s generation delay: 35.9-53.8%.
 
-_LOSES_COPS_WINDOW = Window(lock_delay_s=10.0, resolve_delay_s=80.0)  # 90s total
+_LOSES_COPS_WINDOW = Window(lock_delay_s=30.0, resolve_delay_s=80.0)  # 110s total
+
+LOSES_THE_COPS_RATE = MeasuredRate(
+    yes=21,
+    n=39,
+    fixture="tests/fixtures/real_session_2026-09-04.json",
+    anchor="wanted_change with to > from",
+    settled_window_s=80.0,
+    generation_delay_band_s=(0.0, 60.0),
+)
 
 
 def _trigger_loses_the_cops(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
@@ -642,7 +950,7 @@ def _score_loses_the_cops(state: GameState) -> float:
     # Seeded from the measured 53.8% base rate (n=39) — already very close to
     # 50/50 on its own; nudged only slightly by real-time signals.
     p = _clamp(
-        0.538
+        LOSES_THE_COPS_RATE.rate
         + 0.10 * (1.0 if state.player.in_vehicle else -0.10)
         - 0.05 * (state.player.wanted / 5.0)
     )
@@ -654,11 +962,12 @@ TPL_LOSES_THE_COPS = PredictionTemplate(
     prediction_type="loses_the_cops",
     question="THE COPS JUST CAME ON: WILL WANTED LOSE THEM?",
     outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "wanted_clears"},
+    telemetry_rule=_rule("wanted_clears"),
     window=_LOSES_COPS_WINDOW,
     trigger=_trigger_loses_the_cops,
     score=_score_loses_the_cops,
     reliability=0.85,
+    measured=LOSES_THE_COPS_RATE,
 )
 
 
@@ -667,11 +976,25 @@ TPL_LOSES_THE_COPS = PredictionTemplate(
 # IS emitted (EMITTED_EVENT_TYPES), same as `death`.
 # CALIBRATED: an AMBIENT "survives 3 min" is a 99.1% giveaway (recomputed
 # here; the coordinator measured 97.9% on their own denominator — see the
-# module docstring for why the two differ). Anchored on a real gain instead,
-# 150s out, 19/39 (48.7%) survived with no death/busted in between — the
-# single closest-to-50/50 number this recount found. See "Calibration" pt 4.
+# module docstring for why the two differ). Anchored on a real gain instead:
+# RE-MEASURED 2026-09-21 for the §3 entry-window floor (lock 10s -> 30s, the
+# settled window unchanged at 140s), 22/39 (56.4%) survive with no death or
+# busted row inside [locks_at, resolves_at]. The old 48.7% was the
+# anchor-to-anchor `(gain, gain+150s]` approximation. Band across the 0-60s
+# generation delay: 56.4-74.4% — the widest drift of any template here,
+# because every second the window slides forward is a second further from the
+# moment the heat came on. Still inside the admission band at both ends.
 
-_SURVIVES_CHASE_WINDOW = Window(lock_delay_s=10.0, resolve_delay_s=140.0)  # 150s total
+_SURVIVES_CHASE_WINDOW = Window(lock_delay_s=30.0, resolve_delay_s=140.0)  # 170s total
+
+SURVIVES_A_CHASE_RATE = MeasuredRate(
+    yes=22,
+    n=39,
+    fixture="tests/fixtures/real_session_2026-09-04.json",
+    anchor="wanted_change with to > from",
+    settled_window_s=140.0,
+    generation_delay_band_s=(0.0, 60.0),
+)
 
 
 def _trigger_survives_a_chase(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
@@ -684,10 +1007,10 @@ def _trigger_survives_a_chase(state: GameState, recent_events: Sequence[RecentEv
 
 
 def _score_survives_a_chase(state: GameState) -> float:
-    # Seeded from the measured 48.7% base rate (n=39) — the best-calibrated
-    # number in this catalog; real-time health/heat only nudge it.
+    # Seeded from the re-measured 56.4% base rate (n=39); real-time health and
+    # heat only nudge it.
     p = _clamp(
-        0.487
+        SURVIVES_A_CHASE_RATE.rate
         + 0.15 * (_health_fraction(state) - 0.5)
         - 0.05 * (state.player.wanted / 5.0)
     )
@@ -699,11 +1022,12 @@ TPL_SURVIVES_A_CHASE = PredictionTemplate(
     prediction_type="survives_a_chase",
     question="THE COPS JUST CAME ON: WILL WANTED SURVIVE THIS CHASE?",
     outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "survives_window"},
+    telemetry_rule=_rule("survives_window"),
     window=_SURVIVES_CHASE_WINDOW,
     trigger=_trigger_survives_a_chase,
     score=_score_survives_a_chase,
     reliability=0.9,
+    measured=SURVIVES_A_CHASE_RATE,
 )
 
 
@@ -715,7 +1039,10 @@ TPL_SURVIVES_A_CHASE = PredictionTemplate(
 # attacker_handle`, never a §4 event), so no fight-specific window could be
 # measured. `enters`/`exits_vehicle`'s caveat applies here identically.
 
-_SURVIVES_FIGHT_WINDOW = Window(lock_delay_s=10.0, resolve_delay_s=50.0)  # 1 min total
+# The §3 entry-window floor moved this lock 10s -> 30s (2026-09-21). There is
+# no base rate to re-measure: see above, an events-only export carries no
+# threat telemetry at all, so this template has never had one.
+_SURVIVES_FIGHT_WINDOW = Window(lock_delay_s=30.0, resolve_delay_s=50.0)  # 80s total
 
 
 def _trigger_survives_a_fight(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
@@ -736,7 +1063,7 @@ TPL_SURVIVES_A_FIGHT = PredictionTemplate(
     prediction_type="survives_a_fight",
     question="WILL WANTED SURVIVE THIS FIGHT?",
     outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "survives_window"},
+    telemetry_rule=_rule("survives_window"),
     window=_SURVIVES_FIGHT_WINDOW,
     trigger=_trigger_survives_a_fight,
     score=_score_survives_a_fight,
@@ -758,7 +1085,11 @@ TPL_SURVIVES_A_FIGHT = PredictionTemplate(
 # set low on purpose to reflect that; the generator will rank it behind
 # comparably-uncertain, comparably-watchable options that resolve cleanly.
 
-_MISSION_OUTCOME_WINDOW = Window(lock_delay_s=20.0, resolve_delay_s=280.0)  # 5 min total (capped)
+# The §3 entry-window floor moved this lock 20s -> 30s (2026-09-21). The
+# window TOTAL is already at MAX_WINDOW_S, so the ten seconds came off the
+# settled span (280s -> 270s) rather than being added to the total; there is no
+# base rate to re-measure (this recording has zero mission events).
+_MISSION_OUTCOME_WINDOW = Window(lock_delay_s=30.0, resolve_delay_s=270.0)  # 5 min total (capped)
 
 
 def _trigger_mission_outcome(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
@@ -778,7 +1109,7 @@ TPL_MISSION_OUTCOME = PredictionTemplate(
     prediction_type="mission_outcome",
     question="WILL WANTED COMPLETE THIS MISSION?",
     outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "mission_outcome", "expect": "passed"},
+    telemetry_rule=_rule("mission_outcome", {"expect": "passed"}),
     window=_MISSION_OUTCOME_WINDOW,
     trigger=_trigger_mission_outcome,
     score=_score_mission_outcome,
@@ -798,14 +1129,20 @@ TPL_MISSION_OUTCOME = PredictionTemplate(
 #
 # CALIBRATED, with the real settlement window rather than an anchor-to-anchor
 # approximation: of the 17 real `wanted_change` events reaching `to >= 2`, the
-# 240s settled window that opens 15s after the row is created contains no
-# `death`/`busted` row for 5 (29.4%) at zero generation delay and 8 (47.1%) at
-# a 60s delay — fair across the whole band. Module docstring, calibration pt 5.
+# 240s settled window contains no `death`/`busted` row for 7 of them (41.2%) at
+# zero generation delay and 8 (47.1%) at a 60s delay — fair across the whole
+# band. Module docstring, calibration pt 5.
+#
+# RE-MEASURED 2026-09-21 for the §3 entry-window floor (lock 15s -> 30s): the
+# settled window is the same 240s, fifteen seconds later, and the rate moves
+# 29.4% -> 41.2% at zero delay. Band across 0-60s: 41.2-47.1%, tighter than
+# before and closer to even — a rarer accident of this recording than it
+# sounds, and the reason the sweep test exists rather than a single number.
 
-_TWO_STAR_STANDOFF_WINDOW = Window(lock_delay_s=15.0, resolve_delay_s=240.0)  # 255s total
+_TWO_STAR_STANDOFF_WINDOW = Window(lock_delay_s=30.0, resolve_delay_s=240.0)  # 270s total
 
 TWO_STAR_STANDOFF_RATE = MeasuredRate(
-    yes=5,
+    yes=7,
     n=17,
     fixture="tests/fixtures/real_session_2026-09-04.json",
     anchor="wanted_change with to >= 2 and to > from",
@@ -824,7 +1161,7 @@ def _trigger_two_star_standoff(state: GameState, recent_events: Sequence[RecentE
 
 
 def _score_two_star_standoff(state: GameState) -> float:
-    # Seeded from the measured 29.4% (n=17) at the pessimistic end of the
+    # Seeded from the re-measured 41.2% (n=17) at the pessimistic end of the
     # delay band, nudged by the real-time signals the recording cannot see.
     p = _clamp(
         TWO_STAR_STANDOFF_RATE.rate
@@ -845,17 +1182,183 @@ TPL_TWO_STAR_STANDOFF = PredictionTemplate(
         "CAN WANTED STAY ALIVE AND OUT OF CUFFS FOR FOUR MINUTES?"
     ),
     outcomes=YES_NO_OUTCOMES,
-    telemetry_rule={"kind": "survives_window"},
+    telemetry_rule=_rule("survives_window"),
     window=_TWO_STAR_STANDOFF_WINDOW,
     trigger=_trigger_two_star_standoff,
     score=_score_two_star_standoff,
     # A notch under `survives_a_chase`'s 0.9: same always-resolves rule, but a
-    # 255s window is 1.7x the exposure to a session_end/bridge_down overlap,
+    # 270s window is 1.6x the exposure to a session_end/bridge_down overlap,
     # which §3 makes a mandatory void. (Zero of the 17 real anchors actually
     # had one, so this is caution, not an observed failure rate.)
     reliability=0.85,
     is_event=True,
     measured=TWO_STAR_STANDOFF_RATE,
+)
+
+
+# --- 7-9. the ALWAYS-AVAILABLE questions (CONTRACTS-PREDICTIONS §3, v2.4) --------
+#
+# Everything above needs a dramatic moment: a wanted star, a fight, a mission.
+# The 2026-09-20 recording is 2 h 19 m of real live play with ZERO
+# `wanted_change`, `death` or `busted` rows in it — so on a day like that one,
+# every template above is unofferable and the card is empty for the entire
+# broadcast. §3's answer is a scheduled round: one always-available question
+# every `round_interval_s`, on the one thing the agent does constantly.
+#
+# THE ONE THING HE DOES CONSTANTLY is finish (or fail to finish) free-roam
+# goals: `activity_end` is 2,668 of the 5,649 rows in the 2026-09-04 recording
+# and 112 of the 230 in the 2026-09-20 one. So all three of these read
+# `activity_end`, with `event_matches` — `event_occurs` plus a payload filter,
+# the kind §3 added in v2.4 for exactly this.
+#
+# WHAT THE PAYLOAD REALLY CARRIES, checked in the emitters rather than assumed
+# (`behavior/activities.py:finish`, `behavior/planner.py:_end_trip`, and
+# `main.py:_end_activity` which merges `behavior/roam.py:close`):
+#   * `outcome` — ALWAYS present. Both emitters build the payload with it, and
+#     it is on 2,668/2,668 and 112/112 real rows.
+#   * `category` — NOT always present. It comes from `roam.close()`, which
+#     returns `{}` when no roam goal was locked, so the day planner's own
+#     `go_start_a_job` rows carry none: 2,116/2,668 (79.3%) on 2026-09-04 and
+#     108/112 (96.4%) on 2026-09-20 carry it, and every row missing it is a
+#     `go_start_a_job`. That is FINE for a `payload_match` on
+#     {"category": "trouble"} — `payload @> '{"category":"trouble"}'` is simply
+#     false for a row with no `category` key, which is the right answer — but
+#     it is not fine to describe the question as "any activity", so
+#     `gets_into_trouble` is worded as him going looking for trouble, which is
+#     what a `trouble`-category goal is.
+#
+# NONE OF THE THREE SHIPS A FIXED BASE RATE, and that is the point of §3. The
+# same question measures 50% on 2026-09-20 and 8% on 2026-09-04 (see
+# AMBIENT_RECORDED_RATES) — a fixed rate would have been a giveaway on one of
+# those days. What decides whether one is asked is `baserate.RollingBaseRate`,
+# re-measured from the agent's own recent telemetry on every ask.
+
+#: What the two real recordings say about each ambient question, measured by
+#: running the SHIPPED estimator (`baserate.RollingBaseRate`) over each file
+#: with its clock pinned to the recording's last event: windows of the
+#: template's exact shape ([t+60, t+240]), stepped by
+#: DEFAULT_ROUND_INTERVAL_S back from the newest closed one, counting the
+#: windows that contain a matching event. `(yes, n)` per file.
+#:
+#: These are NOT thresholds and nothing reads them at runtime — they are the
+#: evidence for why the runtime gate has to exist, and
+#: `tests/test_predictions_catalog.py` re-derives every pair from the files
+#: through that same estimator.
+#:
+#: **The sampling grid is worth a sentence, because it moves the answer.**
+#: Stepping FORWARDS from the first event instead gives (82, 1043), (32, 1043)
+#: and (77, 1043) on 2026-09-04 — the same 1,043 windows, offset by 108 s, and
+#: up to 22% different in count. Both are honest measurements of a bursty
+#: process; neither is "the" rate. That is precisely why §3 asks for a live
+#: rolling measurement with a minimum sample and a band around it rather than
+#: a number written into a template, and why nothing here treats a single
+#: point estimate as a fact about the agent.
+AMBIENT_RECORDED_RATES: dict[str, dict[str, tuple[int, int]]] = {
+    "pulls_off_a_goal": {
+        "real_session_2026-09-20.json": (14, 28),  # 50%
+        "real_session_2026-09-04.json": (75, 1043),  # 7%
+    },
+    "runs_out_of_time": {
+        "real_session_2026-09-20.json": (9, 28),  # 32%
+        "real_session_2026-09-04.json": (31, 1043),  # 3%
+    },
+    "gets_into_trouble": {
+        "real_session_2026-09-20.json": (7, 28),  # 25%
+        "real_session_2026-09-04.json": (94, 1043),  # 9%
+    },
+}
+
+_AMBIENT_WINDOW = Window(
+    lock_delay_s=AMBIENT_LOCK_DELAY_S, resolve_delay_s=AMBIENT_RESOLVE_DELAY_S
+)
+
+
+def _ordinary_free_roam(state: GameState, recent_events: Sequence[RecentEvent]) -> bool:
+    """§3's "ordinary free roam": the moments the situational templates DON'T own.
+
+    Alive, not in cuffs, no cutscene, no mission, and no heat — a wanted star,
+    a bust or a mission start is a situational template's moment, and asking an
+    always-available question over the top of one would put two cards on the
+    screen describing the same minute.
+
+    The other half of "believable state" is the CALLER's: `main.py`'s
+    `_offer_prediction` refuses to offer anything at all while
+    `_believe_state()` is false (the blocking-screen watchdog holding a frozen
+    snapshot). That gate is upstream of every template here, ambient or not, so
+    it is deliberately not repeated per-template.
+
+    `recent_events` is unused: "ordinary" is a property of the live state, not
+    of what happened to be recorded in the last minute.
+    """
+    return (
+        not state.player.dead
+        and not state.player.arrested
+        and not state.mission.active
+        and not state.mission.cutscene_active
+        and state.player.wanted == 0
+    )
+
+
+def _ambient_score(state: GameState) -> float:
+    """Ranking among ambient candidates is by MEASURED rate, not by this.
+
+    `generator._pick_ambient` orders on |rate - 0.5| from the live rolling
+    measurement and then on novelty, because for an always-available question
+    the measurement is the only honest statement about how uncertain it is.
+    This exists because `PredictionTemplate.score` is not optional; it returns
+    the neutral value so that if an ambient template ever does reach the
+    situational ranker it neither wins nor loses on a number nobody measured.
+    """
+    return 0.5
+
+
+TPL_PULLS_OFF_A_GOAL = PredictionTemplate(
+    prediction_type="pulls_off_a_goal",
+    question="WANTED IS OFF DOING HIS OWN THING: WILL HE ACTUALLY PULL IT OFF IN THREE MINUTES?",
+    outcomes=YES_NO_OUTCOMES,
+    telemetry_rule=_rule(
+        "event_matches",
+        {"event_type": "activity_end", "payload_match": {"outcome": "completed"}},
+    ),
+    window=_AMBIENT_WINDOW,
+    trigger=_ordinary_free_roam,
+    score=_ambient_score,
+    # `event_matches` always produces an outcome — absence is a definite NO,
+    # exactly as for `event_occurs` (§3) — so the only way this voids is a
+    # session_end/bridge_down overlap or the completeness gate never opening.
+    # Same standing as `death_in_window`, over a shorter window.
+    reliability=0.85,
+    ambient=True,
+)
+
+TPL_RUNS_OUT_OF_TIME = PredictionTemplate(
+    prediction_type="runs_out_of_time",
+    question="WILL WANTED RUN THE CLOCK OUT ON WHAT HE IS DOING IN THE NEXT THREE MINUTES?",
+    outcomes=YES_NO_OUTCOMES,
+    telemetry_rule=_rule(
+        "event_matches",
+        {"event_type": "activity_end", "payload_match": {"outcome": "timeout"}},
+    ),
+    window=_AMBIENT_WINDOW,
+    trigger=_ordinary_free_roam,
+    score=_ambient_score,
+    reliability=0.85,
+    ambient=True,
+)
+
+TPL_GETS_INTO_TROUBLE = PredictionTemplate(
+    prediction_type="gets_into_trouble",
+    question="QUIET STREET, NO COPS: WILL WANTED GO LOOKING FOR TROUBLE IN THREE MINUTES?",
+    outcomes=YES_NO_OUTCOMES,
+    telemetry_rule=_rule(
+        "event_matches",
+        {"event_type": "activity_end", "payload_match": {"category": "trouble"}},
+    ),
+    window=_AMBIENT_WINDOW,
+    trigger=_ordinary_free_roam,
+    score=_ambient_score,
+    reliability=0.85,
+    ambient=True,
 )
 
 
@@ -867,6 +1370,9 @@ def _build_catalog() -> tuple[PredictionTemplate, ...]:
         TPL_SURVIVES_A_FIGHT,
         TPL_MISSION_OUTCOME,
         TPL_TWO_STAR_STANDOFF,
+        TPL_PULLS_OFF_A_GOAL,
+        TPL_RUNS_OUT_OF_TIME,
+        TPL_GETS_INTO_TROUBLE,
     )
     seen: set[str] = set()
     for tpl in catalog:

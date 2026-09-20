@@ -620,3 +620,276 @@ def test_generation_stops_after_repeated_write_failures(tmp_path: Path) -> None:
         "generation continued after the breaker had tripped"
     )
 
+
+
+# --- (e) a rejected predictions insert is VISIBLE, and trips the breaker --------
+#
+# The gap the test above documents from the other side. `test_generation_stops_
+# after_repeated_write_failures` proves the breaker stops generation once the
+# counter is at the limit — but on a real box nothing ever moved that counter.
+# `_offer_prediction` only counted RAISES out of `generate()`/`write()`, and a
+# `predictions` insert that Supabase refuses does not raise there: `events.py`
+# catches it inside `flush()`, logs it like any other table's network blip,
+# writes the row to the offline queue and re-POSTs the whole backlog on the
+# game-loop thread on every flush, forever. The breaker could not see the one
+# failure it exists for.
+#
+# The failure below is real, not simulated: a genuine TCP refusal against
+# 127.0.0.1:1 through the real supabase client, the same idiom the rest of this
+# file (and `test_offline_queue.py`) uses to get an honest failure without a
+# live project. What it exercises is the counting and the breaker, and those do
+# not care whether the server said "connection refused" or "column does not
+# exist" — only that the `predictions` run failed and kept failing.
+
+
+def test_a_refused_predictions_insert_is_counted_on_the_writer(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, predictions_enabled=True)
+    writer = _ObservedWriter(settings, session_id=SESSION_ID, on_event=lambda *_: None)
+    prediction_writer = PredictionWriter(writer)
+
+    assert writer.predictions_write_failures == 0
+    prediction_writer.write(
+        {
+            "session_id": SESSION_ID,
+            "question": "WILL WANTED LOSE THEM?",
+            "prediction_type": "loses_the_cops",
+            "state_context": {},
+            "created_from_event": None,
+            "opened_at": "2026-09-21T00:00:00+00:00",
+            "locks_at": "2026-09-21T00:00:30+00:00",
+            "resolves_at": "2026-09-21T00:01:50+00:00",
+            "outcomes": [{"key": "yes", "label": "YES"}, {"key": "no", "label": "NO"}],
+            "telemetry_rule": {
+                "kind": "wanted_clears",
+                "outcome_if_true": "yes",
+                "outcome_if_false": "no",
+            },
+            "status": "open",
+            "is_event": False,
+            "reward_pool": "0.005",
+            "reward_asset": "TTWO",
+        }
+    )
+    # Every flush retries the queued row and fails again — the "retried from
+    # the disk queue forever" behaviour, now counted.
+    for expected in range(1, 4):
+        assert writer.flush() is False
+        assert writer.predictions_write_failures == expected
+    assert writer.last_predictions_error is not None
+    assert "ConnectError" in writer.last_predictions_error
+    # ...and the row is genuinely on disk, not quietly dropped.
+    assert len(queued_predictions(writer)) == 1
+
+
+def test_the_refusal_is_logged_at_error_naming_the_table_and_the_server(
+    tmp_path: Path, caplog
+) -> None:
+    """A WARNING among every other table's WARNINGs is how this stayed
+    invisible. It is an ERROR now, and it says which table and what the server
+    said — the two things an operator needs to tell a five-second network blip
+    from an unapplied migration."""
+    import logging
+
+    settings = make_settings(tmp_path, predictions_enabled=True)
+    writer = _ObservedWriter(settings, session_id=SESSION_ID, on_event=lambda *_: None)
+    PredictionWriter(writer).write(
+        {
+            "session_id": SESSION_ID,
+            "question": "WILL WANTED LOSE THEM?",
+            "prediction_type": "loses_the_cops",
+            "telemetry_rule": {
+                "kind": "wanted_clears",
+                "outcome_if_true": "yes",
+                "outcome_if_false": "no",
+            },
+            "status": "open",
+            "reward_pool": "0.005",
+            "reward_asset": "TTWO",
+        }
+    )
+    with caplog.at_level(logging.ERROR, logger="wasted.events"):
+        writer.flush()
+    errors = [r for r in caplog.records if r.levelno == logging.ERROR]
+    assert errors, [r.getMessage() for r in caplog.records]
+    assert "predictions" in errors[0].getMessage() or errors[0].kv["table"] == "predictions"
+    assert "ConnectError" in errors[0].kv["server_message"]
+
+
+def test_a_landed_predictions_flush_clears_the_count(tmp_path: Path) -> None:
+    """The counter is CONSECUTIVE failures. Whatever was rejecting the rows
+    stopping is the thing that clears it, and nothing else."""
+    settings = make_settings(tmp_path, predictions_enabled=True)
+    writer = _ObservedWriter(settings, session_id=SESSION_ID, on_event=lambda *_: None)
+    writer.predictions_write_failures = 3
+    writer.last_predictions_error = "APIError: relation does not exist"
+
+    # A flush with no predictions in it changes nothing either way: the agent
+    # being quiet is not evidence about the table.
+    writer.record_event("break", {"phase": "start"})
+    writer.flush()
+    assert writer.predictions_write_failures == 3
+    assert writer.last_predictions_error is not None
+
+
+def test_a_real_rejected_insert_trips_the_generation_breaker(tmp_path: Path) -> None:
+    """End to end: a `predictions` insert that keeps being refused stops
+    generation, without a single exception ever reaching `_offer_prediction`."""
+    from wasted_harness.main import PREDICTION_FAILURE_LIMIT
+
+    settings = make_settings(tmp_path, predictions_enabled=True)
+    bridge = _TickBridge(_state_body(), stop_after=1)
+    h = make_harness(bridge, settings, SESSION_ID)
+    state = GameState.model_validate(_state_body())
+
+    h._offer_prediction(state)
+    assert written_predictions(h.writer), "control: nothing was generated to fail on"
+    # Nothing raised on the generate/write path — that is the whole point.
+    assert h._prediction_write_failures == 0
+
+    for _ in range(PREDICTION_FAILURE_LIMIT):
+        h.writer.flush()
+    assert h.writer.predictions_write_failures >= PREDICTION_FAILURE_LIMIT
+    assert h._prediction_failures() >= PREDICTION_FAILURE_LIMIT
+
+    # The breaker is now shut: the loop may keep running, but it stops adding
+    # rows to a queue nothing will ever drain.
+    before = len(queued_predictions(h.writer)) + len(buffered_predictions(h.writer))
+    for _ in range(20):
+        h._offer_prediction(state)
+    after = len(queued_predictions(h.writer)) + len(buffered_predictions(h.writer))
+    assert after == before, "generation continued after a real rejection tripped the breaker"
+
+
+def test_the_breaker_says_so_once_and_names_the_server_message(
+    tmp_path: Path, caplog
+) -> None:
+    import logging
+
+    from wasted_harness.main import PREDICTION_FAILURE_LIMIT
+
+    settings = make_settings(tmp_path, predictions_enabled=True)
+    bridge = _TickBridge(_state_body(), stop_after=1)
+    h = make_harness(bridge, settings, SESSION_ID)
+    h.writer.predictions_write_failures = PREDICTION_FAILURE_LIMIT
+    h.writer.last_predictions_error = "APIError: relation \"predictions\" does not exist"
+    state = GameState.model_validate(_state_body())
+
+    with caplog.at_level(logging.WARNING, logger="wasted.main"):
+        for _ in range(10):
+            h._offer_prediction(state)
+
+    announcements = [
+        r for r in caplog.records if "generation is now OFF for this run" in r.getMessage()
+    ]
+    assert len(announcements) == 1, "the breaker announced itself more than once"
+    assert "does not exist" in announcements[0].kv["server_message"]
+
+
+# --- (f) the operator knobs reach the generator ---------------------------------
+
+
+def test_the_operator_knobs_reach_the_generator_config(tmp_path: Path, monkeypatch) -> None:
+    """`settings.py` -> `GeneratorConfig`, through the real `_wire_predictions`."""
+    for name, value in (
+        ("WASTED_PREDICTIONS_ENABLED", "true"),
+        ("WASTED_PREDICTION_ROUND_S", "120"),
+        ("WASTED_PREDICTION_AMBIENT", "false"),
+        ("WASTED_PREDICTION_MIN_GAP_S", "45"),
+        ("WASTED_PREDICTION_MAX_OPEN", "4"),
+        ("WASTED_PREDICTION_BASE_POOL", "0.01"),
+        # NO SUPABASE, deliberately and explicitly. `_wire_predictions` warm
+        # starts the base rate with one real read, and the developer `.env`
+        # this repo is checked out with points at the live cloud project —
+        # `load_dotenv` puts it in `os.environ` for the whole pytest process,
+        # so "pass an absent env_file" is NOT enough on its own. Blanked here
+        # so this test can never touch production data. Every other test in
+        # this file uses a closed port for the same reason.
+        ("SUPABASE_URL", ""),
+        ("SUPABASE_SECRET_KEY", ""),
+    ):
+        monkeypatch.setenv(name, value)
+    settings = Settings.load(env_file=tmp_path / "absent.env")
+    assert settings.supabase_configured is False
+    assert settings.state_dir  # real Settings, not the hand-built one above
+
+    bridge = _TickBridge(_state_body(), stop_after=1)
+    h = _tick_harness(bridge)
+    h.settings = settings
+    h.writer = _ObservedWriter(settings, session_id=SESSION_ID, on_event=h._note_recent_event)
+    h._wire_predictions(settings)
+
+    config = h.predictions.config
+    assert config.round_interval_s == 120.0
+    assert config.ambient_enabled is False
+    assert config.min_gap_s == 45.0
+    assert config.max_concurrent_open == 4
+    assert config.base_reward_pool == "0.01"
+    assert h.prediction_base_rate is not None
+    assert h.predictions.base_rate == h.prediction_base_rate.measure
+
+
+@pytest.mark.parametrize(
+    ("name", "value"),
+    [
+        ("WASTED_PREDICTION_ROUND_S", "soon"),
+        ("WASTED_PREDICTION_ROUND_S", "0"),
+        ("WASTED_PREDICTION_MIN_GAP_S", "-5"),
+        ("WASTED_PREDICTION_MAX_OPEN", "two"),
+        ("WASTED_PREDICTION_MAX_OPEN", "0"),
+        ("WASTED_PREDICTION_BASE_POOL", "free"),
+        ("WASTED_PREDICTION_BASE_POOL", "0"),
+    ],
+)
+def test_an_unreadable_knob_is_a_startup_error_not_a_silent_default(
+    tmp_path: Path, monkeypatch, name: str, value: str
+) -> None:
+    """An operator who set a cadence, a cap or a treasury pool and got the
+    default would have no way to tell. §6's own rule for the claim rails, held
+    here too: "a rail that is present but unparseable is an error"."""
+    from wasted_harness.settings import ConfigError
+
+    monkeypatch.setenv(name, value)
+    with pytest.raises(ConfigError, match=name):
+        Settings.load(env_file=Path(tmp_path) / "absent.env")
+
+
+# --- (g) every recorded event reaches the live base-rate estimator --------------
+
+
+def test_every_event_the_writer_records_also_feeds_the_base_rate(tmp_path: Path) -> None:
+    """One choke point, two consumers: the recency window the situational
+    templates read, and the rolling measurement the ambient ones need."""
+    settings = make_settings(tmp_path, predictions_enabled=True, supabase=False)
+    bridge = _TickBridge(_state_body(), stop_after=1)
+    h = make_harness(bridge, settings, SESSION_ID)
+    assert h.prediction_base_rate is not None
+
+    before = h.prediction_base_rate.observed_count
+    h.writer.record_event("activity_end", {"activity": "x", "outcome": "completed"})
+    h.writer.record_event("wanted_change", {"from": 0, "to": 1})
+    assert h.prediction_base_rate.observed_count == before + 2
+    # ...including the unbatched path `death`/`busted` take when clips are up.
+    h.writer.insert_event_now("death", {"cause": "?"})
+    assert h.prediction_base_rate.observed_count == before + 3
+
+
+def test_with_the_layer_off_nothing_is_measured(tmp_path: Path) -> None:
+    settings = make_settings(tmp_path, predictions_enabled=False, supabase=False)
+    bridge = _TickBridge(_state_body(), stop_after=1)
+    h = make_harness(bridge, settings, SESSION_ID)
+    assert h.prediction_base_rate is None
+    h.writer.record_event("activity_end", {"activity": "x", "outcome": "completed"})  # no crash
+
+
+def test_a_warm_start_against_an_unreachable_supabase_falls_back_to_cold(
+    tmp_path: Path,
+) -> None:
+    """The read is best effort in every direction: a real connection refusal
+    leaves a cold estimator and a running harness, never an exception at
+    startup."""
+    settings = make_settings(tmp_path, predictions_enabled=True)
+    bridge = _TickBridge(_state_body(), stop_after=1)
+    h = make_harness(bridge, settings, SESSION_ID)  # _wire_predictions ran the read
+    assert h.prediction_base_rate is not None
+    assert h.prediction_base_rate.observed_count == 0
+    assert h.run() == 0
