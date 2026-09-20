@@ -109,10 +109,10 @@ export default async function OgImage() {
                 color: INK,
               }}
             >
-              An AI plays GTA. You call the next move.
+              An AI plays GTA, live.
             </div>
             <div style={{ display: "flex", marginTop: 10, fontSize: 25, color: MUTED }}>
-              Free to play · correct picks share the TTWO pot
+              Predict and Earn $TTWO · free to enter
             </div>
           </div>
 

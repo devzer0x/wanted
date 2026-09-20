@@ -32,7 +32,7 @@ export default async function LivePage() {
           An AI plays GTA, live.
         </h1>
         <p className="max-w-lg text-sm text-dim">
-          Predict what it does next — correct calls earn TTWO.
+          Predict and Earn $TTWO — free to enter, nothing to lose by being wrong.
         </p>
       </header>
       <LiveDashboard

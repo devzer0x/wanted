@@ -56,3 +56,6 @@ notes/
 
 # local scratch notes, never committed
 terminal.txt
+
+# design source for web/public/logo.png; the optimised copies are what ship
+/logo.png

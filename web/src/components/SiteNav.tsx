@@ -1,5 +1,6 @@
 "use client";
 
+import Image from "next/image";
 import Link from "next/link";
 import { usePathname } from "next/navigation";
 import { useEffect, useRef } from "react";
@@ -44,10 +45,21 @@ export function SiteNav() {
     <header className="sticky top-0 z-60 border-b-[3px] border-ink bg-cream/95 backdrop-blur-sm">
       <div className="mx-auto flex min-h-[68px] w-full max-w-6xl flex-wrap items-center justify-between gap-x-3 gap-y-2.5 px-3 py-2.5 sm:px-6">
         <Link href="/" className="inline-flex items-center gap-2.5" aria-label="WANTED home">
+          {/* The mark carries its own ink border and offset shadow, so it needs no ring from the
+              nav. Fixed box + `priority`: it is above the fold on every route, and letting it
+              arrive late shifts the whole header. */}
+          <Image
+            src="/logo.png"
+            alt=""
+            width={512}
+            height={512}
+            priority
+            className="h-8 w-8 shrink-0 sm:h-9 sm:w-9"
+          />
           <Wordmark className="text-[22px] sm:text-[26px]" />
           <span className="hidden flex-col leading-[1.05] lg:flex">
             <span className="text-[12px] font-black tracking-[0.1em] uppercase">AI plays GTA</span>
-            <span className="text-[11px] font-extrabold text-muted">you call the next move</span>
+            <span className="text-[11px] font-extrabold text-muted">Predict and Earn $TTWO</span>
           </span>
         </Link>
 

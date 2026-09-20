@@ -19,7 +19,7 @@ export const SITE_OG_ALT = "WANTED — an AI plays GTA. Predict what happens nex
 export const SITE_TITLE = "WANTED — an AI plays GTA. Predict what happens next.";
 export const TITLE_TEMPLATE = "%s · WANTED";
 export const SITE_DESCRIPTION =
-  "An AI plays a famous open-world story mode 24/7, live. Predict what it does next — correct calls earn TTWO. All commentary and gameplay decisions are AI-generated.";
+  "An AI plays a famous open-world story mode 24/7, live. Predict and Earn $TTWO — free to enter, nothing to lose by being wrong. All commentary and gameplay decisions are AI-generated.";
 
 /**
  * The document title a page ends up with, resolved here rather than left to Next's template.

@@ -38,6 +38,20 @@ export function SiteFooter() {
           AI; all commentary and gameplay decisions on this site are AI-generated.
         </p>
 
+        {/* The reward asset is named in the site-wide tagline now, so its disclosure belongs
+            site-wide too rather than only on /rules. It points at a real company, and the
+            claim it must never leave implied is an endorsement. */}
+        <p className="max-w-[720px] text-xs leading-[1.55] font-bold text-purple-pale/80">
+          $TTWO is a tokenized debt security issued by Robinhood Assets (Jersey) Limited that
+          tracks the share price of Take-Two Interactive. It is not issued by Take-Two, carries
+          no shareholder rights, and using it implies no relationship with Take-Two or
+          Robinhood. Rewards are restricted in some jurisdictions — see{" "}
+          <Link href="/rules" className="underline underline-offset-2 hover:text-cream!">
+            the rules
+          </Link>
+          .
+        </p>
+
         <span className="text-[11px] font-extrabold tracking-[0.1em] text-purple-pale/60 uppercase">
           Single-player story mode only · cheats are announced, never hidden
         </span>
