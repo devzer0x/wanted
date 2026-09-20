@@ -17,7 +17,7 @@ same events and asked at the same clock value return the same pair.
 
 **Why it exists at all, in one number.** "Will WANTED pull off what he is
 doing in the next three minutes" is 50% (14/28) in the 2026-09-20 recording
-and 8% (82/1043) in the 2026-09-04 one — the same question, the same window,
+and 7% (75/1043) in the 2026-09-04 one — the same question, the same window,
 two real sessions of the same agent. A fixed base rate would have been a
 coin-flip on one day and a giveaway on the other, and nothing in the
 catalogue could have known which day it was on.
@@ -51,6 +51,7 @@ assuming the gap away.
 from __future__ import annotations
 
 import bisect
+import threading
 import time
 from collections.abc import Callable, Mapping, Sequence
 from dataclasses import dataclass, field
@@ -171,12 +172,26 @@ class RollingBaseRate:
     _hits: dict[tuple[Any, ...], list[float]] = field(
         default_factory=dict, init=False, repr=False
     )
+    #: `observe` is called from whichever thread records the event — the clip
+    #: worker records its own, which is why `main._RecentEvents` beside this is
+    #: locked too — while `measure` runs on the loop thread. `observe` prunes,
+    #: i.e. slices the front off the list `measure` is walking; unserialised
+    #: that skips rows, and the understated count is then cached in `_hits` and
+    #: written onto a real row as its calibration. Re-entrant because `measure`
+    #: calls `_matching` with it held.
+    _lock: threading.RLock = field(
+        default_factory=threading.RLock, init=False, repr=False, compare=False
+    )
 
     # -- input ------------------------------------------------------------------
 
     def observe(self, ts: float, type_: str, payload: Mapping[str, Any] | None) -> None:
         """Record one §4 event. Never raises: it sits on the game-loop thread."""
         entry = (float(ts), str(type_), dict(payload or {}))
+        with self._lock:
+            self._observe_locked(entry)
+
+    def _observe_locked(self, entry: tuple[float, str, Mapping[str, Any]]) -> None:
         if self._events and entry[0] < self._events[-1][0]:
             # Out of order (a queued row replayed, or a warm start interleaving
             # with live events). Rare enough to pay for a bisect insert rather
@@ -207,6 +222,10 @@ class RollingBaseRate:
         returns `n = 0` — which every caller must read as "do not ask", never
         as "0%".
         """
+        with self._lock:
+            return self._measure_locked(template)
+
+    def _measure_locked(self, template: PredictionTemplate) -> Calibration:
         window_s = template.window.resolve_delay_s
         rule = template.telemetry_rule
         if self._origin is None or rule_matcher(rule) is None:

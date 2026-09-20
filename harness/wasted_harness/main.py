@@ -1535,11 +1535,14 @@ class Harness:
                 .table("events")
                 .select("ts,type,payload")
                 .gte("ts", since.isoformat())
-                .order("ts", desc=False)
+                # Newest first: the read is capped, and on a box busier than the
+                # cap an ascending read would keep the OLDEST rows and drop the
+                # most recent stretch — the part that says how he plays now.
+                .order("ts", desc=True)
                 .limit(PREDICTION_WARM_START_MAX_ROWS)
                 .execute()
             )
-            rows = resp.data or []
+            rows = list(reversed(resp.data or []))  # the estimator is fed oldest first
         except Exception as exc:  # broad by design: a cold start is survivable
             log.warning(
                 "prediction base rate could not be warm started; starting cold "

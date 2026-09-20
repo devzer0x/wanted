@@ -11,6 +11,7 @@ provenance-stamped production pulls, never hand-written (CLAUDE.md rule 1).
 from __future__ import annotations
 
 import json
+import threading
 from datetime import datetime
 from pathlib import Path
 
@@ -273,3 +274,53 @@ def test_the_older_recording_measures_the_same_question_as_a_giveaway() -> None:
     c = est.measure(by_type("pulls_off_a_goal"))
     assert c.n == 1043
     assert c.rate is not None and c.rate < 0.10
+
+
+def test_nothing_mutates_the_estimator_while_it_is_being_measured() -> None:
+    """Events really are recorded off the loop thread (the clip worker records
+    its own), and `observe` prunes — it slices the front off the very list
+    `measure` is walking. Unsynchronised, that skips rows, and the understated
+    count is then CACHED and written onto a real row as its calibration.
+
+    Deterministic, not a stress test: the injected clock is called inside
+    `measure`, and that is where a writer thread is launched. With the estimator
+    serialised the writer cannot get in until `measure` has returned.
+    """
+    got_in_mid_measure: list[bool] = []
+    writer: list[threading.Thread] = []
+
+    class InterleavingClock:
+        def __init__(self) -> None:
+            self.t = 10_000.0
+            self.armed = False
+            self.measuring_thread: int | None = None
+
+        def __call__(self) -> float:
+            if self.armed and threading.get_ident() == self.measuring_thread:
+                self.armed = False
+                done = threading.Event()
+
+                def write() -> None:
+                    estimator.observe(self.t, "activity_end", {"outcome": "completed"})
+                    done.set()
+
+                thread = threading.Thread(target=write)
+                writer.append(thread)
+                thread.start()
+                got_in_mid_measure.append(done.wait(0.3))
+            return self.t
+
+    clock = InterleavingClock()
+    estimator = RollingBaseRate(clock=clock)
+    for offset in range(0, 7200, 60):
+        estimator.observe(clock.t - 7200 + offset, "activity_end", {"outcome": "completed"})
+    before = estimator.observed_count
+
+    clock.measuring_thread = threading.get_ident()
+    clock.armed = True
+    estimator.measure(ambient_template(payload_match={"outcome": "completed"}))
+    writer[0].join(timeout=2.0)
+
+    assert got_in_mid_measure == [False], "an observe() ran to completion inside measure()"
+    assert estimator.observed_count == before + 1  # ...and it did land once measure let go
+

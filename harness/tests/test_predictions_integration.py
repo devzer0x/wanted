@@ -893,3 +893,51 @@ def test_a_warm_start_against_an_unreachable_supabase_falls_back_to_cold(
     assert h.prediction_base_rate is not None
     assert h.prediction_base_rate.observed_count == 0
     assert h.run() == 0
+
+
+def test_the_warm_start_asks_for_the_newest_rows_not_the_oldest(tmp_path: Path) -> None:
+    """The read is capped. Ordered ascending, a box busier than the cap loads the
+    OLDEST rows of the three hours and silently leaves out the most recent
+    stretch — the part that says how he is playing now. What the real supabase
+    client puts on the wire is what is asserted: a local HTTP server stands where
+    PostgREST would and records the query. It serves no rows, so nothing about
+    the game is invented here.
+    """
+    import http.server
+
+    seen: list[str] = []
+
+    class PostgrestStandIn(http.server.BaseHTTPRequestHandler):
+        def _answer(self) -> None:
+            if self.command == "GET" and self.path.startswith("/rest/v1/events"):
+                seen.append(self.path)
+            length = int(self.headers.get("content-length") or 0)
+            if length:
+                self.rfile.read(length)
+            self.send_response(200)
+            self.send_header("content-type", "application/json")
+            self.end_headers()
+            self.wfile.write(b"[]")
+
+        do_GET = do_POST = do_PATCH = _answer
+
+        def log_message(self, *args: Any) -> None:  # keep pytest output clean
+            return
+
+    server = http.server.ThreadingHTTPServer(("127.0.0.1", 0), PostgrestStandIn)
+    threading.Thread(target=server.serve_forever, daemon=True).start()
+    try:
+        settings = make_settings(tmp_path, predictions_enabled=True)
+        settings = type(settings)(
+            **{**settings.__dict__, "supabase_url": f"http://127.0.0.1:{server.server_address[1]}"}
+        )
+        bridge = _TickBridge(_state_body(), stop_after=1)
+        make_harness(bridge, settings, SESSION_ID)  # _wire_predictions runs the read
+    finally:
+        server.shutdown()
+        server.server_close()
+
+    assert len(seen) == 1, seen
+    assert "order=ts.desc" in seen[0], seen[0]
+    assert "limit=2000" in seen[0], seen[0]
+

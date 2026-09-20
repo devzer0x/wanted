@@ -202,7 +202,7 @@ range. `tests/test_predictions_catalog.py` re-derives all of it.
 |---|---|---|---|---|---|
 | `death_in_window`   | 15->30 | 225 s | 43.6% | **35.9%** (14/39) | 25.6-35.9% |
 | `loses_the_cops`    | 10->30 |  80 s | 53.8% | **53.8%** (21/39) | 35.9-53.8% |
-| `survives_a_chase`  | 10->30 | 140 s | 48.7% | **56.4%** (22/39) | 56.4-74.4% |
+| `survives_a_chase`  | 10->30 | 140 s | 48.7% | **56.4%** (22/39) | 53.8-74.4% |
 | `two_star_standoff` | 15->30 | 240 s | 29.4% | **41.2%** (7/17)  | 41.2-47.1% |
 | `survives_a_fight`  | 10->30 |  50 s | — | — (no threat telemetry in an events-only export) |
 | `mission_outcome`   | 20->30 | 280->270 s | — | — (no mission events in either recording) |
@@ -981,7 +981,7 @@ TPL_LOSES_THE_COPS = PredictionTemplate(
 # settled window unchanged at 140s), 22/39 (56.4%) survive with no death or
 # busted row inside [locks_at, resolves_at]. The old 48.7% was the
 # anchor-to-anchor `(gain, gain+150s]` approximation. Band across the 0-60s
-# generation delay: 56.4-74.4% — the widest drift of any template here,
+# generation delay: 53.8-74.4% — the widest drift of any template here,
 # because every second the window slides forward is a second further from the
 # moment the heat came on. Still inside the admission band at both ends.
 
