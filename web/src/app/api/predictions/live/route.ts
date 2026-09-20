@@ -196,7 +196,11 @@ export async function GET(): Promise<Response> {
           .in("prediction_id", allIds),
         admin
           .from("reward_ledger")
-          .select("prediction_id, amount")
+          // `amount::text`, never the bare column: `numeric(38,18)` can arrive as an
+          // unquoted JSON number and round-trip through a JS double (FM-08 — a small
+          // `even_split` share prints back as "5e-7"). Same cast as
+          // `/api/rewards/balance` and `/api/rewards/claims`.
+          .select("prediction_id, amount:amount::text")
           .eq("wallet", wallet)
           .in("prediction_id", allIds),
       ]);
@@ -206,9 +210,20 @@ export async function GET(): Promise<Response> {
     if (ledgerErr) {
       return internalError("predictions/live: failed to read reward_ledger", ledgerErr, "failed to read reward_ledger");
     }
+    // `MyEntry.reward` is a BASE-UNIT string (lib/prediction/types.ts), but the ledger
+    // stores WHOLE token units — the same convention `toPrediction` converts for
+    // `reward_pool` twenty lines above. Passing the column straight through shipped a
+    // whole-unit decimal like "0.02" into a field the UI only trusts as an integer:
+    // `hasBaseUnits()` rejects anything with a ".", so `LivePredictionCard` and
+    // `ResolvedPredictionCard` rendered "no reward was credited" to a viewer who HAD
+    // been credited, and `summary.ts::viewerRecord` dropped the amount from their
+    // earnings tally. Convert at the boundary, like everywhere else.
     const rewardByPrediction = new Map<string, string>();
     for (const row of (ledgerRows ?? []) as { prediction_id: string; amount: string | number }[]) {
-      rewardByPrediction.set(row.prediction_id, String(row.amount));
+      rewardByPrediction.set(
+        row.prediction_id,
+        toBaseUnits(String(row.amount ?? "0"), decimals).toString(),
+      );
     }
     const byId = new Map(live.concat(resolved).map((p) => [p.id, p] as const));
     for (const row of (entryRows ?? []) as {

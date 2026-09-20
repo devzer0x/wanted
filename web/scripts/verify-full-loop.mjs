@@ -277,6 +277,24 @@ await api("/api/cron/tick", { method: "POST", headers: { authorization: `Bearer 
 check("re-running settlement does not double-credit",
   Number(sql(`select count(*) from public.reward_ledger where wallet='${winner.address.toLowerCase()}';`)) === 1);
 
+// What the WINNER actually sees on the card. `claimable` below was always right, which is
+// exactly why this went unnoticed: /api/predictions/live built `mine[].reward` from the raw
+// `numeric` column while `MyEntry.reward` is declared a BASE-UNIT string, so a real credit
+// arrived as "10.000000000000000000", `hasBaseUnits()` rejected the "." and the card told a
+// paid winner "no reward was credited".
+const mineLive = await api("/api/predictions/live", { headers: { cookie: winnerAuth.cookie } });
+const mineEntry = mineLive.body?.mine?.[predId];
+check("the winner's own entry comes back with the prediction",
+  mineEntry?.correct === true, JSON.stringify(mineEntry));
+check("mine[].reward is the credit in BASE units, as MyEntry declares",
+  mineEntry?.reward === "10000000000000000000", String(mineEntry?.reward));
+check("mine[].reward is a plain integer string the UI will render",
+  /^\d+$/.test(String(mineEntry?.reward)), String(mineEntry?.reward));
+
+const loserLive = await api("/api/predictions/live", { headers: { cookie: loserAuth.cookie } });
+check("the incorrect wallet's entry reports no reward",
+  loserLive.body?.mine?.[predId]?.reward === "0", String(loserLive.body?.mine?.[predId]?.reward));
+
 // ---------------------------------------------------------------------------------------------
 console.log("\n--- 7. claimable balance ---");
 const bal = await api("/api/rewards/balance", { headers: { cookie: winnerAuth.cookie } });
