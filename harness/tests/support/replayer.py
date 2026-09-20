@@ -286,6 +286,10 @@ class RecordingBus:
 class RecordingWriter:
     """Stands in for `events.SupabaseWriter`. Records every §4 event and every
     decision; never touches Supabase or the offline queue."""
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
 
     def __init__(self, log: ReplayLog, wheel: MovementWheel, clock: FakeClock) -> None:
         self._log = log

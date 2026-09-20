@@ -134,6 +134,10 @@ class _Bus:
 
 
 class _Writer:
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
     def __init__(self) -> None:
         self.decisions: list[dict[str, Any]] = []
 

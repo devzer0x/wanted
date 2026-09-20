@@ -886,6 +886,10 @@ def test_navigate_to_only_ever_speaks_the_closed_task_vocabulary() -> None:
 
 class _Recorder:
     """Absorbs bookkeeping calls; records nothing asserted on."""
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
 
     def __getattr__(self, _name: str):
         return lambda *a, **k: None
@@ -945,6 +949,10 @@ class _Governor:
 
 
 class _EventWriter:
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
 

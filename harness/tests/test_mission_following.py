@@ -640,6 +640,10 @@ def test_drive_mission_objective_honours_a_pending_quiet_period() -> None:
 
 class _Recorder:
     """Absorbs bookkeeping calls `_reflex` makes; records nothing asserted on."""
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
 
     def __getattr__(self, _name: str):
         return lambda *a, **k: None
@@ -1663,6 +1667,10 @@ class _FakeMissions:
 
 
 class _FakeWriter:
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
     def __init__(self):
         self.events = []
         self.missions = []

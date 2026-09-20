@@ -227,6 +227,10 @@ class StubHarness:
 
 class _Recorder:
     """Absorbs the bookkeeping calls _reflex makes; records nothing we assert on."""
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
 
     def __getattr__(self, _name: str):
         return lambda *a, **k: None

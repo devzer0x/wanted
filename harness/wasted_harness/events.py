@@ -164,6 +164,14 @@ class SupabaseWriter:
         self.lock_path = self.queue_path.with_suffix(".lock")
         self._client: Any = None
         self._buffer: list[dict[str, Any]] = []
+        #: True when the last flush left rows unwritten (buffer or offline queue).
+        #: Read by `Harness._heartbeat`, which withholds the heartbeat while it is
+        #: set: `settle_due_predictions()` treats `stats.heartbeat_at >= resolves_at`
+        #: as proof the writer caught up past the window (CONTRACTS-PREDICTIONS §3),
+        #: and that inference is only sound if a heartbeat cannot outrun the events
+        #: it implies. Starts False: nothing has failed yet, and the first flush
+        #: sets it honestly either way.
+        self.unflushed = False
         # The clip pipeline writes from a worker thread; the loop writes from
         # the main thread. Guards the buffer swap, not the network call.
         self._buffer_lock = threading.Lock()
@@ -336,8 +344,15 @@ class SupabaseWriter:
         """Attempt to write everything buffered (+ any queued backlog).
 
         Returns True when the buffer is fully drained to Supabase; False when
-        rows went to (or stayed in) the offline queue.
+        rows went to (or stayed in) the offline queue. Either way it records the
+        answer in `self.unflushed` — see that attribute for why the prediction
+        settlement gate depends on it.
         """
+        drained = self._flush_once()
+        self.unflushed = not drained
+        return drained
+
+    def _flush_once(self) -> bool:
         with self._buffer_lock:
             buffered, self._buffer = self._buffer, []
         if not self.configured:
@@ -384,7 +399,23 @@ class SupabaseWriter:
 
         remaining: list[dict[str, Any]] = []
         ok = True
-        for table, op, group in _runs(entries):
+        # `stats` carries `heartbeat_at`, which settlement reads as "the writer has
+        # caught up past this moment". Each (table, op) run is a SEPARATE request, so
+        # a failed `events` run followed by a successful `stats` run in the same flush
+        # publishes that claim while the evidence behind it is still on disk — and a
+        # prediction window can then settle on absent telemetry (resolving
+        # `survives_window` as SURVIVED for a death still sitting in the queue).
+        # So: heartbeats go last, and are skipped entirely once anything has failed.
+        runs = list(_runs(entries))
+        runs.sort(key=lambda run: run[0] == "stats")
+        for table, op, group in runs:
+            if table == "stats" and not ok:
+                log.warning(
+                    "heartbeat held back: earlier rows did not land",
+                    extra={"kv": {"queued": len(remaining)}},
+                )
+                remaining.extend(group)
+                continue
             pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
             skipped = []
             for e in group:

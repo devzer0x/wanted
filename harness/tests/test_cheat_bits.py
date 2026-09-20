@@ -387,6 +387,10 @@ class _Bridge:
 
 
 class _Recorder:
+    #: Stands in for `SupabaseWriter`, which carries this flag; `Harness._heartbeat`
+    #: reads it to refuse publishing a heartbeat over an unflushed backlog.
+    unflushed = False
+
     def __init__(self) -> None:
         self.events: list[tuple[str, dict[str, Any]]] = []
 

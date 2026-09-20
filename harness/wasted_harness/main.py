@@ -4526,6 +4526,22 @@ class Harness:
                 extra={"kv": {"blocked_screen": self._screen_blocked, "state": state is not None}},
             )
             return
+        if self.writer.unflushed:
+            # Same principle as the branch above, one layer down: a heartbeat is a
+            # claim about what has been PUBLISHED, not about what this process can
+            # see. `settle_due_predictions()` reads `heartbeat_at >= resolves_at` as
+            # proof the writer caught up past a window (CONTRACTS-PREDICTIONS §3), so
+            # publishing one while rows are still queued lets a prediction settle on
+            # telemetry that has not landed — and the exposed rules fail toward
+            # PAYING OUT (a queued death resolves `survives_window` as SURVIVED),
+            # not toward voiding. While a backlog exists the gate may only be opened
+            # by `max(events.ts)`, which is real evidence. Cost: the site reads OFF
+            # AIR during a write backlog, which is the honest reading of one.
+            log.info(
+                "heartbeat withheld: writer has an unflushed backlog",
+                extra={"kv": {"queue_path": str(self.writer.queue_path)}},
+            )
+            return
         assert state is not None  # `live` implies it; keeps the type checker honest
         self._last_stats = now
         hud: dict[str, Any] = {
