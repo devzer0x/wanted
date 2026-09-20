@@ -1,7 +1,76 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-20.
+run log, or URL) noted next to it. Last updated: 2026-09-21.
+
+## 2026-09-21 — wallet connect, and a prediction cadence (CONTRACTS-PREDICTIONS v2.4)
+
+**NOTHING IN THIS SECTION IS DEPLOYED.** It is in the working tree, verified locally as described,
+uncommitted. Production state, measured read-only on 2026-09-20 22:27 UTC while the agent was live:
+`predictions`, `prediction_entries`, `reward_ledger`, `reward_claims` — **0 rows, ever**;
+`site_config.rewards = {enabled:false, payouts:false}`; the minute cron is running
+(`treasury_status` refreshes every minute; `CRON_SECRET` is set in Vercel production).
+
+**Wallet connect — "Requested resource not available."** That text is viem's for EIP-1193
+**-32002**: the wallet already holds an unanswered connection request (locked, prompt hidden, an
+earlier tab). `WalletProvider.connect()` treated it as fatal. Now: the state stays `connecting`, a
+hint says where to look, `eth_accounts` (which never prompts) is polled for up to 120 s and the
+wallet attaches on approval; a second click cannot send a second `eth_requestAccounts`; with more
+than one EIP-6963 wallet the viewer chooses; a wallet that only sets `window.ethereum` connects;
+every "connect" affordance shares one entry point. Also: the vote closes on the viewer's own clock
+at `locks_at` (it stayed clickable until the next 8 s poll), and the pot is withheld rather than
+scaled by a guessed 18 decimals when no reward asset is configured.
+*Verified:* four new e2e tests written first and seen failing, then `npm run test:e2e` —
+production build, real Supabase — **76 passed, 0 failed**, desktop and mobile. The stand-in wallet
+(`e2e/walletHarness.ts`) gained the three real behaviours it did not model. *Not verified:* a real
+extension wallet in a real browser; previews are SSO-protected, so this has not run on Vercel.
+
+**Why there were no predictions, and what v2.4 changes.** Every shipped template needed a
+situational trigger — a wanted star is ~1 per 2.2 h in the 09-04 recording and there were none at
+all in 2 h 19 m of the 09-20 live session — and entry windows were 10–20 s. v2.4 adds a 30 s entry
+floor, a scheduled round every 300 s (60 s to enter, 180 s window) and one rule kind,
+`event_matches` (event type + `payload @>` filter). An always-available question is asked only
+while its YES-rate, re-measured from the last 3 h of the agent's own events, is inside [0.20, 0.80]
+on >= 12 windows: "pulls off a goal within 3 minutes" measured **8 %** on 09-04 and **50 %** on
+09-20, so any fixed base rate would have been a giveaway on one of those days. A second real
+fixture, `harness/tests/fixtures/real_session_2026-09-20.json` (230 events, provenance stamped),
+exists for exactly that reason.
+
+*Verified — infra* (`20260921000000_event_matches.sql`, executor + independent verifier):
+`./verify-predictions.sh` exit 0 on a real Postgres 16 with the real 09-04 recording. The new
+function body is the old one **verbatim plus one branch** (0 lines removed, 29 added, 1 hunk —
+`infra/verify-event-matches-verbatim.sh`, whose negative control fails on a one-line stray edit).
+`02:52:00Z–02:55:00Z` settles `yes` citing the recorded `completed` row at `02:53:16.913902Z`, and
+skips the `timeout` row before it; `01:15:00Z–01:18:00Z` holds three `activity_end` rows, none
+completed, and settles `no` — the case that proves the filter. `{}`, missing, string and array
+`payload_match` and a blank `event_type` all void `malformed_rule`. Zero entries voids
+`no_entries` with no ledger row; two entries credit exactly the correct wallet once and a re-run
+credits nothing. **Without the migration the kind voids `unknown_rule_kind`** — a harness ahead of
+the database cannot pay anyone, which is why it is a new kind and not a parameter on `event_occurs`.
+*Verified — money path with the migration applied:* `npm run verify:payout` — **179/179** on a fork
+of Robinhood Chain mainnet. `node scripts/verify-full-loop.mjs` — **59/59**, and this is the first
+time that script has been executed end to end: its first run failed 5 assertions that had been
+written without being run (it asserted the 09-04 prediction was NOT among recent results and also
+expected `mine[]` for it from the same route; and it expected 409 on a second claim in a state
+where §10.5 gives 400 `nothing to claim`). No product defect was behind any of the five. The B2
+assertion (`mine[].reward` in base units) is therefore now genuinely verified.
+
+*Harness* (`predictions/baserate.py`, generator, catalogue, settings, events): `pytest` exit 0,
+ruff clean on touched files. Replay over both recordings: 09-20 — 17 questions in 2.32 h, all
+scheduled rounds, entry window 60 s; 09-04 — 163 in 86.93 h (124 rounds / 39 situational), minimum
+entry window 30 s. **Not verified:** anything on the game server. The harness is not deployed,
+and `WASTED_PREDICTIONS_ENABLED` on the box is unknown.
+
+**Order of operations when this ships** (each is an operator decision): (1)
+`infra/apply-predictions-to-cloud.sh` — `create or replace` only; (2) web deploy; (3) harness
+deploy with `WASTED_PREDICTIONS_ENABLED=true`; (4) only then `site_config.rewards`. Any other order
+is safe but wasteful: every scheduled round voids until (1) has run.
+
+**Also in the tree, separate from the above:** `ForegroundKeeper` (harness) — an unfocused game
+keeps ticking, so `BlockingScreenWatchdog` never fires, while the broadcast holds one frame and
+SendInput lands elsewhere; the harness now takes the foreground back, only in the console session
+and never under an operator on RDP. Policy is unit-tested; **the Win32 calls have never run on
+Windows.**
 
 ## 2026-09-08 — WANTED prediction layer (public product name: WANTED; $WANTED / TTWO)
 
