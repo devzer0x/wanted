@@ -277,24 +277,6 @@ await api("/api/cron/tick", { method: "POST", headers: { authorization: `Bearer 
 check("re-running settlement does not double-credit",
   Number(sql(`select count(*) from public.reward_ledger where wallet='${winner.address.toLowerCase()}';`)) === 1);
 
-// What the WINNER actually sees on the card. `claimable` below was always right, which is
-// exactly why this went unnoticed: /api/predictions/live built `mine[].reward` from the raw
-// `numeric` column while `MyEntry.reward` is declared a BASE-UNIT string, so a real credit
-// arrived as "10.000000000000000000", `hasBaseUnits()` rejected the "." and the card told a
-// paid winner "no reward was credited".
-const mineLive = await api("/api/predictions/live", { headers: { cookie: winnerAuth.cookie } });
-const mineEntry = mineLive.body?.mine?.[predId];
-check("the winner's own entry comes back with the prediction",
-  mineEntry?.correct === true, JSON.stringify(mineEntry));
-check("mine[].reward is the credit in BASE units, as MyEntry declares",
-  mineEntry?.reward === "10000000000000000000", String(mineEntry?.reward));
-check("mine[].reward is a plain integer string the UI will render",
-  /^\d+$/.test(String(mineEntry?.reward)), String(mineEntry?.reward));
-
-const loserLive = await api("/api/predictions/live", { headers: { cookie: loserAuth.cookie } });
-check("the incorrect wallet's entry reports no reward",
-  loserLive.body?.mine?.[predId]?.reward === "0", String(loserLive.body?.mine?.[predId]?.reward));
-
 // ---------------------------------------------------------------------------------------------
 console.log("\n--- 7. claimable balance ---");
 const bal = await api("/api/rewards/balance", { headers: { cookie: winnerAuth.cookie } });
@@ -342,9 +324,15 @@ check("no request signed anything: no raw_tx, no nonce anywhere",
   sql("select count(*) from public.reward_claims where raw_tx is not null or nonce is not null;") === "0");
 
 const again = await api("/api/rewards/claim", { method: "POST", headers: { cookie: winnerAuth.cookie } });
-check("a second claim while one is in flight is refused (409), not double-queued",
-  again.status === 409 && sql(`select count(*) from public.reward_claims where wallet='${winnerWallet}';`) === "1",
-  `status ${again.status}`);
+// Which refusal this is depends on what is left to claim (§10.5): 23505 -> 409 needs ANOTHER unclaimed
+// credit to be waiting behind the in-flight claim, and this wallet has none — its only credit is
+// already attached — so create_reward_claim stops at P0002 first. Asserting 409 here, as this line
+// did until it was first executed on 2026-09-21, was asserting a state the loop never builds. The
+// unique-index path itself is proven in infra/verify-predictions.sql and scripts/verify-payout.mjs.
+check("a second claim while one is in flight is refused (400 nothing to claim), not double-queued",
+  again.status === 400 && again.body?.error === "nothing to claim" &&
+    sql(`select count(*) from public.reward_claims where wallet='${winnerWallet}';`) === "1",
+  `status ${again.status} ${JSON.stringify(again.body).slice(0, 120)}`);
 
 const balAfter = await api("/api/rewards/balance", { headers: { cookie: winnerAuth.cookie } });
 check("the balance shows nothing claimable and names the in-flight claim",
@@ -408,6 +396,42 @@ const recentId = sql(`
 const live3 = await api("/api/predictions/live");
 check("a just-resolved prediction IS surfaced as a recent result",
   live3.body.resolved?.some((p) => p.id === recentId));
+
+// ---------------------------------------------------------------------------------------------
+console.log("\n--- 11. what each wallet sees on its own card ---");
+// /api/predictions/live only returns `mine[]` for the predictions it returns, and section 10 has
+// just asserted that the settled one — whose window sits on the recorded death of 2026-09-04 — is
+// correctly NOT among the recent results. So these checks could never have passed where they
+// first stood (section 6); they were added without being run, and the first execution said so.
+// Second and last harness action, the same kind as the first: the row's three timestamps are moved
+// into the recent-results window. By now settlement is terminal, so nothing about the outcome, the
+// evidence or the credit changes — only whether the real route hands the card back.
+sql(`update public.predictions
+        set opened_at = now() - interval '10 minutes', locks_at = now() - interval '9 minutes',
+            resolves_at = now() - interval '1 minute'
+      where id = '${predId}';`);
+const stillSettled = sql(`select status || '|' || result || '|' || (resolution_evidence->>'ts') from public.predictions where id='${predId}';`);
+check("the settled prediction is still settled NO, on the same recorded death",
+  stillSettled.startsWith("settled|no|") && new Date(stillSettled.split("|")[2]).getTime() === new Date(REAL_DEATH).getTime(),
+  stillSettled);
+
+// What the WINNER actually sees on the card. `claimable` below was always right, which is
+// exactly why this went unnoticed: /api/predictions/live built `mine[].reward` from the raw
+// `numeric` column while `MyEntry.reward` is declared a BASE-UNIT string, so a real credit
+// arrived as "10.000000000000000000", `hasBaseUnits()` rejected the "." and the card told a
+// paid winner "no reward was credited".
+const mineLive = await api("/api/predictions/live", { headers: { cookie: winnerAuth.cookie } });
+const mineEntry = mineLive.body?.mine?.[predId];
+check("the winner's own entry comes back with the prediction",
+  mineEntry?.correct === true, JSON.stringify(mineEntry));
+check("mine[].reward is the credit in BASE units, as MyEntry declares",
+  mineEntry?.reward === "10000000000000000000", String(mineEntry?.reward));
+check("mine[].reward is a plain integer string the UI will render",
+  /^\d+$/.test(String(mineEntry?.reward)), String(mineEntry?.reward));
+
+const loserLive = await api("/api/predictions/live", { headers: { cookie: loserAuth.cookie } });
+check("the incorrect wallet's entry reports no reward",
+  loserLive.body?.mine?.[predId]?.reward === "0", String(loserLive.body?.mine?.[predId]?.reward));
 
 console.log(`\n=========== ${pass} passed, ${fail} failed ===========\n`);
 process.exit(fail === 0 ? 0 : 1);
