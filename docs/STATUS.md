@@ -5,8 +5,13 @@ run log, or URL) noted next to it. Last updated: 2026-09-21.
 
 ## 2026-09-21 — wallet connect, and a prediction cadence (CONTRACTS-PREDICTIONS v2.4)
 
-**NOTHING IN THIS SECTION IS DEPLOYED.** It is in the working tree, verified locally as described,
-uncommitted. Production state, measured read-only on 2026-09-20 22:27 UTC while the agent was live:
+**What is live and what is not.** The WEB changes are deployed: production deployment
+`wasted-qnqpj8liu` (2026-09-21, Ready, aliased to wanted.money), pushed as `8a544fd..2cfc061`.
+Verified against the live site: the connect-only wallet tests, **16/16 on https://wanted.money**,
+desktop and mobile, including the four new behaviours the previous build fails (the sign-in tests
+were not run there, so nothing was written to the production database). **Not applied:** the
+`event_matches` migration on the cloud project. **Not deployed:** the harness. So production still
+creates no predictions; the site is ready for them. Production state, measured read-only on 2026-09-20 22:27 UTC while the agent was live:
 `predictions`, `prediction_entries`, `reward_ledger`, `reward_claims` — **0 rows, ever**;
 `site_config.rewards = {enabled:false, payouts:false}`; the minute cron is running
 (`treasury_status` refreshes every minute; `CRON_SECRET` is set in Vercel production).
@@ -21,9 +26,9 @@ every "connect" affordance shares one entry point. Also: the vote closes on the 
 at `locks_at` (it stayed clickable until the next 8 s poll), and the pot is withheld rather than
 scaled by a guessed 18 decimals when no reward asset is configured.
 *Verified:* four new e2e tests written first and seen failing, then `npm run test:e2e` —
-production build, real Supabase — **76 passed, 0 failed**, desktop and mobile. The stand-in wallet
-(`e2e/walletHarness.ts`) gained the three real behaviours it did not model. *Not verified:* a real
-extension wallet in a real browser; previews are SSO-protected, so this has not run on Vercel.
+production build, real Supabase — **76 passed, 0 failed**, desktop and mobile; then the connect
+tests against the live site, above. The stand-in wallet (`e2e/walletHarness.ts`) gained the three
+real behaviours it did not model. *Not verified:* a real extension wallet in a real browser.
 
 **Why there were no predictions, and what v2.4 changes.** Every shipped template needed a
 situational trigger — a wanted star is ~1 per 2.2 h in the 09-04 recording and there were none at
