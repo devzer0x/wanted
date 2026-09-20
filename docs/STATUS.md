@@ -1,7 +1,7 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-08.
+run log, or URL) noted next to it. Last updated: 2026-09-20.
 
 ## 2026-09-08 — WANTED prediction layer (public product name: WANTED; $WANTED / TTWO)
 
@@ -169,11 +169,103 @@ and a line containing it is rejected in `say` or `thought`, in any casing. Prove
 regression test — it is not hypothetical, because the production `decisions` table already contains
 two lines where the agent addressed itself by that name, and those render on the public site.
 
+## 2026-09-20 — pre-funding review: four blockers found and fixed
+
+Fable's review before the first tranche. Three Sonnet reviewers in parallel (harness generator,
+settlement SQL, web + treasury), one Opus skeptic on the single finding that could pay the wrong
+people. The treasury and payout code came through clean — persist-before-broadcast, DB-sourced
+nonces, no error path that both fails a claim and could still land on chain, eligibility enforced
+server-side on every money route. The four blockers were all elsewhere.
+
+**B1 — two of eight shipped templates could never resolve.** `enters_vehicle` and `exits_vehicle`
+passed validation because `vehicle_entered`/`vehicle_exited` are in `TELEMETRY_RULE_KINDS`, but
+`settle_due_predictions()` (`20260908120000_predictions.sql:584`) matches those kinds and
+unconditionally voids with `missing_telemetry`. They would have taken real entries and settled void
+100% of the time — a card that never has a winner. `land_the_helicopter` had already been rejected
+for exactly this reason, so the standard existed and simply was not applied. Both carried
+`reliability=0.75`, above `mission_outcome`'s honest `0.5`, so ranking actively preferred them.
+Fixed: both moved to `REJECTED_TEMPLATES` with the measured reason; `UNSETTLEABLE_RULE_KINDS` added
+and enforced in `_build_catalog()` at import time; a test re-derives the always-void set from the
+migration by parsing which dispatch branches can assign `v_result`, so the constant cannot drift
+from the SQL. Proven non-vacuous: re-shipping such a template raises at import and collection fails.
+
+**Consequence worth an operator decision:** those two were the only templates that fired on an
+ordinary quiet moment. Every survivor needs a real trigger (wanted gain, fight, mission), so
+predictions now open only on events. That matches the calibration finding that ambient questions
+are 99%+ giveaways, but it does lower prediction cadence, and nothing ambient replaces them yet.
+
+**B2 — a paid winner was told they had won nothing.** `/api/predictions/live` built `mine[].reward`
+from the raw `reward_ledger.amount` (whole units) while `MyEntry.reward` is declared a base-unit
+string. `hasBaseUnits()` requires a plain integer, so a real credit of `"10.000000000000000000"`
+rendered as "no reward was credited" on both cards and was dropped from the viewer's earnings
+tally. Claimable balance was always correct, which is why it went unseen. Fixed with the
+`amount::text` cast and `toBaseUnits()` at the boundary, matching `/api/rewards/balance`.
+
+**B3 — the harness settled nothing, silently.** `ticker.py` called `settle_due_predictions()`, which
+`20260914000001_settlement_guards.sql:89` revokes from `service_role`; the granted function is the
+advisory-lock wrapper `settle_due_predictions_serialized()`. Every tick raised `42501`, was
+swallowed by `_call_one`'s deliberately broad `except`, and reported as `settled: None`. So the
+contract's named PRIMARY driver locked predictions and never settled one, leaving the 1-minute
+Vercel cron as the only driver and silently breaking this package's own 30 s windows. Fixed, plus a
+test that replays every migration's grants in filename order and asserts each RPC the ticker names
+is still EXECUTE-granted to `service_role` — the cross-artifact check whose absence caused it.
+
+**B4 — settlement could resolve on evidence that had not landed.** CONFIRMED by an Opus skeptic that
+tried to falsify it on five fronts. The completeness gate opens on
+`max(events.ts) >= resolves_at OR stats.heartbeat_at >= resolves_at`, treating the heartbeat as
+proof the writer caught up. The writer is not one ordered channel: every `(table, op)` run is a
+separate HTTP request and a failed run does not abort the flush, so a failed `events` insert
+followed by a successful `stats` upsert publishes the proof without the evidence. `SETTLEMENT_GRACE`
+does not help — it is only consulted when the gate is shut. Two corrections to the original report,
+both making it worse: `survives_window` is NOT safe (`insert_event_now` only bypasses the buffer
+when the clip pipeline is up, so with OBS down a queued `death` resolves the window as SURVIVED —
+failing toward paying the wrong people), and a deterministically-rejected row blocks its run's head
+of line indefinitely while the 1-row heartbeat keeps succeeding, making it a steady state rather
+than a coincidence. Fixed at both layers, no migration: `stats` runs last in a flush and is skipped
+entirely once anything has failed, and `flush()` records `unflushed` which `_heartbeat` reads to
+withhold a heartbeat over a backlog. Cost, accepted: the site reads OFF AIR during a write backlog.
+
+**Verification.** Harness: full suite passes, ruff back to the same 8 pre-existing findings as HEAD.
+Every fix has a regression test proven non-vacuous by reverting the fix and confirming failure — B4's
+drives the real `SupabaseWriter` against a real HTTP server that accepts `stats` and refuses
+`events`, and with the fix reverted it prints the actual POST trace showing the heartbeat published
+behind the failed event. Web: typecheck and lint clean.
+
+**NOT verified, and why:** B2 is typecheck-clean only. The assertion that proves it
+(`mine[].reward` is base units and a plain integer string) has been added to
+`web/scripts/verify-full-loop.mjs`, but that harness expects an already-running Postgres container
+and Next server which nothing in this repo scripts, so it was not executed here. Run
+`npm run verify:loop` against the local stack before funding. Note the existing 50 assertions
+checked `claimable` and never `mine[]`, which is exactly how B2 survived them.
+
+**Still open, not blocking funding but before `rewards.enabled`:** the four operator-only outbox
+functions (`resolve_claim_review`, `resume_payouts`, `cancel_queued_claim`, `record_claim_override`)
+are granted to the same `service_role` the app uses, with no lease or fencing, so "only an operator,
+in SQL" is a convention rather than something Postgres enforces; settlement's three caps are not
+scoped by `asset` (`20260908120000_predictions.sql:656-662`), harmless while TTWO is the only asset;
+the prediction circuit breaker cannot catch a rejected INSERT (the write is buffered and
+`events.py:flush()` swallows and requeues), so it guards a generator bug, not a broken table;
+`CONTRACTS-PREDICTIONS` §6 and §10.6 give opposite defaults for unset `CLAIM_MIN_AMOUNT` /
+`CLAIM_MAX_AMOUNT` (§10 wins by the doc's own precedence rule, but §6 is not marked superseded) —
+and both must be set in Vercel, since unset is a refusal, not "no limit".
+
+**Unchanged and still true:** prediction generation has never run against live game state. The live
+project holds no predictions and the newest heartbeat in `stats` is 2026-08-25.
+
 ## 2026-09-15 — TTWO payouts rebuilt; NOT funded, NOT deployed
 
-**Nothing below is live.** The work is in the working tree, uncommitted, and none of the four new
-migrations is applied to the cloud project. No treasury key exists. No transfer has ever been
-broadcast to mainnet from this codebase.
+**Not funded.** No treasury key exists, and no transfer has ever been broadcast to mainnet from
+this codebase.
+
+*(Corrected 2026-09-20. This paragraph used to read "the work is in the working tree, uncommitted,
+and none of the four new migrations is applied to the cloud project." Both halves had gone stale:
+the work is committed as `cf51a1f`, and the migrations ARE applied — probed directly against the
+live project, `predictions` / `reward_ledger` / `reward_claims` / `treasury_accounts` all answer,
+and `payout_lease` holds its singleton row. `treasury_accounts` is empty, which is what actually
+proves nothing has ever been signed. Both switches read off: `site_config.rewards` is
+`{"enabled": false, "payouts": false}`, and all three `reward_caps` are present and positive.
+Same failure mode as the 2026-09-09 grant paragraph below — a prose claim about the database
+outliving the database. A probe settles it; prose does not.)*
 
 **Why it was rebuilt.** An Opus audit of the old claim path (18 failure modes, 2026-09-14) found two
 critical defects: a wallet could claim exactly once in its life (a `submitted` claim never left the
