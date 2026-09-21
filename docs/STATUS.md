@@ -3,6 +3,38 @@
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
 run log, or URL) noted next to it. Last updated: 2026-09-21.
 
+## 2026-09-21 (later) — mainnet readiness, and the budget question that comes with a cadence
+
+**Read directly from Robinhood Chain mainnet** (`cast`, RPC `rpc.mainnet.chain.robinhood.com`,
+block 68,845,309), not from our own reporting: chain id **4663**; treasury
+`0xe2c5…6dab` holds **0.089246 ETH** and **0.123703 TTWO**, matching `site_config.treasury_status`
+to the wei; TTWO reports `symbol() = "TTWO"`, `decimals() = 18` and **`paused() = false`**; the
+treasury's **on-chain nonce is 1 and `treasury_accounts.next_nonce` is 1**, so the worker's idle
+check will not halt on a nonce it cannot explain. The production cron is alive — `treasury_status`
+is refreshed every minute — and the agent's brain is calling the API again (22 decisions in the
+hour, **$0.25/h** measured against a $2.00/h cap).
+
+**Cloud database state (read-only):** all eight prediction tables exist and `treasury_accounts` is
+initialised, but `settle_due_predictions()` does **not** contain the `event_matches` branch yet, and
+`predictions` is still empty. So RUNBOOK §5.7 step 1 has not been done. Applying it was refused by
+this session's permission layer as a production write; the exact command is in §5.7.
+
+**The budget arithmetic, before payouts go on.** A scheduled round asks for a
+`reward_pool` of 0.005 TTWO (`WASTED_PREDICTION_BASE_POOL`), and at the 300 s cadence there are 288
+rounds in a day — **1.44 TTWO/day** of requested pools against a `daily_cap` of **0.25 TTWO/day**.
+The cap wins, and the way it wins is worth knowing: once the day's credits reach it, settlement
+computes a credit of zero and `if v_credit > 0 then insert` means **no ledger row is written at
+all**, so the card reads "Correct — no reward was credited". That is honest, and it is also what
+roughly five sixths of a day's winners would see. With 0.1237 TTWO in the hot wallet, the cap
+itself is only funded for **half a day** (`runway_days: 0.49`).
+
+Three ways out, all operator decisions, and the first two need no code change because both values
+are now env/`site_config` knobs: lower `WASTED_PREDICTION_BASE_POOL` to about **0.0008** so a full
+day of rounds fits under the cap (credits accumulate across rounds, and `CLAIM_MIN_AMOUNT` of
+0.002 TTWO means a viewer claims after about three wins); raise `daily_cap` and fund the hot wallet
+toward its 1.75 TTWO ceiling (§5.2); or lengthen the round. Doing none of them is also a choice —
+the show still runs and settles honestly, it just pays only the first ~50 winners of each UTC day.
+
 ## 2026-09-21 — wallet connect, and a prediction cadence (CONTRACTS-PREDICTIONS v2.4)
 
 **What is live and what is not.** The WEB changes are deployed: production deployment
