@@ -3,6 +3,53 @@
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
 run log, or URL) noted next to it. Last updated: 2026-09-21.
 
+## 2026-09-21 (evening) — §5.7 step 1 is done; the rehearsal it unlocks passed 39/39
+
+**The cloud project now settles `event_matches`.** Applied by the operator (the first attempt
+reported nothing and changed nothing — a docker `-v` mount whose host path does not resolve becomes
+an empty DIRECTORY, and psql stops with "could not read from input file: Is a directory"; RUNBOOK
+§5.7 now pipes the file in on stdin, which has no path to resolve). Verified afterwards, read-only:
+the branch and its `payload @>` filter and `malformed_rule` guard are all present; `security
+definer` and `search_path=public, pg_temp` survived; the grants did too (`service_role` false on the
+raw function, true on the wrapper, `anon` false); and **0 predictions / 0 credits / 0 claims** — it
+touched no row. `rewards` is still `{enabled:false, payouts:false}`.
+
+**And it is the exact function that was tested.** `pg_get_functiondef` dumped from the cloud project
+and from a throwaway Postgres carrying only this repo's migrations are byte-identical — sha256
+`982913ae6dd16b2a…`, 429 lines both. Every check below therefore describes production's own code,
+not a local approximation.
+
+**The rehearsal (`cd web && node scripts/verify-rounds.mjs`, 39 checks, exit 0).** Every earlier
+proof started from a prediction row a test inserted; this one starts from the generator. Postgres 16
+with all 11 migrations, PostgREST v12, and an anvil fork of Robinhood Chain **mainnet** (4663, real
+TTWO, `paused() false`). The 2026-09-20 production recording (230 real events) loaded verbatim and
+replayed onto now by one constant offset of 59,790.918 s — payloads, types and order untouched.
+Then: the real `PredictionGenerator` + `CATALOG` + `RollingBaseRate` asked **16 scheduled rounds**,
+warm started by reading 106 real events back out of the database (`main._warm_start_base_rate`, the
+production restart path); every row reached the table through the real writer and matched what the
+in-memory replay predicted, in order and to the second; every row is `event_matches` in the
+contract's literal shape, carries its own measurement (n ≥ 12, rate in band — 50 %, 31 %, 50 %,
+33 %, …) and gives a viewer 60 s. One round settled **`yes` on `events.id=225`**, a real
+`drive_by_run` timeout at `2026-09-20T22:34:54Z`, with that id recorded as the evidence; one settled
+`no` from the absence of a match; one **voided `no_entries`**, as did all **14 of 14** due-and-empty
+rounds. Entry went through the real `enter_prediction` and was refused on a closed window. Then the
+real `runPayoutWorker`, compiled from the working tree, signed and mined a real transaction —
+`keccak256(raw_tx) == tx_hash == receipt.transactionHash`, receipt status 1 — and the winner's
+on-chain TTWO balance rose by exactly the **0.005** credited, with the ledger row attached to the
+confirmed claim so it cannot be claimed twice.
+
+**Production right now:** the minute cron completed a full tick 60 s ago with the new function in
+place (`halted:false, queued:0, in_flight:0, needs_review:0`), so settlement runs cleanly as a
+no-op; `/api/predictions/live` answers `session_live: true` with an empty board, which is the honest
+state; the agent is playing and its brain is on the API at $0.25/h.
+
+**Still open, and it is the only thing between here and live rounds:** §5.7 step 2, the harness.
+Predictions are created on the game server and nowhere else. SSH to the box has refused every
+connection today, so `scripts/deploy-predictions.ps1` now does that step from inside a Remote
+Desktop session with no file transfer — it builds the package from the checkout on the box, hands
+over to `deploy-all.ps1` (which refuses unless the game is ticking, and restores its own backup if
+the new code does not import), and restarts sshd on the way out.
+
 ## 2026-09-21 (later) — mainnet readiness, and the budget question that comes with a cadence
 
 **Read directly from Robinhood Chain mainnet** (`cast`, RPC `rpc.mainnet.chain.robinhood.com`,
