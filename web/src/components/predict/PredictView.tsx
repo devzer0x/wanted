@@ -2,6 +2,10 @@
 
 import { useEffect, useState, type ReactNode } from "react";
 import { LivePredictionCard } from "@/components/predict/LivePredictionCard";
+import {
+  NOTHING_OPEN_LIVE,
+  NOTHING_OPEN_OFF_AIR,
+} from "@/components/predict/NoLivePrediction";
 import { ResolvedPredictionCard } from "@/components/predict/ResolvedPredictionCard";
 import { usePredictions } from "@/components/predict/usePredictions";
 import { viewerRecord } from "@/components/predict/summary";
@@ -125,8 +129,7 @@ export function PredictView({ header }: { header?: ReactNode }) {
               Nothing open
             </span>
             <p className="mx-auto mt-3 max-w-sm text-[13px] font-bold leading-relaxed text-muted">
-              No live prediction right now. The next one opens from something that happens on
-              stream.
+              {session_live ? NOTHING_OPEN_LIVE : NOTHING_OPEN_OFF_AIR}
             </p>
           </div>
         ) : (
