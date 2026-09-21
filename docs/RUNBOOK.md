@@ -266,10 +266,18 @@ apply the single file:
 
 ```bash
 cd infra && set -a && . ./.env.cloud && set +a
-docker run --rm -i -e "PGURL=$SUPABASE_DB_URL" \
-  -v "$PWD/supabase/migrations/20260921000000_event_matches.sql:/tmp/m.sql:ro" \
-  postgres:16-alpine sh -c 'psql "$PGURL" -v ON_ERROR_STOP=1 -q -f /tmp/m.sql'
+docker run --rm -i -e "PGURL=$SUPABASE_DB_URL" postgres:16-alpine \
+  sh -c 'psql "$PGURL" -v ON_ERROR_STOP=1 -f -' \
+  < supabase/migrations/20260921000000_event_matches.sql
 ```
+
+The SQL goes in on **stdin**, not as a `-v` mount, and that is not a style
+preference. A docker volume whose host path does not resolve — the wrong working
+directory, or a path Docker Desktop does not share, `/tmp` among them — is
+created as an empty DIRECTORY rather than refused, and psql then stops with
+`could not read from input file: Is a directory`. That failure looks like a
+database problem and is not one. Cost on 2026-09-21: one apply that reported
+nothing and changed nothing.
 
 Then re-run the query above: `step1_done` must be `t`. Also confirm the grants survived — `create
 or replace` keeps them, and this proves it rather than assuming: `service_role` must still be
