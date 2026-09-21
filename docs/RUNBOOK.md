@@ -244,6 +244,77 @@ kind `pay`; the worker then confirms the claim against that hash.
 
 ---
 
+## 5.7 Turning predictions on (first time)
+
+Four steps, in this order. Any other order is safe but wasteful: until step 1 has run, every
+scheduled round the harness writes settles `void` with reason `unknown_rule_kind` — nobody is paid
+and nobody is told a falsehood, but nobody can win either.
+
+Check where you are before starting — all four answers come from one read-only query:
+
+```sql
+select (select count(*) from public.predictions)                                    as predictions,
+       position('event_matches' in pg_get_functiondef(
+         'public.settle_due_predictions()'::regprocedure)) > 0                      as step1_done,
+       (select value from public.site_config where key = 'rewards')                 as switches,
+       (select value from public.site_config where key = 'treasury_status')         as treasury;
+```
+
+**1. The settlement rule (`event_matches`).** One `create or replace function`; additive, and
+re-runnable. `infra/apply-predictions-to-cloud.sh` applies it along with the other repairs, or
+apply the single file:
+
+```bash
+cd infra && set -a && . ./.env.cloud && set +a
+docker run --rm -i -e "PGURL=$SUPABASE_DB_URL" \
+  -v "$PWD/supabase/migrations/20260921000000_event_matches.sql:/tmp/m.sql:ro" \
+  postgres:16-alpine sh -c 'psql "$PGURL" -v ON_ERROR_STOP=1 -q -f /tmp/m.sql'
+```
+
+Then re-run the query above: `step1_done` must be `t`. Also confirm the grants survived — `create
+or replace` keeps them, and this proves it rather than assuming: `service_role` must still be
+**false** on the raw function and **true** on `settle_due_predictions_serialized`.
+
+**2. The harness.** Predictions are created on the game server and nowhere else; no web deploy can
+make one appear. Deploy the harness (§1) with `WASTED_PREDICTIONS_ENABLED=true` in
+`C:\wasted\harness\.env` — `go-live.ps1` writes that flag on every run, so a normal go-live
+covers it. Within about five minutes of the agent playing, `select count(*) from public.predictions`
+starts moving. If it does not, read `C:\wasted\logs\harness-*.log` for a line naming the
+`predictions` table: a rejected insert is now reported with the server's own message.
+
+**3. Watch one round settle, with the money still off.** Rewards stay off for this step, which is
+the point: the full lifecycle runs and credits nothing, so a wrong outcome costs nothing.
+
+```sql
+select question, status, result, entry_count, correct_count,
+       resolution_evidence ->> 'void_reason' as void_reason,
+       state_context -> 'calibration'        as measured_odds
+  from public.predictions order by opened_at desc limit 10;
+```
+
+Expect `settled` rows with a `result`, and `void / no_entries` for any round nobody entered — that
+is the rule working, not a fault. Every row should carry `measured_odds` with `n >= 12` and a rate
+between 0.20 and 0.80.
+
+**4. The money.** Only after step 3 looks right. The two switches are independent and instant
+(§5.2): `rewards.enabled` lets settlement write credits, `rewards.payouts` lets the worker sign.
+Turn on crediting first and watch a `reward_ledger` row appear before enabling payouts.
+
+```sql
+update public.site_config set value = value || '{"enabled": true}'::jsonb  where key = 'rewards';
+-- then, once a credit has appeared and looks right:
+update public.site_config set value = value || '{"payouts": true}'::jsonb  where key = 'rewards';
+```
+
+**Budget before you do.** `reward_caps.daily_cap` is the ceiling on credits per UTC day; the
+treasury must hold more TTWO than that or claims queue. `treasury_status.runway_days` is exactly
+that division — under 1 means less than a day of the cap in the hot wallet (§5.2 refills it).
+
+**Turning it all off again** is two statements and no deploy: `payouts` false stops signing,
+`enabled` false stops crediting. Rounds keep being asked and keep settling; they simply pay
+nothing. To stop the questions themselves, set `WASTED_PREDICTIONS_ENABLED=false` and restart the
+harness.
+
 ## 6. Starting the show and leaving without freezing it
 
 This is the whole procedure, in the order you actually do it. If you are tired, do exactly these
