@@ -40,6 +40,7 @@ from __future__ import annotations
 import json
 import signal
 import threading
+from datetime import UTC, datetime, timedelta
 from pathlib import Path
 from typing import Any
 
@@ -643,9 +644,15 @@ def test_generation_stops_after_repeated_write_failures(tmp_path: Path) -> None:
 
 
 def test_a_refused_predictions_insert_is_counted_on_the_writer(tmp_path: Path) -> None:
+    """This is about the FAILURE-COUNTING path, not the entry-window floor
+    (`events.MIN_ENTRY_REMAINING_S`), so `locks_at` is built comfortably in
+    the future off the real wall clock `_ObservedWriter` uses by default —
+    a fixed past literal here would eventually go stale and get DROPPED by
+    that other, unrelated mechanism instead of genuinely failing."""
     settings = make_settings(tmp_path, predictions_enabled=True)
     writer = _ObservedWriter(settings, session_id=SESSION_ID, on_event=lambda *_: None)
     prediction_writer = PredictionWriter(writer)
+    opened = datetime.now(UTC) + timedelta(minutes=1)
 
     assert writer.predictions_write_failures == 0
     prediction_writer.write(
@@ -655,9 +662,9 @@ def test_a_refused_predictions_insert_is_counted_on_the_writer(tmp_path: Path) -
             "prediction_type": "loses_the_cops",
             "state_context": {},
             "created_from_event": None,
-            "opened_at": "2026-09-21T00:00:00+00:00",
-            "locks_at": "2026-09-21T00:00:30+00:00",
-            "resolves_at": "2026-09-21T00:01:50+00:00",
+            "opened_at": opened.isoformat(),
+            "locks_at": (opened + timedelta(seconds=30)).isoformat(),
+            "resolves_at": (opened + timedelta(seconds=110)).isoformat(),
             "outcomes": [{"key": "yes", "label": "YES"}, {"key": "no", "label": "NO"}],
             "telemetry_rule": {
                 "kind": "wanted_clears",

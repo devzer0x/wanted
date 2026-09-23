@@ -267,10 +267,14 @@ def cmd_run(args: argparse.Namespace) -> int:
     if not settings.supabase_configured:
         print("SUPABASE_URL / SUPABASE_SECRET_KEY are not set", file=sys.stderr)
         return 2
-    writer = SupabaseWriter(settings, session_id=args.session)
-    prediction_writer = PredictionWriter(writer)
-
     clock = _Clock(t_start)
+    # The writer judges "is this row's entry window still open?" at the moment it
+    # inserts (events.MIN_ENTRY_REMAINING_S, CONTRACTS-PREDICTIONS v2.5 §3), so it
+    # must read the SAME clock the generator stamped the row with. On the real
+    # time.time() every replayed round would look minutes or hours stale — the
+    # replay runs 2.32 h of play in seconds — and be dropped, correctly.
+    writer = SupabaseWriter(settings, session_id=args.session, wall_clock=clock)
+    prediction_writer = PredictionWriter(writer)
     estimator = RollingBaseRate(
         clock=clock, history_s=DEFAULT_HISTORY_S, round_interval_s=DEFAULT_ROUND_INTERVAL_S
     )
@@ -300,9 +304,14 @@ def cmd_run(args: argparse.Namespace) -> int:
         )
 
     written: list[dict[str, Any]] = []
+    flushes: list[bool] = []
 
     def sink(row: dict[str, Any]) -> None:
+        # Flushed at the tick it was generated, as production does within one
+        # FLUSH_INTERVAL_S (2 s): one flush after the whole replay would judge
+        # every row against the replay's LAST tick.
         prediction_writer.write(row)
+        flushes.append(prediction_writer.flush())
         written.append(row)
 
     rows = _rounds(
@@ -314,7 +323,7 @@ def cmd_run(args: argparse.Namespace) -> int:
         session_id=args.session,
         sink=sink,
     )
-    flushed = prediction_writer.flush()
+    flushed = all(flushes) and prediction_writer.flush()
     json.dump(
         {
             "offset_s": offset,

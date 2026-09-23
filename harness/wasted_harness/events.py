@@ -30,7 +30,7 @@ import os
 import tempfile
 import threading
 import time
-from collections.abc import Iterator
+from collections.abc import Callable, Iterator
 from datetime import UTC, datetime
 from pathlib import Path
 from typing import Any
@@ -110,6 +110,26 @@ PREDICTIONS_TABLE = "predictions"
 #: hour in the file the 3am operator has to read.
 PREDICTIONS_ERROR_LOG_INTERVAL_S = 60.0
 
+#: CONTRACTS-PREDICTIONS §3: `predictions/generator.py` fixes `opened_at`/
+#: `locks_at`/`resolves_at` from the wall clock AT GENERATION, and this writer
+#: (via its offline queue) can hold a row for an arbitrary time before it is
+#: actually inserted — an outage, or simply a slow backlog. Inserting a row
+#: whose entry window has already closed, or is about to, ships an unenterable
+#: card that `entry_count = 0` voids `no_entries` at settlement: a real,
+#: publicly visible prediction nobody could actually answer. So a `predictions`
+#: insert is DROPPED — never attempted, never requeued — rather than shipped,
+#: once the time left to enter (`locks_at` minus this writer's own wall clock,
+#: read at the moment of insertion) falls below this floor.
+#:
+#: 10s, not 0s: the live prediction page polls every 8s
+#: (CONTRACTS-PREDICTIONS §4, `/api/predictions/live`) and the broadcast itself
+#: runs a few seconds behind the game, so anything under one poll cycle is a
+#: card nobody watching could realistically see AND answer in time — the same
+#: reasoning that set §3's 30s ENTRY WINDOW floor in the first place
+#: (`predictions/catalog.py:MIN_ENTRY_WINDOW_S`), applied here to the tail end
+#: of that window instead of its start.
+MIN_ENTRY_REMAINING_S = 10.0
+
 # A Supabase outage must not fill the server's disk. At ~1 KB/row this caps the
 # backlog around 40 MB; past it the OLDEST rows are dropped (loudly) so the most
 # recent hours of the show survive.
@@ -179,13 +199,26 @@ def _queue_file_lock(lock_path: Path) -> Iterator[None]:
 class SupabaseWriter:
     """All harness → Supabase writes go through this. One instance per process."""
 
-    def __init__(self, settings: Settings, session_id: str | None = None) -> None:
+    def __init__(
+        self,
+        settings: Settings,
+        session_id: str | None = None,
+        *,
+        wall_clock: Callable[[], float] = time.time,
+    ) -> None:
         self._settings = settings
         self.session_id = session_id
         self.queue_path = settings.ensure_state_dir() / "queue.jsonl"
         self.lock_path = self.queue_path.with_suffix(".lock")
         self._client: Any = None
         self._buffer: list[dict[str, Any]] = []
+        #: Injectable, same idiom as `predictions/generator.py`'s
+        #: `wall_clock: Callable[[], float] = time.time` field and
+        #: `budget.py`'s `wall_clock`/`clock` pair — real wall-clock time by
+        #: default, a fixed/steppable one in tests. Used ONLY to compare
+        #: against a `predictions` row's `locks_at` (MIN_ENTRY_REMAINING_S);
+        #: nothing else in this class reads it.
+        self._wall_clock = wall_clock
         #: True when the last flush left rows unwritten (buffer or offline queue).
         #: Read by `Harness._heartbeat`, which withholds the heartbeat while it is
         #: set: `settle_due_predictions()` treats `stats.heartbeat_at >= resolves_at`
@@ -449,6 +482,15 @@ class SupabaseWriter:
                 )
                 remaining.extend(group)
                 continue
+            if table == PREDICTIONS_TABLE and op == "insert":
+                # See MIN_ENTRY_REMAINING_S. Runs on EVERY entry about to be
+                # inserted, whether it is fresh off the buffer or replayed
+                # from the offline queue after an outage (both are mixed into
+                # `entries` above before `_runs()` grouped them) — a dropped
+                # row is handled, not a write failure, so it must never reach
+                # `pairs`/`remaining` below: not inserted, not requeued, and
+                # invisible to `predictions_failed`/`predictions_written`.
+                group = _drop_stale_predictions(group, self._wall_clock())
             pairs: list[tuple[dict[str, Any], dict[str, Any]]] = []
             skipped = []
             for e in group:
@@ -745,6 +787,71 @@ class SupabaseWriter:
             "supabase write failed",
             extra={"kv": {"what": what, "error": f"{type(exc).__name__}: {exc}"[:200]}},
         )
+
+
+def _seconds_until(locks_at: Any, now: float) -> float | None:
+    """`locks_at` (an ISO-8601 string, as `predictions/generator.py` writes it)
+    minus `now`, or `None` when it cannot be parsed.
+
+    `None` is treated as "do not drop" by the caller: a row with an unparseable
+    `locks_at` has a different, separate bug (the row shape is wrong), and
+    guessing it is stale would hide that bug behind a silent drop instead of
+    letting it surface the normal way (a rejected insert, visible on the
+    writer's own `predictions_write_failures`/`last_predictions_error`).
+    """
+    if not isinstance(locks_at, str):
+        return None
+    try:
+        parsed = datetime.fromisoformat(locks_at)
+    except ValueError:
+        return None
+    # Judged exactly as Postgres will store it. The generator only writes tz-aware
+    # UTC (`_iso()`), but a naive value would be accepted by the `timestamptz`
+    # column in the session time zone, which is UTC on Supabase — so it is read
+    # as UTC here too, never as the box's local time (`.timestamp()` on a naive
+    # datetime would use local time, and on Windows can raise OSError for it).
+    if parsed.tzinfo is None:
+        parsed = parsed.replace(tzinfo=UTC)
+    return parsed.timestamp() - now
+
+
+def _drop_stale_predictions(
+    entries: list[dict[str, Any]], now: float
+) -> list[dict[str, Any]]:
+    """Drop any `predictions` insert whose entry window is already gone, or
+    about to be, AT THE MOMENT OF INSERTION. See `MIN_ENTRY_REMAINING_S`.
+
+    Applies identically to a row fresh off the in-memory buffer and to one
+    replayed from the on-disk offline queue after an outage — both arrive here
+    the same way (mixed into `_write_entries`'s `entries` before `_runs()`
+    grouped them), and both carry the SAME `locks_at` they were generated
+    with, exactly as a queued `events` row keeps its original `ts` (the
+    completeness-gate property CONTRACTS-PREDICTIONS §3 already relies on).
+    """
+    kept: list[dict[str, Any]] = []
+    for e in entries:
+        row = e["row"]
+        remaining = _seconds_until(row.get("locks_at"), now)
+        if remaining is not None and remaining < MIN_ENTRY_REMAINING_S:
+            log.warning(
+                "dropping predictions row: its entry window is closed or about to be — "
+                "not enough time left for a viewer polling every 8s to see it and answer, "
+                "so it is dropped rather than inserted (and not requeued)",
+                extra={
+                    "kv": {
+                        "prediction_type": row.get("prediction_type"),
+                        # Negative = already past locks_at ("late" by -remaining
+                        # seconds); positive-but-under-floor = "short" by that
+                        # many fewer seconds than MIN_ENTRY_REMAINING_S needs.
+                        "seconds_remaining": round(remaining, 2),
+                        "min_entry_remaining_s": MIN_ENTRY_REMAINING_S,
+                        "locks_at": row.get("locks_at"),
+                    }
+                },
+            )
+            continue
+        kept.append(e)
+    return kept
 
 
 def _runs(

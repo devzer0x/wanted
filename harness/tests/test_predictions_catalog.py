@@ -941,6 +941,61 @@ def test_event_matches_validates_its_payload_filter(params: dict, match: str) ->
         )
 
 
+@pytest.mark.parametrize(
+    "level",
+    ["two", "", None, True, False, [2], {"gte": 2}, float("nan"), float("inf"), float("-inf")],
+)
+def test_wanted_reaches_level_must_be_a_real_number(level: object) -> None:
+    """`settle_due_predictions()` (20260921000000_event_matches.sql) does
+    `(v_params ->> 'level')::numeric` with NO try/catch around the cast: a
+    non-numeric `level` (an earlier bug let `level="two"` pass import-time
+    validation, since `_validate_rule` only checked for PRESENCE) raises
+    inside the settlement loop and takes the WHOLE BATCH down with it, not
+    just this row. `True`/`False` are refused too — `bool` is a `numeric`
+    subtype in the JSON sense settlement would accept only by accident
+    (`isinstance(True, int)` is `True` in Python), and a wanted level of
+    `true` is not a number a viewer would recognise as a star count."""
+    with pytest.raises(ValueError, match="must be a real number"):
+        PredictionTemplate(
+            prediction_type="bad_level",
+            question="WILL THIS EVER SHIP?",
+            outcomes=YES_NO_OUTCOMES,
+            telemetry_rule={
+                "kind": "wanted_reaches",
+                "params": {"level": level},
+                "outcome_if_true": "yes",
+                "outcome_if_false": "no",
+            },
+            window=SMALLEST_LEGAL_WINDOW,
+            trigger=lambda state, events: True,
+            score=lambda state: 0.5,
+            reliability=0.8,
+        )
+
+
+@pytest.mark.parametrize("level", [2, 2.0, 0, -1])
+def test_wanted_reaches_accepts_a_real_number_level(level: object) -> None:
+    """Control: an actual int/float level (including 0 and a negative one —
+    this validator only checks the JSON TYPE, not the game-logic range) builds
+    cleanly."""
+    tpl = PredictionTemplate(
+        prediction_type="good_level",
+        question="WILL THIS EVER SHIP?",
+        outcomes=YES_NO_OUTCOMES,
+        telemetry_rule={
+            "kind": "wanted_reaches",
+            "params": {"level": level},
+            "outcome_if_true": "yes",
+            "outcome_if_false": "no",
+        },
+        window=SMALLEST_LEGAL_WINDOW,
+        trigger=lambda state, events: True,
+        score=lambda state: 0.5,
+        reliability=0.8,
+    )
+    assert tpl.telemetry_rule["params"]["level"] == level
+
+
 def test_event_matches_is_in_the_registry_and_used_by_the_ambient_templates() -> None:
     assert "event_matches" in TELEMETRY_RULE_KINDS
     assert "event_matches" not in UNSETTLEABLE_RULE_KINDS

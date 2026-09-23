@@ -242,6 +242,7 @@ production row was ever affected: `predictions` has zero rows.
 
 from __future__ import annotations
 
+import math
 from collections.abc import Callable, Sequence
 from dataclasses import dataclass
 from typing import Any
@@ -295,6 +296,22 @@ REQUIRED_RULE_PARAMS: dict[str, tuple[str, ...]] = {
     "survives_window": (),
     "mission_outcome": ("expect",),
     "activity_outcome": ("activity", "expect"),
+}
+
+#: Which of a kind's REQUIRED params settlement casts to `numeric` rather than
+#: reading as text. Read out of `infra/supabase/migrations/20260921000000_
+#: event_matches.sql`: only `wanted_reaches.level` is ever cast —
+#: `(v_params ->> 'level')::numeric` — with no try/catch around it. Every other
+#: kind's params (`event_type`, `payload_match`, `expect`, `activity`) are read
+#: with `->>`/`@>` as text/JSON, never cast, so a string there is merely wrong,
+#: not fatal. A non-numeric `level` (the presence-only check above lets
+#: `level="two"` through) reaches that cast at SETTLEMENT TIME, inside the loop
+#: `settle_due_predictions()` runs over every due prediction, and Postgres
+#: raises out of the whole function — voiding/settling NONE of that batch, not
+#: just this row. `_validate_rule` below refuses it here instead, at import
+#: time, so it can never reach a row.
+NUMERIC_RULE_PARAMS: dict[str, tuple[str, ...]] = {
+    "wanted_reaches": ("level",),
 }
 
 #: What a `payload_match` value is allowed to be. `payload @> payload_match` is
@@ -625,6 +642,29 @@ def _validate_rule(prediction_type: str, rule: dict[str, Any], outcomes: tuple[d
             raise ValueError(
                 f"{prediction_type!r}: kind {kind!r} requires params.{required}; "
                 f"settlement voids `malformed_rule` without it"
+            )
+    for numeric_param in NUMERIC_RULE_PARAMS.get(kind, ()):
+        value = params.get(numeric_param)
+        # `bool` is an `int` subclass in Python, so `isinstance(True, (int,
+        # float))` is True — excluded explicitly, because settlement casting
+        # `'true'::numeric` is exactly as fatal as `'two'::numeric` and a
+        # wanted level of `true`/`false` is not a star count either way.
+        # NaN and ±inf are floats too, but they are not valid JSON (the row would not
+        # serialise) and are not a star count; refused for the same reason.
+        if (
+            not isinstance(value, (int, float))
+            or isinstance(value, bool)
+            or not math.isfinite(value)
+        ):
+            raise ValueError(
+                f"{prediction_type!r}: kind {kind!r} requires params.{numeric_param} must be a "
+                f"real number (finite int or float; not bool, NaN or inf); got {value!r} "
+                f"({type(value).__name__}). "
+                f"settlement does `(telemetry_rule -> 'params' ->> {numeric_param!r})::numeric`, "
+                f"so anything else raises inside settle_due_predictions(): before migration "
+                f"20260922000000 that aborted settlement for every due prediction in the run, "
+                f"and after it this one voids as settlement_error — a question that can never "
+                f"have a winner either way."
             )
     if kind in ("event_occurs", "event_matches"):
         event_type = params.get("event_type")
