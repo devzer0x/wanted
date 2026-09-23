@@ -1,7 +1,7 @@
 "use client";
 
-import { useCallback, useState } from "react";
-import { apiErrorMessage } from "@/components/apiError";
+import { useCallback, useEffect, useState } from "react";
+import { apiErrorMessage, enterConflictMessage } from "@/components/apiError";
 import { pctOf } from "@/components/predict/distribution";
 import { outcomeFill } from "@/components/predict/outcomeStyle";
 import { PredictionCountdown } from "@/components/predict/PredictionCountdown";
@@ -29,6 +29,28 @@ export function MobilePredictBar({
   const [voting, setVoting] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
 
+  // Ported from LivePredictionCard: `status` is only as fresh as the last poll (8 s), so without
+  // this the outcome buttons stayed tappable after `locks_at` until the next poll landed — every
+  // such tap was correctly refused by the server (409), but the bar was offering something it
+  // could not deliver. The server remains the only authority on the lock.
+  const [lockPassed, setLockPassed] = useState(false);
+  const locksAt = prediction?.locks_at;
+  useEffect(() => {
+    // A new round (a new locks_at) starts clean: the bar stays mounted between rounds, so a
+    // "just locked" from the last one would otherwise sit under this one's live buttons.
+    setError(null);
+    if (!locksAt) {
+      setLockPassed(false);
+      return;
+    }
+    const ms = new Date(locksAt).getTime() - Date.now();
+    const id = setTimeout(() => setLockPassed(true), Math.max(0, Number.isFinite(ms) ? ms : 0));
+    return () => {
+      clearTimeout(id);
+      setLockPassed(false);
+    };
+  }, [locksAt]);
+
   const vote = useCallback(
     async (outcomeKey: string) => {
       if (!prediction) return;
@@ -41,7 +63,7 @@ export function MobilePredictBar({
           credentials: "same-origin",
           body: JSON.stringify({ outcome: outcomeKey }),
         });
-        if (res.status === 409) setError("Just locked — a beat too late.");
+        if (res.status === 409) setError(await enterConflictMessage(res, "Just locked — a beat too late."));
         else if (!res.ok) setError(await apiErrorMessage(res, "Couldn't submit your pick"));
         onEntered();
       } catch {
@@ -55,10 +77,11 @@ export function MobilePredictBar({
 
   if (!prediction || prediction.status !== "open") return null;
 
-  const ready = !mine && wallet.address && wallet.signIn === "signed-in";
+  const ready = !mine && !lockPassed && wallet.address && wallet.signIn === "signed-in";
 
   return (
     <div
+      data-testid="mobile-predict-bar"
       className="pointer-events-none fixed inset-x-0 bottom-0 z-50 px-3 pt-3 lg:hidden"
       style={{
         paddingBottom: "calc(10px + env(safe-area-inset-bottom, 0px))",
@@ -81,6 +104,10 @@ export function MobilePredictBar({
             You picked{" "}
             {prediction.outcomes.find((o) => o.key === mine.outcome)?.label ?? mine.outcome}.
             Waiting to lock.
+          </p>
+        ) : lockPassed ? (
+          <p className="text-xs font-bold text-muted" role="status">
+            Locked — waiting for the result.
           </p>
         ) : ready ? (
           <div className="flex gap-2">

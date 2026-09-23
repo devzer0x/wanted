@@ -64,6 +64,28 @@ export async function POST(request: Request, { params }: RouteContext): Promise<
   }
 
   if (data !== true) {
+    // `enter_prediction` inserts with `ON CONFLICT (prediction_id, wallet) DO NOTHING` and returns
+    // whether a row was actually inserted — so a duplicate entry and a locked/unknown/invalid-
+    // outcome prediction are BOTH a `false` return with no error. The RPC result alone cannot tell
+    // them apart. Distinguish with one extra service-role read rather than guess: if the wallet
+    // already has a row for this prediction, this was always a duplicate, whatever the
+    // prediction's current state.
+    const { data: existing, error: existingErr } = await admin
+      .from("prediction_entries")
+      .select("id")
+      .eq("prediction_id", id)
+      .eq("wallet", wallet.toLowerCase())
+      .maybeSingle();
+    if (existingErr) {
+      return internalError(
+        "predictions/enter: prediction_entries lookup failed",
+        existingErr,
+        "enter_prediction failed"
+      );
+    }
+    if (existing) {
+      return jsonError(409, "already entered this prediction");
+    }
     return jsonError(409, "prediction is locked, unknown, or the outcome is invalid");
   }
 

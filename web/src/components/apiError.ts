@@ -14,3 +14,14 @@ export async function apiErrorMessage(res: Response, fallback: string): Promise<
   }
   return `${fallback} (${res.status}).`;
 }
+
+/**
+ * What a 409 from `POST /api/predictions/{id}/enter` means to the viewer. The route answers 409 for
+ * two different things (CONTRACTS-PREDICTIONS §4): the round locked before the pick landed, or this
+ * wallet already has a pick on it (a double tap, a second tab). The second is not an error to show
+ * — the refresh that follows renders "You picked …" — so it returns null; anything else is the lock.
+ */
+export async function enterConflictMessage(res: Response, lockedMessage: string): Promise<string | null> {
+  const reason = await apiErrorMessage(res, "");
+  return /already entered/i.test(reason) ? null : lockedMessage;
+}

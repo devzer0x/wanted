@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
-import { apiErrorMessage } from "@/components/apiError";
+import { apiErrorMessage, enterConflictMessage } from "@/components/apiError";
 import { OutcomeBar } from "@/components/predict/OutcomeBar";
 import { PredictionCountdown } from "@/components/predict/PredictionCountdown";
 import { pctOf } from "@/components/predict/distribution";
@@ -57,6 +57,9 @@ export function LivePredictionCard({
   // was offering something it could not deliver. The server remains the only authority on the lock.
   const [lockPassed, setLockPassed] = useState(false);
   useEffect(() => {
+    // A new round starts clean: where this card is not keyed by prediction id (the live
+    // dashboard), last round's "just locked" would otherwise sit under this one's buttons.
+    setVoteError(null);
     const ms = new Date(prediction.locks_at).getTime() - Date.now();
     const id = setTimeout(() => setLockPassed(true), Math.max(0, Number.isFinite(ms) ? ms : 0));
     return () => {
@@ -80,7 +83,7 @@ export function LivePredictionCard({
           body: JSON.stringify({ outcome: outcomeKey }),
         });
         if (res.status === 409) {
-          setVoteError("Predictions just locked — a beat too late.");
+          setVoteError(await enterConflictMessage(res, "Predictions just locked — a beat too late."));
         } else if (!res.ok) {
           setVoteError(await apiErrorMessage(res, "Couldn't submit your pick"));
         }

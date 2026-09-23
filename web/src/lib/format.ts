@@ -100,10 +100,24 @@ export function formatBaseUnits(
   if (value === null || value === undefined || !/^-?\d+$/.test(value)) return "—";
   const negative = value.startsWith("-");
   const digits = negative ? value.slice(1) : value;
+  const isZero = /^0+$/.test(digits);
   const padded = digits.padStart(decimals + 1, "0");
   const whole = padded.slice(0, padded.length - decimals).replace(/^0+(?=\d)/, "");
   const fracFull = padded.slice(padded.length - decimals);
   const frac = fracFull.slice(0, maxFractionDigits).replace(/0+$/, "");
+
+  // A non-zero amount smaller than this display's precision can represent used to fall through
+  // the truncation below to "0" — indistinguishable from having nothing, which is what turned a
+  // real 0.005/60 TTWO credit into "Correct — 0 TTWO credited." `hasBaseUnits()` already treats
+  // this exact value as non-zero (it reads the raw bigint, not the display truncation), so the
+  // two disagreed. Never claim zero for money that exists: show the smallest amount this display
+  // COULD show, prefixed with "<", scaled to `maxFractionDigits` the same way the real value
+  // would have been. Exact zero is unaffected — it never reaches this branch.
+  if (!isZero && whole === "0" && frac === "") {
+    const threshold = maxFractionDigits > 0 ? `0.${"0".repeat(maxFractionDigits - 1)}1` : "1";
+    return `${negative ? "-" : ""}<${threshold}`;
+  }
+
   const groupedWhole = whole.replace(/\B(?=(\d{3})+(?!\d))/g, ",");
   return `${negative ? "-" : ""}${groupedWhole}${frac ? `.${frac}` : ""}`;
 }

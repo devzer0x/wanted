@@ -38,6 +38,7 @@
     ".next-e2e/types/**/*.ts",
     ".next-loop/types/**/*.ts",
     ".next-offline/types/**/*.ts",
+    ".next-predict-local/types/**/*.ts",
     ".next-preview/types/**/*.ts",
     ".next/types/**/*.ts",
     "next-env.d.ts",
@@ -48,6 +49,7 @@
     ".next/build",
     ".next-e2e/build",
     ".next-offline/build",
+    ".next-predict-local/build",
     "test-results"
   ]
 }

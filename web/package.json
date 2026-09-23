@@ -10,6 +10,7 @@
     "typecheck": "tsc --noEmit",
     "test:e2e": "playwright test",
     "test:e2e:offline": "PLAYWRIGHT_OFFLINE=1 playwright test",
+    "verify:predict-local": "PLAYWRIGHT_PREDICT_LOCAL=1 playwright test e2e/predictLocal.spec.ts",
     "verify:siwe": "node scripts/verify-siwe.mjs",
     "verify:treasury": "node scripts/verify-treasury.mjs",
     "verify:payout": "node scripts/verify-payout.mjs",
