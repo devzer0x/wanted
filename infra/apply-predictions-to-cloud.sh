@@ -83,6 +83,13 @@ REPAIR_MIGRATIONS=(
   # grant, because `create or replace` keeps the existing ACL — including 20260914000001's revoke
   # of EXECUTE from service_role, re-checked as a post-condition in step 7.
   supabase/migrations/20260921000000_event_matches.sql
+  # Replaces settle_due_predictions() again, with 20260921000000's definition plus four hunks: a
+  # per-candidate `exception when data_exception` block, so one prediction whose rule or events
+  # raise a class-22 error voids as `settlement_error` instead of aborting every settlement call,
+  # every tick; and the max_per_prediction clamp recorded on the ledger row (§6). MUST come after
+  # 20260921000000, or applying that one afterwards would put the old body back. `create or
+  # replace` only and no grant, like the one above; step 7 re-checks the ACL and the new body.
+  supabase/migrations/20260922000000_settle_row_isolation.sql
 )
 MIGRATIONS=("${BASE_MIGRATIONS[@]}" "${REPAIR_MIGRATIONS[@]}")
 
@@ -194,6 +201,9 @@ echo "== verifying =="
 # The event_matches kind (20260921000000). Both lines must print true.
 "${PSQL[@]}" -tAc "select 'settlement understands event_matches: ' || bool_or(p.prosrc like '%event_matches%') from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'settle_due_predictions';"
 "${PSQL[@]}" -tAc "select 'the replace kept settlement behind the lock: ' || (has_function_privilege('service_role', 'public.settle_due_predictions_serialized()', 'execute') and not has_function_privilege('service_role', 'public.settle_due_predictions()', 'execute') and not has_function_privilege('anon', 'public.settle_due_predictions()', 'execute'));"
+# Row isolation and the recorded clamp (20260922000000). Must print true; the ACL line above covers
+# this replace too, because it runs after every migration in the list.
+"${PSQL[@]}" -tAc "select 'settlement isolates class-22 rows and records the max_per_prediction clamp: ' || bool_or(p.prosrc like '%exception when data_exception then%' and p.prosrc like '%''settlement_error''%' and p.prosrc like '%v_clamp_reason := ''max_per_prediction''%' and p.prosrc like '%event_matches%') from pg_proc p join pg_namespace n on n.oid = p.pronamespace where n.nspname = 'public' and p.proname = 'settle_due_predictions';"
 
 echo
 echo "Done. Next: PostgREST picks up the new schema within a few seconds; then"

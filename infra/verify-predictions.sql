@@ -12,6 +12,8 @@
 --                                        SECOND row in the window, not the first
 --   * 2026-09-04T01:15:00Z .. 01:18:00Z  three real activity_end rows, NONE completed (gave_up,
 --                                        preempted, timeout) -> the same rule = no
+--   * 2026-09-04T05:15:21Z .. 08:42:33Z  no death and no arrest between a real busted and a real
+--                                        death -> every section-14 survives_window rule = yes
 --
 -- If settlement disagrees with any of these, it disagrees with something that actually happened.
 \set ON_ERROR_STOP on
@@ -813,6 +815,406 @@ select has_function_privilege('service_role', 'public.settle_due_predictions()',
 select prosecdef as security_definer_must_be_t, proconfig as search_path_must_be_public_pg_temp
 from pg_proc p join pg_namespace n on n.oid = p.pronamespace
 where n.nspname = 'public' and p.proname = 'settle_due_predictions';
+
+\echo ''
+\echo '################ 14. ROW ISOLATION + THE max_per_prediction CLAMP (20260922000000) ################'
+\echo '-- Every assertion in this section is HARD: pg_temp.must() raises, ON_ERROR_STOP ends the run and'
+\echo '--   verify-predictions.sh exits non-zero. Nothing here is eyeballed.'
+\echo '-- Every window sits inside 05:15:21Z..08:42:33Z of the real 2026-09-04 recording: the busted at'
+\echo '--   05:15:21.371533Z and the death at 08:42:33.680272Z are the nearest liveness-ending events on'
+\echo '--   either side, so a survives_window rule over any of these windows really is `yes`.'
+
+create function pg_temp.must(ok boolean, what text) returns boolean
+language plpgsql as $$
+begin
+  if ok is not true then
+    raise exception 'ASSERTION FAILED: %', what;
+  end if;
+  return true;
+end;
+$$;
+
+-- One prediction over the real recording. The entry window is 60 s, the v2.4 scheduled-round shape.
+create function pg_temp.mk(p_type text, p_locks timestamptz, p_resolves timestamptz, p_rule jsonb, p_pool numeric)
+returns uuid language sql as $$
+  insert into public.predictions
+    (session_id, question, prediction_type, opened_at, locks_at, resolves_at,
+     outcomes, telemetry_rule, reward_pool, reward_asset)
+  select s.id, 'SECTION 14 — ' || p_type, p_type, p_locks - interval '60 seconds', p_locks, p_resolves,
+         '[{"key":"yes","label":"YES"},{"key":"no","label":"NO"}]'::jsonb, p_rule, p_pool, 'TTWO'
+  from (select id from public.sessions limit 1) s
+  returning id;
+$$;
+
+-- Direct insert, as in every section above: these windows are in the past, so enter_prediction()
+-- would (correctly) refuse them.
+create function pg_temp.enter(p_type text, p_wallet text, p_outcome text) returns void
+language sql as $$
+  insert into public.prediction_entries (prediction_id, wallet, outcome)
+  select id, p_wallet, p_outcome from public.predictions where prediction_type = p_type;
+$$;
+
+create function pg_temp.survives() returns jsonb language sql as $$
+  select '{"kind": "survives_window", "outcome_if_true": "yes", "outcome_if_false": "no"}'::jsonb;
+$$;
+
+-- Today's spend, computed the way settle_due_predictions() computes it.
+create function pg_temp.spent_today() returns numeric language sql as $$
+  select coalesce(sum(amount), 0) from public.reward_ledger
+  where (created_at at time zone 'utc')::date = (now() at time zone 'utc')::date;
+$$;
+
+\echo ''
+\echo '-- 14.1 (b) max_per_prediction is RECORDED on the ledger row, like the other two clamps (§6).'
+\echo '--   Before 20260922000000 the pool was reduced but every row said clamped=false, reason NULL.'
+insert into public.site_config (key, value) values
+  ('reward_caps', '{"daily_cap": 100000, "max_per_prediction": 0.02, "max_per_wallet_day": 100000}'::jsonb),
+  ('rewards',     '{"enabled": true, "payouts": true}'::jsonb)
+on conflict (key) do update set value = excluded.value;
+select pg_temp.must(public.rewards_enabled(), 'rewards are on with real caps') as rewards_on_must_be_t;
+
+select count(*) as created from (
+  select pg_temp.mk('iso_clamp_one',   '2026-09-04T06:40:00Z', '2026-09-04T06:43:00Z', pg_temp.survives(), 0.05)
+  union all
+  select pg_temp.mk('iso_clamp_split', '2026-09-04T06:40:00Z', '2026-09-04T06:43:00Z', pg_temp.survives(), 0.05)
+  union all
+  select pg_temp.mk('iso_clamp_equal', '2026-09-04T06:40:00Z', '2026-09-04T06:43:00Z', pg_temp.survives(), 0.02)
+) z;
+select pg_temp.enter('iso_clamp_one',   '0xc1a01', 'yes'), pg_temp.enter('iso_clamp_one', '0xc1a0f', 'no'),
+       pg_temp.enter('iso_clamp_split', '0xc1a02', 'yes'), pg_temp.enter('iso_clamp_split', '0xc1a03', 'yes'),
+       pg_temp.enter('iso_clamp_equal', '0xc1a04', 'yes');
+select public.lock_due_predictions() as locked;
+select pg_temp.must(public.settle_due_predictions() = 3, 'the three clamp predictions settle') as settled_3_must_be_t;
+
+\echo '-- EXPECT: iso_clamp_one  0.02 clamped max_per_prediction (pool 0.05, one winner)'
+\echo '--         iso_clamp_split 0.01 x2, BOTH clamped max_per_prediction (every credit from that pool)'
+\echo '--         iso_clamp_equal 0.02, NOT clamped: a pool equal to the cap was not reduced'
+select p.prediction_type, l.wallet, l.amount, l.clamped, l.clamp_reason
+from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+where p.prediction_type like 'iso_clamp_%' order by p.prediction_type, l.wallet;
+
+select pg_temp.must(
+  (select count(*) = 1 and bool_and(l.wallet = '0xc1a01' and l.amount = 0.02 and l.clamped
+                                    and l.clamp_reason = 'max_per_prediction')
+     from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type = 'iso_clamp_one'),
+  'pool 0.05 against max_per_prediction 0.02 credits 0.02 with clamped=true, clamp_reason max_per_prediction')
+  as clamp_recorded_must_be_t;
+select pg_temp.must(
+  (select count(*) = 2 and bool_and(l.amount = 0.01 and l.clamped and l.clamp_reason = 'max_per_prediction')
+     from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type = 'iso_clamp_split'),
+  'every credit from a reduced pool carries the clamp, not just the first')
+  as every_credit_carries_it_must_be_t;
+select pg_temp.must(
+  (select count(*) = 1 and bool_and(l.amount = 0.02 and not l.clamped and l.clamp_reason is null)
+     from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type = 'iso_clamp_equal'),
+  'a pool EQUAL to max_per_prediction is not reduced and is not marked clamped')
+  as equal_pool_unclamped_must_be_t;
+
+\echo '-- (b) combined with the other reasons by the existing concatenation pattern, pool clamp first'
+\echo '--     because it is applied first. daily_cap is set to (spent today + 0.01) just before the run.'
+update public.site_config
+   set value = jsonb_build_object('daily_cap', pg_temp.spent_today() + 0.01,
+                                  'max_per_prediction', 0.02, 'max_per_wallet_day', 100000)
+ where key = 'reward_caps';
+select count(*) as created from (
+  select pg_temp.mk('iso_clamp_daily', '2026-09-04T06:40:00Z', '2026-09-04T06:43:00Z', pg_temp.survives(), 0.05)) z;
+select pg_temp.enter('iso_clamp_daily', '0xc1a05', 'yes');
+select public.lock_due_predictions() as locked;
+select pg_temp.must(public.settle_due_predictions() = 1, 'iso_clamp_daily settles') as settled_1_must_be_t;
+
+update public.site_config
+   set value = '{"daily_cap": 100000, "max_per_prediction": 0.02, "max_per_wallet_day": 0.015}'::jsonb
+ where key = 'reward_caps';
+select count(*) as created from (
+  select pg_temp.mk('iso_clamp_wday', '2026-09-04T06:40:00Z', '2026-09-04T06:43:00Z', pg_temp.survives(), 0.05)) z;
+select pg_temp.enter('iso_clamp_wday', '0xc1a06', 'yes');
+select public.lock_due_predictions() as locked;
+select pg_temp.must(public.settle_due_predictions() = 1, 'iso_clamp_wday settles') as settled_1_must_be_t;
+
+\echo '-- ...and a credit whose pool was NOT reduced keeps exactly the reason it always had'
+update public.site_config
+   set value = jsonb_build_object('daily_cap', pg_temp.spent_today() + 0.004,
+                                  'max_per_prediction', 0.02, 'max_per_wallet_day', 100000)
+ where key = 'reward_caps';
+select count(*) as created from (
+  select pg_temp.mk('iso_daily_only', '2026-09-04T06:40:00Z', '2026-09-04T06:43:00Z', pg_temp.survives(), 0.01)) z;
+select pg_temp.enter('iso_daily_only', '0xc1a07', 'yes');
+select public.lock_due_predictions() as locked;
+select pg_temp.must(public.settle_due_predictions() = 1, 'iso_daily_only settles') as settled_1_must_be_t;
+
+select p.prediction_type, l.wallet, l.amount, l.clamped, l.clamp_reason
+from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+where p.prediction_type in ('iso_clamp_daily', 'iso_clamp_wday', 'iso_daily_only') order by p.prediction_type;
+select pg_temp.must(
+  (select count(*) = 1 and bool_and(l.amount = 0.01 and l.clamped and l.clamp_reason = 'max_per_prediction+daily_cap')
+     from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type = 'iso_clamp_daily'),
+  'pool clamp then daily cap: 0.01, clamp_reason max_per_prediction+daily_cap')
+  as with_daily_cap_must_be_t;
+select pg_temp.must(
+  (select count(*) = 1 and bool_and(l.amount = 0.015 and l.clamped and l.clamp_reason = 'max_per_prediction+wallet_day_cap')
+     from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type = 'iso_clamp_wday'),
+  'pool clamp then wallet-day cap: 0.015, clamp_reason max_per_prediction+wallet_day_cap')
+  as with_wallet_day_cap_must_be_t;
+select pg_temp.must(
+  (select count(*) = 1 and bool_and(l.amount = 0.004 and l.clamped and l.clamp_reason = 'daily_cap')
+     from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type = 'iso_daily_only'),
+  'an unreduced pool clamped only by the daily cap still records exactly daily_cap')
+  as daily_cap_alone_unchanged_must_be_t;
+
+-- Generous caps again: from here on this section tests WHO is credited and whether a run
+-- survives, not how much.
+insert into public.site_config (key, value) values
+  ('reward_caps', '{"daily_cap": 100000, "max_per_prediction": 100000, "max_per_wallet_day": 100000}'::jsonb)
+on conflict (key) do update set value = excluded.value;
+
+\echo ''
+\echo '-- 14.2 (a) A NON-class-22 error is NOT swallowed. It propagates exactly as before: the whole call'
+\echo '--   aborts, nothing it did commits, the prediction stays `locked`, and the next tick settles it.'
+\echo '--   The fault is injected by a verify-only trigger on reward_ledger, dropped again in 14.3.'
+create function public.verify_only_ledger_fault() returns trigger
+language plpgsql as $$
+declare
+  v_code text := nullif(current_setting('verify.fault_sqlstate', true), '');
+begin
+  if v_code is not null
+     and (new.wallet = current_setting('verify.fault_wallet', true)
+          or (new.prediction_id::text = current_setting('verify.fault_second_credit_of', true)
+              and exists (select 1 from public.reward_ledger l where l.prediction_id = new.prediction_id)))
+  then
+    raise exception 'verify-only injected fault' using errcode = v_code;
+  end if;
+  return new;
+end;
+$$;
+create trigger verify_only_ledger_fault before insert on public.reward_ledger
+  for each row execute function public.verify_only_ledger_fault();
+
+-- The bystander resolves FIRST, so it is fully settled inside the same call before the fault
+-- fires: if a non-22 error ever committed partial work, the bystander is where it would show.
+select count(*) as created from (
+  select pg_temp.mk('iso_fault_bystander', '2026-09-04T06:45:00Z', '2026-09-04T06:47:00Z', pg_temp.survives(), 10)
+  union all
+  select pg_temp.mk('iso_fault',           '2026-09-04T06:45:00Z', '2026-09-04T06:48:00Z', pg_temp.survives(), 10)) z;
+select pg_temp.enter('iso_fault_bystander', '0xfa018', 'yes'), pg_temp.enter('iso_fault', '0xfa017', 'yes');
+select public.lock_due_predictions() as locked;
+
+set verify.fault_wallet = '0xfa017';
+set verify.fault_sqlstate = '40001';
+\echo '-- EXPECT ERROR 40001 (serialization_failure) — from the settlement call itself'
+\set ON_ERROR_STOP off
+select public.settle_due_predictions() as must_raise_40001;
+\set ON_ERROR_STOP on
+select pg_temp.must(:'SQLSTATE' = '40001', 'the injected 40001 propagated out of settle_due_predictions()')
+  as sqlstate_40001_propagated_must_be_t;
+select prediction_type, status, result, resolution_evidence
+from public.predictions where prediction_type in ('iso_fault', 'iso_fault_bystander') order by prediction_type;
+select pg_temp.must(
+  (select bool_and(status = 'locked' and resolution_evidence is null and settled_at is null)
+     from public.predictions where prediction_type in ('iso_fault', 'iso_fault_bystander')),
+  'after a 40001 neither prediction is voided or settled: both are still locked')
+  as not_voided_must_be_t;
+select pg_temp.must(
+  (select count(*) = 0 from public.reward_ledger l join public.predictions p on p.id = l.prediction_id
+    where p.prediction_type in ('iso_fault', 'iso_fault_bystander')),
+  'after a 40001 nothing was credited, not even the bystander settled earlier in the same call')
+  as nothing_committed_must_be_t;
+
+\echo '-- ...and the same for every other class the handler must leave alone. Each call runs in its own'
+\echo '--   subtransaction here only so the loop can continue; a raise inside it rolls it back exactly'
+\echo '--   as the failed RPC transaction would be rolled back.'
+create function pg_temp.propagates(p_code text) returns boolean language plpgsql as $$
+declare
+  v_got text;
+begin
+  perform set_config('verify.fault_sqlstate', p_code, false);
+  begin
+    perform public.settle_due_predictions();
+  exception when others or query_canceled then
+    v_got := sqlstate;
+  end;
+  perform set_config('verify.fault_sqlstate', '', false);
+  return v_got is not distinct from p_code
+     and not exists (select 1 from public.predictions
+                     where prediction_type in ('iso_fault', 'iso_fault_bystander') and status <> 'locked');
+end;
+$$;
+select c.code,
+       pg_temp.must(pg_temp.propagates(c.code), 'SQLSTATE ' || c.code || ' propagates and voids nothing')
+         as propagates_must_be_t
+from (values ('40P01'), ('57014'), ('55P03'), ('53000'), ('53200'), ('23505'), ('P0001'), ('XX000')) c(code);
+
+\echo '-- The transient failure clears; the NEXT tick settles both and credits each winner exactly once.'
+set verify.fault_sqlstate = '';
+select pg_temp.must(public.settle_due_predictions() = 2, 'the retry settles both') as retry_settles_2_must_be_t;
+select pg_temp.must(
+  (select bool_and(p.status = 'settled' and p.result = 'yes'
+                   and (select count(*) from public.reward_ledger l where l.prediction_id = p.id) = 1)
+     from public.predictions p where p.prediction_type in ('iso_fault', 'iso_fault_bystander')),
+  'after the retry both are settled yes with exactly one credit each')
+  as retried_and_credited_once_must_be_t;
+
+\echo ''
+\echo '-- 14.3 (a) A class-22 error AFTER partial work: the candidate''s subtransaction rolls back its'
+\echo '--   settled status, its streaks and the credit already written, and the handler voids it.'
+\echo '--   The fault fires on the SECOND credit of this prediction, so the first one really was written.'
+select count(*) as created from (
+  select pg_temp.mk('iso_partial', '2026-09-04T06:50:00Z', '2026-09-04T06:53:00Z', pg_temp.survives(), 10)) z;
+select pg_temp.enter('iso_partial', '0xb0a01', 'yes'), pg_temp.enter('iso_partial', '0xb0a02', 'yes'),
+       pg_temp.enter('iso_partial', '0xb0a03', 'no');
+select pg_temp.must((select count(*) = 0 from public.wallet_streaks where wallet in ('0xb0a01', '0xb0a02', '0xb0a03')),
+                    'the three entrants have no streak row yet') as no_streaks_yet_must_be_t;
+select public.lock_due_predictions() as locked;
+select id as partial_id from public.predictions where prediction_type = 'iso_partial' \gset
+set verify.fault_wallet = '';
+set verify.fault_second_credit_of = :'partial_id';
+set verify.fault_sqlstate = '22003';
+\echo '-- EXPECT: a WARNING naming this prediction and SQLSTATE 22003, and a normal return of 1'
+select pg_temp.must(public.settle_due_predictions() = 1, 'the run returns normally and counts the void')
+  as returns_normally_must_be_t;
+set verify.fault_sqlstate = '';
+select prediction_type, status, result, correct_count, resolution_evidence, settled_at is not null as settled_at_set
+from public.predictions where prediction_type = 'iso_partial';
+select pg_temp.must(
+  (select status = 'void' and result is null and correct_count = 0 and settled_at is not null
+          and resolution_evidence = '{"void_reason": "settlement_error", "sqlstate": "22003"}'::jsonb
+     from public.predictions where prediction_type = 'iso_partial'),
+  'void, settlement_error, sqlstate 22003, settled_at stamped, correct_count rolled back to 0')
+  as voided_settlement_error_must_be_t;
+select pg_temp.must(
+  (select count(*) = 0 from public.reward_ledger where prediction_id = :'partial_id'),
+  'the credit written before the fault was rolled back with the candidate')
+  as no_ledger_rows_must_be_t;
+select pg_temp.must((select count(*) = 0 from public.wallet_streaks where wallet in ('0xb0a01', '0xb0a02', '0xb0a03')),
+                    'the streak upserts were rolled back with the candidate') as no_streaks_must_be_t;
+
+drop trigger verify_only_ledger_fault on public.reward_ledger;
+drop function public.verify_only_ledger_fault();
+reset verify.fault_wallet;
+reset verify.fault_second_credit_of;
+reset verify.fault_sqlstate;
+select pg_temp.must(
+  not exists (select 1 from pg_trigger where tgname = 'verify_only_ledger_fault')
+  and to_regprocedure('public.verify_only_ledger_fault()') is null,
+  'the verify-only fault trigger is gone') as fault_trigger_dropped_must_be_t;
+
+\echo ''
+\echo '-- 14.4 (a) THE REPORTED CASE: wanted_reaches with params.level = "two" (22P02 on the numeric cast)'
+\echo '--   due in the SAME tick as two healthy winnable rows, one ordered before it and one after.'
+\echo '--   Before 20260922000000 this aborted every call, every tick, until an operator deleted the row.'
+select count(*) as created from (
+  select pg_temp.mk('iso_healthy_before', '2026-09-04T06:55:00Z', '2026-09-04T06:57:00Z', pg_temp.survives(), 10)
+  union all
+  select pg_temp.mk('iso_poisoned',       '2026-09-04T06:55:00Z', '2026-09-04T06:58:00Z',
+    '{"kind": "wanted_reaches", "params": {"level": "two"}, "outcome_if_true": "yes", "outcome_if_false": "no"}'::jsonb, 10)
+  union all
+  select pg_temp.mk('iso_healthy_after',  '2026-09-04T06:55:00Z', '2026-09-04T06:59:00Z', pg_temp.survives(), 10)) z;
+select pg_temp.enter('iso_healthy_before', '0x150a1', 'yes'), pg_temp.enter('iso_healthy_before', '0x150a2', 'no'),
+       pg_temp.enter('iso_poisoned', '0x150a3', 'yes'),
+       pg_temp.enter('iso_healthy_after', '0x150a4', 'yes');
+select pg_temp.must(public.lock_due_predictions() = 3, 'all three are due in this tick') as locked_3_must_be_t;
+\echo '-- EXPECT: one WARNING naming iso_poisoned''s id and SQLSTATE 22P02, and a normal return of 3'
+select pg_temp.must(public.settle_due_predictions() = 3, 'one run settles two and voids one')
+  as settled_3_must_be_t;
+
+select p.prediction_type, p.status, p.result, p.resolution_evidence,
+       (select count(*) from public.reward_ledger l where l.prediction_id = p.id) as ledger_rows
+from public.predictions p where p.prediction_type in ('iso_healthy_before', 'iso_poisoned', 'iso_healthy_after')
+order by p.resolves_at;
+select pg_temp.must(
+  (select bool_and(p.status = 'settled' and p.result = 'yes'
+                   and (select count(*) from public.reward_ledger l where l.prediction_id = p.id) = 1)
+     from public.predictions p where p.prediction_type in ('iso_healthy_before', 'iso_healthy_after')),
+  'both healthy rows settle yes in the same tick as the poisoned one')
+  as healthy_settled_must_be_t;
+select pg_temp.must(
+  (select count(*) = 2 and bool_and(l.amount = 10 and not l.clamped)
+     from public.reward_ledger l where l.wallet in ('0x150a1', '0x150a4'))
+  and not exists (select 1 from public.reward_ledger where wallet in ('0x150a2', '0x150a3')),
+  'the two winners are credited the full pool once; the loser and the poisoned entrant are not')
+  as credited_once_must_be_t;
+select pg_temp.must(
+  (select status = 'void' and result is null and settled_at is not null
+          and resolution_evidence = '{"void_reason": "settlement_error", "sqlstate": "22P02"}'::jsonb
+     from public.predictions where prediction_type = 'iso_poisoned'),
+  'the poisoned row is void | settlement_error | 22P02, and nothing else')
+  as poisoned_voided_must_be_t;
+
+\echo '-- Principle 7: resolution_evidence is PUBLIC (predictions RLS). As anon it carries the code and'
+\echo '--   nothing else — not the server''s message, which here quotes the offending input.'
+set role anon;
+select prediction_type, resolution_evidence from public.predictions where prediction_type = 'iso_poisoned';
+select pg_temp.must(
+  (select (select array_agg(k order by k) from jsonb_object_keys(resolution_evidence) k) = array['sqlstate', 'void_reason']
+          and resolution_evidence::text !~* '(invalid|syntax|numeric|input|two)'
+     from public.predictions where prediction_type = 'iso_poisoned'),
+  'anon sees exactly {void_reason, sqlstate} and no message text') as no_server_text_public_must_be_t;
+reset role;
+
+\echo '-- Re-run: nothing left to do, and still exactly one credit per winner (idempotency invariant 2).'
+select pg_temp.must(public.settle_due_predictions() = 0, 'a re-run settles nothing') as rerun_0_must_be_t;
+select pg_temp.must(
+  (select count(*) = 2 from public.reward_ledger where wallet in ('0x150a1', '0x150a4')),
+  'still exactly one credit per winner after the re-run') as still_once_must_be_t;
+
+\echo '-- 14.4b The other state a candidate can be fetched in: already `resolving`, as a row is after a'
+\echo '--   tick skipped it for incomplete telemetry (§3). The claim is not re-run for it; the handler'
+\echo '--   must still find it `resolving` and void it. The status is set here by the same guarded'
+\echo '--   locked -> resolving transition the claim makes, without the processing after it.'
+select count(*) as created from (
+  select pg_temp.mk('iso_poisoned_resolving', '2026-09-04T07:05:00Z', '2026-09-04T07:07:00Z',
+    '{"kind": "wanted_reaches", "params": {"level": "two"}, "outcome_if_true": "yes", "outcome_if_false": "no"}'::jsonb, 10)) z;
+select pg_temp.enter('iso_poisoned_resolving', '0x150a5', 'yes');
+select pg_temp.must(public.lock_due_predictions() = 1, 'it is due') as locked_1_must_be_t;
+update public.predictions set status = 'resolving' where prediction_type = 'iso_poisoned_resolving';
+select pg_temp.must(public.settle_due_predictions() = 1, 'a resolving candidate that raises 22P02 is voided, not fatal')
+  as settled_1_must_be_t;
+select pg_temp.must(
+  (select status = 'void' and settled_at is not null
+          and resolution_evidence = '{"void_reason": "settlement_error", "sqlstate": "22P02"}'::jsonb
+     from public.predictions where prediction_type = 'iso_poisoned_resolving'),
+  'resolving -> void through the handler: void | settlement_error | 22P02')
+  as resolving_candidate_voided_must_be_t;
+
+\echo ''
+\echo '-- 14.5 The replace kept everything around the body. create or replace preserves the ACL; this'
+\echo '--   migration restates no grant and does not touch the serialised wrapper.'
+select has_function_privilege('service_role', 'public.settle_due_predictions()', 'execute')
+         as service_role_raw_must_be_f,
+       has_function_privilege('service_role', 'public.settle_due_predictions_serialized()', 'execute')
+         as service_role_wrapper_must_be_t,
+       has_function_privilege('anon', 'public.settle_due_predictions()', 'execute')
+         as anon_raw_must_be_f,
+       has_function_privilege('anon', 'public.settle_due_predictions_serialized()', 'execute')
+         as anon_wrapper_must_be_f;
+select pg_temp.must(
+  not has_function_privilege('service_role', 'public.settle_due_predictions()', 'execute')
+  and has_function_privilege('service_role', 'public.settle_due_predictions_serialized()', 'execute')
+  and not has_function_privilege('anon', 'public.settle_due_predictions()', 'execute')
+  and not has_function_privilege('anon', 'public.settle_due_predictions_serialized()', 'execute')
+  and not has_function_privilege('authenticated', 'public.settle_due_predictions()', 'execute')
+  and not has_function_privilege('authenticated', 'public.settle_due_predictions_serialized()', 'execute'),
+  'settlement is still reachable by service_role only through the lock, and by anon/authenticated not at all')
+  as acl_preserved_must_be_t;
+select pg_temp.must(
+  (select p.prosecdef and p.proconfig = array['search_path=public, pg_temp'] and l.lanname = 'plpgsql'
+          and p.pronargs = 0 and p.prorettype = 'integer'::regtype
+          and p.prosrc like '%when data_exception then%' and p.prosrc like '%''settlement_error''%'
+          and p.prosrc like '%v_clamp_reason := ''max_per_prediction''%'
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace join pg_language l on l.oid = p.prolang
+    where n.nspname = 'public' and p.proname = 'settle_due_predictions'),
+  'same signature, language, SECURITY DEFINER and search_path; the new body is the one installed')
+  as definition_must_be_t;
+select pg_temp.must(
+  (select p.prosrc like '%pg_try_advisory_xact_lock(7741300101)%' and p.prosrc like '%return public.settle_due_predictions();%'
+     from pg_proc p join pg_namespace n on n.oid = p.pronamespace
+    where n.nspname = 'public' and p.proname = 'settle_due_predictions_serialized'),
+  'the serialised wrapper is still the advisory-lock wrapper') as wrapper_untouched_must_be_t;
 
 \echo ''
 \echo '################ DONE ################'
