@@ -1,4 +1,4 @@
-# WANTED — PREDICTION LAYER CONTRACTS v2.4
+# WANTED — PREDICTION LAYER CONTRACTS v2.5
 
 Frozen. Executors treat this as read-only; changes go through the orchestrator and bump the
 version. If code and contract disagree, the contract wins. Companion to `docs/CONTRACTS.md`
@@ -33,6 +33,16 @@ the database fails closed (an unknown kind voids) instead of settling every such
 also gains "Cadence and entry windows": an enforced floor on the time a viewer has to enter, and the
 rule that an always-available question is only asked while its own measured recent odds are fair.
 Migration `20260921000000_event_matches.sql`. No table, column, HTTP shape or payout rule changed.
+
+**v2.5** — four defects found by the 2026-09-22 review, each reproduced before it was fixed. §3: one
+candidate whose rule or events raise a data error (SQLSTATE class 22) now voids alone as
+`settlement_error` instead of aborting settlement for every due prediction, every tick; and the
+harness no longer publishes a row whose entry window closed while it sat in the offline queue. §6:
+the `max_per_prediction` clamp is recorded on the ledger row like the other two, and a credit
+clamped to exactly zero is stated for what it is (no ledger row). §4: a duplicate entry answers
+`already entered this prediction`, and `/api/leaderboard` reads `earned` as text. Migration
+`20260922000000_settle_row_isolation.sql`. No table, column, function signature or payout rule
+changed.
 
 ---
 
@@ -198,6 +208,13 @@ The shape of a rule, in full, because the harness writes it and SQL reads it:
   honest and a foregone conclusion is not.
 - **Nobody enters, nobody wins** is unchanged and already structural: `entry_count = 0` voids as
   `no_entries` before any credit code is reachable ("Voiding is mandatory", below).
+- **A row that missed its own entry window is not published** (v2.5). The window is fixed when the
+  harness generates the row, and the row can then wait in the writer's buffer or on-disk offline
+  queue through a Supabase outage. At the moment of insertion, a `predictions` row with less than
+  `MIN_ENTRY_REMAINING_S` (10 s — the page polls every 8 s) left before `locks_at` is dropped, logged
+  once, and neither requeued nor counted as a write failure (`harness/wasted_harness/events.py`).
+  Before this, such a row was inserted `open` with `locks_at` already past: a card nobody could
+  enter, which then voided `no_entries`.
 
 ### Settlement preconditions — telemetry completeness
 
@@ -259,6 +276,15 @@ Settlement **must** produce `void` (and credit nobody) when:
   (`survives_window` is the only rule that treats absence as a positive result, and it still
   requires a live session throughout);
 - `entry_count = 0` (nothing to settle).
+- processing the candidate raises a **data error** (SQLSTATE class 22 — e.g. a numeric param that is
+  not a number): that candidate alone voids with evidence exactly
+  `{"void_reason": "settlement_error", "sqlstate": "<code>"}`, and the other due predictions in the
+  same call settle normally (v2.5). The error MESSAGE is never written, because
+  `resolution_evidence` is public and the message quotes the offending input (§10.1 principle 7);
+  the operator's log gets a WARNING with the id and code. Every other error class (serialization,
+  deadlock, cancellation, lock timeout, resources, the status guard) still aborts the call and is
+  retried on the next tick — voiding on a transient failure would cancel a winnable round for good.
+  The harness also refuses to construct a template whose numeric params are not numbers.
 
 Never infer an outcome. Never let a model decide one. A void returns nothing to nobody and costs
 the treasury nothing — it is always the safe branch.
@@ -277,10 +303,10 @@ wallet, amount, outcome-correctness, or timestamp.
 | `/api/auth/session` | GET | → `{address \| null, eligible}` |
 | `/api/auth/logout` | POST | clears cookie |
 | `/api/predictions/live` | GET | → open + locked + recently settled |
-| `/api/predictions/[id]/enter` | POST | `{outcome}` → 201, or **409 after `locks_at`** |
+| `/api/predictions/[id]/enter` | POST | `{outcome}` → 201, or **409 after `locks_at`**; 409 `already entered this prediction` for a wallet's second entry (v2.5: `enter_prediction` returns `false` for both, so the route reads `prediction_entries` to tell them apart) |
 | `/api/rewards/balance` | GET | → `{claimable, lifetime, asset}` for the cookie's wallet |
 | `/api/rewards/claim` | POST | → creates a claim, submits the transfer, returns `{claimId, status}` |
-| `/api/leaderboard` | GET | `?window=today\|week\|all` |
+| `/api/leaderboard` | GET | `?window=today\|week\|all`. `earned` is selected as `earned::text` (v2.5): as a bare JSON number it became a JS double, so an amount under 1e-6 turned into `"5e-7"`, which the base-unit conversion rejects — one tiny credit made the route fail for every viewer |
 | `/api/cron/tick` | GET or POST | **secret-gated**; locks due predictions, settles due windows. Vercel Cron always invokes with **GET** (`vercel-cron/1.0`) and cannot be configured otherwise, so both verbs are implemented and gated identically |
 
 ### `session_live` uses one threshold, shared with the page
@@ -537,7 +563,15 @@ spending limit — so that half was deleted rather than wired up, because the en
 only ever be the SQL.
 
 A credit that would breach a cap is **clamped, and the clamp is recorded on the ledger row**; it is
-never silently dropped and never silently exceeded. Caps are checked inside the settlement
+never silently exceeded. All three caps record themselves (v2.5 — `max_per_prediction` did not):
+`clamp_reason` is `max_per_prediction`, `daily_cap` or `wallet_day_cap`, joined with `+` when more
+than one applied. A pool EQUAL to `max_per_prediction` is not reduced and is not marked.
+
+**A credit clamped to exactly zero writes no ledger row** (`reward_ledger.amount` is `CHECK (> 0)`).
+That is the one case with no clamp record, and it is not a lost fact: the entry row and the
+prediction's `result` are the record that the wallet was right, and the card says "Correct — no
+reward was credited". It happens once a UTC day's `daily_cap` or a wallet's `max_per_wallet_day` is
+used up. Caps are checked inside the settlement
 transaction against `sum()` over the same table — not in application memory, which cannot be
 atomic across concurrent settlements.
 

@@ -283,12 +283,53 @@ Then re-run the query above: `step1_done` must be `t`. Also confirm the grants s
 or replace` keeps them, and this proves it rather than assuming: `service_role` must still be
 **false** on the raw function and **true** on `settle_due_predictions_serialized`.
 
+**1b. Settlement hardening (`20260922000000_settle_row_isolation.sql`, CONTRACTS-PREDICTIONS v2.5).**
+Same shape, same stdin rule, applied AFTER the file above (applying `20260921000000` again later
+would put the older body back). It changes no row and no grant: one prediction whose rule raises a
+data error now voids alone as `settlement_error` instead of stopping settlement for everyone, and a
+`max_per_prediction` clamp is recorded on the ledger row. Not required for the first rounds — the
+shipped catalogue cannot write such a rule — but apply it before the money is switched on.
+
+```bash
+cd infra && set -a && . ./.env.cloud && set +a
+docker run --rm -i -e "PGURL=$SUPABASE_DB_URL" postgres:16-alpine \
+  sh -c 'psql "$PGURL" -v ON_ERROR_STOP=1 -f -' \
+  < supabase/migrations/20260922000000_settle_row_isolation.sql
+```
+
+Check: `position('settlement_error' in pg_get_functiondef('public.settle_due_predictions()'::regprocedure)) > 0`
+must be `t`, and the two grant checks above must still hold.
+
 **2. The harness.** Predictions are created on the game server and nowhere else; no web deploy can
-make one appear. Deploy the harness (§1) with `WASTED_PREDICTIONS_ENABLED=true` in
-`C:\wasted\harness\.env` — `go-live.ps1` writes that flag on every run, so a normal go-live
-covers it. Within about five minutes of the agent playing, `select count(*) from public.predictions`
-starts moving. If it does not, read `C:\wasted\logs\harness-*.log` for a line naming the
-`predictions` table: a rejected insert is now reported with the server's own message.
+make one appear. Before starting: the agent must be PLAYING (goals completing, not wedged — see
+below) and the brain's API key must work.
+
+One command, from a Remote Desktop session **signed in as Administrator** (the account the agent's
+task runs as), in Terminal (Admin):
+
+    pwsh -File C:\wasted\repo\scripts\deploy-predictions.ps1
+
+It updates `C:\wasted\repo` to `origin/main` and packages the harness from it. It renames aside any
+`C:\wasted\tmp\WastedBridge.dll`, so `deploy-all.ps1` cannot hot-reload an older bridge over the
+running one. Then it hands over to `deploy-all.ps1`, which refuses unless the game ticks and restores
+its backup if the new code does not import, and it restarts sshd. `deploy-all.ps1` starts the new
+build inside the RDP session, whose display vanishes on disconnect, so that run only proves the code
+imports. The script stops it and checks nothing survived. Only then does it set
+`WASTED_PREDICTIONS_ENABLED=true` in `C:\wasted\harness\.env` and run `tscon` to the console
+(**your RDP window closes; that is success**). It waits 25 s, re-asserts the game's focus and starts
+the agent there, checking it runs in that session. If `deploy-all.ps1` fails after stopping the
+agent, the restored build is started the same way with the switch untouched, so the show is never
+left without one. The transcript is `C:\wasted\logs\deploy-predictions_<stamp>.log`. Do not
+reconnect RDP to watch it; watch the site and the query below.
+
+**How long until the first question.** Not minutes. A scheduled round is asked only while its
+YES-rate over the last 3 hours of the agent's own events is inside [0.20, 0.80] on >= 12 windows,
+and the warm start reads those 3 hours from Supabase. After a stretch where he finished nothing
+(2026-09-21/22: every roam goal ended `bridge_task_lost` at the La Puerta marina, rate 0/36), the
+rate has to climb back above 0.20: roughly 75 minutes of normal play at the 2026-09-20 pace, about
+2 hours at a slower one. A wanted star or a fight can ask sooner. If nothing appears after that,
+read `C:\wasted\logs\harness-*.log.err` for a line naming the `predictions` table: a rejected
+insert is reported with the server's own message.
 
 **3. Watch one round settle, with the money still off.** Rewards stay off for this step, which is
 the point: the full lifecycle runs and credits nothing, so a wrong outcome costs nothing.

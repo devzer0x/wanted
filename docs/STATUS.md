@@ -1,7 +1,130 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-21.
+run log, or URL) noted next to it. Last updated: 2026-09-23.
+
+## 2026-09-23 — v2.5 built and verified locally; production still asks nothing, and why
+
+**Production, read-only, 2026-09-22 17:33 UTC onward.** `predictions`, entries, ledger, claims: **0
+rows, ever**. The cloud function has the `event_matches` branch (§5.7 step 1 stands).
+`rewards = {enabled:false, payouts:false}`; caps 0.25 / 0.02 / 0.05 TTWO. **Mainnet agrees with the
+database to the wei** (`cast`, block ~69.84 M): chain 4663; TTWO `paused() = false`, decimals 18;
+treasury 0.123702639816220904 TTWO and 0.089245875265823694 ETH; on-chain nonce 1 =
+`treasury_accounts.next_nonce` 1; the grants are as §5.7 requires. A TTWO transfer from the treasury
+estimates at 61,177 gas at 0.051 gwei. TTWO mid price is $206.04 (`api.robinhood.com/rhj/prices`,
+17:37 UTC), so a round's 0.005 pool is about $1.03 and the 0.25 daily cap about $51.51. The hot
+wallet holds about half a day of cap. The box's clock sits within ~0.2 s of Postgres (40 samples of
+`stats.heartbeat_at` age: min 0.205 s, max 5.145 s on a 5 s cadence), so no skew shortens an entry
+window.
+
+**Why no question has been asked, three independent reasons:**
+1. **The box still runs the pre-v2.4 harness.** Session `77650284` has run since 2026-09-20 20:17
+   UTC, so §5.7 step 2 is not done.
+2. **The agent has been wedged at the La Puerta marina since 2026-09-21 05:20:54 UTC.** The water
+   reflex took him out of a vehicle onto the dock. `roam_the_block` counts any empty vehicle within
+   50 m as a car (`roam.py:_plan_roam_the_block`, no class filter), and the bridge's
+   `enter_nearest_vehicle` ranks boats like anything else. The game clears that task after ~1 s,
+   the per-type backoffs then refuse the next attempt inside `_execute_action`, and the goal ends
+   `bridge_task_lost` 1.6 ms after it starts. Result: ~60 an hour, **zero `completed`, zero
+   `timeout`**, no stars, no deaths for 36 h. The last `completed` of the session was at 05:21:54.
+3. **The brain has been silent since 2026-09-21 19:12:09 UTC.** There is no `decisions` row, and
+   `cost_per_hour_usd` is 0 at governor L0, so the API calls fail before any usage is billed.
+   Account side (credit, limit or key) is suspected but not visible from here. The 2026-09-21
+   (evening) line "its brain is on the API at $0.25/h" has been false since then.
+
+The real generator replayed over the last 6 h of those events asks **0 questions**:
+`pulls_off_a_goal`, `runs_out_of_time` and `gets_into_trouble` each measure **0/36**, below the 0.20
+floor. The gate is doing its job. After recovery the 3 h rate needs roughly 75 minutes (2026-09-20
+pace) to 2 hours of normal play to climb back into band, so deploying the harness alone produces
+nothing until he is moving again.
+
+**Found by a review of the prediction code and fixed (CONTRACTS-PREDICTIONS v2.5).** Each was
+reproduced before its fix, and each fix has a test seen failing without it. Two independent refuter
+passes accepted all four and rejected a fifth (box clock skew, measured above).
+- **Settlement: one bad row stopped settlement for everyone.** A rule raising a data error (e.g.
+  `wanted_reaches` with `level: "two"`, 22P02) aborted `settle_due_predictions()` every tick, and
+  nothing else settled until someone deleted it by hand. The new migration,
+  `20260922000000_settle_row_isolation.sql`, is the old body verbatim plus four declared hunks
+  (`infra/verify-settle-row-isolation-verbatim.sh`, with negative controls). A class-22 error now
+  voids that one row as `{"void_reason":"settlement_error","sqlstate":…}` with no message text.
+  Every other error class still aborts and retries. The same migration records the
+  `max_per_prediction` clamp on the ledger row. **It is NOT applied to the cloud** (§5.7 step 1b);
+  no catalogue rule can raise today, and the harness now refuses non-finite or non-numeric params
+  at import.
+- **Harness: a question could be published after its voting window closed.** A row that waited out
+  a Supabase outage in the offline queue was inserted `open` after `locks_at`. Now a `predictions`
+  row with < 10 s left to enter is dropped at insert: logged, not requeued, not a breaker failure.
+- **Web:** `/api/leaderboard` returned 500 for every viewer once any wallet's `earned` was below
+  1e-6 (bare JSON number → "5e-7" → throw); it now selects `earned::text`. The hosted PostgREST was
+  probed read-only: the cast gives 200, and a bad type gives 400 `42704`, so the cast is really
+  applied. A real credit under 0.0001 TTWO now displays as "<0.0001", not "Correct — 0 TTWO
+  credited". The mobile bar now disables at `locks_at` instead of at the next 8 s poll. A second
+  entry answers 409 "already entered this prediction", which the card treats as not-an-error.
+- **Test safety, pre-existing:** `npm run test:e2e:offline` inherited the production
+  **service-role** pair from `web/.env.local`, so the "offline" suite read production. Both local
+  Playwright modes now point every Supabase variable at a dead port, and the new predict-local mode
+  refuses to start unless its env file names a loopback URL. Its stack publishes on 127.0.0.1 only.
+
+*Verified on this tree:*
+- `harness` pytest: **1249 passed** (1229 before).
+- `infra/verify-predictions.sh`, `verify-event-matches-verbatim.sh` and
+  `verify-settle-row-isolation-verbatim.sh`: PASS.
+- `web/scripts/verify-rounds.mjs`: **39/39** on an anvil fork of mainnet, including a mined payout.
+  Its writer now reads the replay's clock and flushes per round, as production does every 2 s; on
+  the real clock every replayed round is correctly stale.
+- `npm run verify:payout`: **179/179**.
+- `npm run build`: OK.
+- `test:e2e:offline`: **32 passed**, now genuinely offline.
+- New `npm run verify:predict-local`: **7 passed, 1 skipped (mobile-only)**, and seen failing on
+  HEAD for the stated reasons.
+- *Not re-run after the fixes:* `verify-full-loop.mjs` (59/59 on 2026-09-22, before them; it still
+  has no stack automation) and the production-reading `npm run test:e2e`.
+
+**`scripts/deploy-predictions.ps1`: two hazards removed, NOT run on the box.**
+- **An older bridge could be hot-reloaded.** It handed over to `deploy-all.ps1`, which hot-reloads
+  `C:\wasted\tmp\WastedBridge.dll` whenever that file exists: 1.7.0 was uploaded on 2026-09-03 and
+  the repo is at 1.9.0. The file is now renamed aside first.
+- **The agent started inside Remote Desktop.** `deploy-all.ps1` starts the agent in the RDP session,
+  whose display vanishes on disconnect. That run now only proves the new code imports. The script
+  stops it, refuses to continue if anything survives, turns predictions on only then, runs `tscon`
+  to the console and starts `WASTED-Harness` there, checking it runs in that same session. The
+  script requires the Administrator account, which is the task's principal.
+- **A failed deploy no longer leaves the show without an agent.** If `deploy-all.ps1` fails after
+  stopping the agent, the restored build is started again on the console with the switch
+  untouched.
+
+An independent review found these gaps in the first revision, and they are fixed; a stale "just
+locked" message carried into the next round on the dashboard is fixed too. The PowerShell 7 parser
+reports 0 errors, but nothing here has run on Windows. RUNBOOK §5.7 steps 1b and 2 carry the
+procedure and the warm-up expectation.
+
+**Brain model review: Jev (TypeSafe AI, 2026-09-15) considered as the decision model.** It is a
+non-generative "decision model" that picks from caller-defined options. Its only game demo is Doom,
+which the maker says a scripted bot plays better. **Not adopted.** Every WANTED decision must also
+write the on-air `say` line, and the model is not the bottleneck: during the wedge the director saw
+"a dock full of boats… a Voltic sixty-odd meters off" and picked `steal_nice_car` 330 times, of
+which 14 became goals, because free roam drops model movement orders. Measured cost per call:
+Haiku 4.5 tactical $0.0058, Sonnet 5 director $0.021; about $1/h averaged over the hours the brain
+ran. Prices match the official page (fetched 2026-09-22).
+
+**Open, in order.**
+1. **Operator:** the API key or credit (Anthropic console), and getting him off the dock (one
+   inland `walk_to`, or a Story Mode restart).
+2. **Operator yes:** push, then web deploy.
+3. **Box §5.7 step 2** (RDP, one command), after 1.
+4. **§5.7 step 1b** on the cloud.
+5. **Watch rounds settle with the money off.**
+6. **The budget.** At up to 288 rounds/day × 0.005 against a 0.25 cap, a funded day pays about the
+   first 50 winners. The hot wallet holds half the cap. Choose a lower pool, fund it, or lower the
+   cap.
+7. **The switches.**
+
+**Behaviour fixes still to do, with the game running:**
+- a vehicle-class filter for road goals in `roam.py` and in the bridge's `StartEnterNearestVehicle`;
+- `WaterEscalator` ejecting him from boats;
+- `planner.py`'s bored-mood mission-marker trips ignoring `missions_enabled` (260 six-minute
+  `gave_up` trips since the wedge);
+- letting the model's movement order through once a roam goal has looped `bridge_task_lost`.
 
 ## 2026-09-21 (evening) — §5.7 step 1 is done; the rehearsal it unlocks passed 39/39
 
