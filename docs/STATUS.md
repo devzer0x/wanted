@@ -1,7 +1,24 @@
 # WANTED — STATUS
 
 Single source of truth. Nothing appears in "Works / verified" without evidence (command output,
-run log, or URL) noted next to it. Last updated: 2026-09-23.
+run log, or URL) noted next to it. Last updated: 2026-09-26.
+
+## 2026-09-26 — web v2.5 is live; the game server is the one step left
+
+**Done:** `23110d0..a050663` pushed. The web deploy went preview first
+(`wasted-92coxayxz`: `vercel curl` on `/api/health`, `/api/predictions/live` and
+`/api/leaderboard?window=all`, all 200, no error logs), then `vercel promote`, which per Vercel's
+docs rebuilds with Production environment variables. The result is `dpl_E9JmgKmkHipfyLC9tT7s7otAmsrz`,
+Ready and aliased to wanted.money, and the same three routes answer 200 on the live domain.
+
+**Not done:**
+- **Migration 1b** (`20260922000000_settle_row_isolation.sql`) was refused by this session's
+  permission layer as a production deploy. The cloud still runs the 2026-09-21 function, which is
+  enough for every rule the shipped catalogue writes.
+- **The box.** The harness session `77650284` was shut down cleanly at 2026-09-25 08:51:27 UTC, with
+  no heartbeat since and no `decisions` row since 2026-09-21 19:12 UTC. SSH answered one attempt with
+  `Connection reset` (the same refusal as 2026-09-21), so §5.7 step 2 needs the operator over RDP.
+- `predictions`: still 0 rows. `rewards` still off.
 
 ## 2026-09-23 — v2.5 built and verified locally; production still asks nothing, and why
 
